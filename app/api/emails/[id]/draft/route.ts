@@ -71,12 +71,26 @@ export async function POST(
     
     console.log(`[Draft] Total stored: ${allStored.length}, Sent with embeddings: ${sentWithEmbeddings.length}, Sent without embeddings: ${sentWithoutEmbeddings.length}, Replies with embeddings: ${repliesWithEmbeddings.length}, Past emails for matching: ${pastEmails.length}`);
 
+    // If no past emails, return a simple fallback draft (same as before)
     if (pastEmails.length === 0) {
       console.warn(`[Draft] No past emails with embeddings found. Total stored: ${allStored.length}, Sent: ${allStored.filter(e => e.isSent).length}`);
       return NextResponse.json(
         { 
           error: 'No past emails found for style matching. Please send some emails first.',
           draft: 'I received your email and will get back to you soon.' // Fallback draft
+        },
+        { status: 200 }
+      );
+    }
+    
+    // Ensure pastEmails have valid structure (safety check)
+    const validPastEmails = pastEmails.filter(e => e && e.id && (e.embedding?.length > 0 || true)); // Allow emails without embeddings as fallback
+    if (validPastEmails.length === 0) {
+      console.warn(`[Draft] No valid past emails found after filtering`);
+      return NextResponse.json(
+        { 
+          error: 'No valid past emails found for style matching.',
+          draft: 'I received your email and will get back to you soon.'
         },
         { status: 200 }
       );
