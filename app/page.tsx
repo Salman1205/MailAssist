@@ -117,7 +117,9 @@ export default function Page() {
       fetchSyncStatus()
       if (!hasAutoSynced) {
         setHasAutoSynced(true)
-        startSync(300).catch((err) => setSyncError(err.message))
+        // Use a smaller batch size in production so sync jobs are less
+        // likely to be interrupted on serverless hosts.
+        startSync(75).catch((err) => setSyncError(err.message))
       }
     } else {
       setUserProfile(null)
