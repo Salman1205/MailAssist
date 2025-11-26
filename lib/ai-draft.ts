@@ -29,19 +29,33 @@ export async function generateDraftReply(
   groqApiKey: string
 ): Promise<string> {
   // Generate embedding for the incoming email
-  const queryContext = createEmailContext(incomingEmail.subject, incomingEmail.body);
-  const queryEmbedding = await generateEmbedding(queryContext);
+  let queryEmbedding: number[];
+  try {
+    const queryContext = createEmailContext(incomingEmail.subject, incomingEmail.body);
+    queryEmbedding = await generateEmbedding(queryContext);
+  } catch (error) {
+    console.error('Error generating embedding for incoming email:', error);
+    // If embedding fails, still generate draft but without similarity matching
+    queryEmbedding = [];
+  }
 
   // Find similar past emails to match tone and style
-  const similarEmails = findSimilarEmails(
-    queryEmbedding,
-    pastEmails.map((email) => ({
-      emailId: email.id,
-      embedding: email.embedding,
-      email,
-    })),
-    5 // Top 5 most similar emails
-  );
+  // If no embedding was generated, use all past emails
+  const similarEmails = queryEmbedding.length > 0
+    ? findSimilarEmails(
+        queryEmbedding,
+        pastEmails.map((email) => ({
+          emailId: email.id,
+          embedding: email.embedding,
+          email,
+        })),
+        5 // Top 5 most similar emails
+      )
+    : pastEmails.slice(0, 5).map((email) => ({
+        emailId: email.id,
+        email,
+        similarity: 0,
+      }));
 
   // Build context from similar emails
   const styleExamples = similarEmails

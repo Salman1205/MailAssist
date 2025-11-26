@@ -56,8 +56,8 @@ async function generateEmbeddingHuggingFace(
   const truncatedText = text.slice(0, 512);
 
   let lastError: Error | null = null;
-  const maxRetries = 1; // Reduced retries for speed (fail fast if API is down)
-  const REQUEST_TIMEOUT = 10; // 10 seconds timeout (reduced for faster failure detection)
+  const maxRetries = 2; // Reduced retries for speed (fail fast if API is down)
+  const REQUEST_TIMEOUT = 10000; // 10 seconds timeout in milliseconds
   
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
