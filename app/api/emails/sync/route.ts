@@ -34,18 +34,14 @@ export async function POST(request: NextRequest) {
     const maxResults = parseInt(searchParams.get('maxResults') || '100');
 
     const currentSyncState = await getSyncState();
-    if (currentSyncState.status === 'running') {
-      return NextResponse.json(
-        {
-          message: 'Sync already running',
-          processing: true,
-          queued: currentSyncState.queued,
-          processed: currentSyncState.processed,
-        },
-        { status: 202 }
-      );
-    }
-
+    const isContinuing = currentSyncState.status === 'running';
+    
+    console.log(`[SYNC] ${isContinuing ? 'Continuing' : 'Starting new'} sync job. Current state:`, {
+      status: currentSyncState.status,
+      processed: currentSyncState.processed,
+      queued: currentSyncState.queued
+    });
+    
     // Fetch sent emails
     const sentEmails = await fetchSentEmails(tokens, maxResults);
     
@@ -57,22 +53,31 @@ export async function POST(request: NextRequest) {
     const newEmails = sentEmails.filter(e => !storedIds.has(e.id));
 
     if (newEmails.length === 0) {
+      // Mark as complete if no new emails
+      if (isContinuing) {
+        await setSyncState({
+          ...currentSyncState,
+          status: 'idle',
+          finishedAt: Date.now(),
+        });
+      }
       return NextResponse.json({
         message: 'All emails already processed',
-        processed: 0,
+        processed: currentSyncState.processed || 0,
         total: sentEmails.length
       });
     }
 
-    const jobStartedAt = Date.now();
+    // Use existing job start time if continuing, otherwise create new
+    const jobStartedAt = isContinuing ? (currentSyncState.startedAt || Date.now()) : Date.now();
     
-    // Only reset processed to 0 when starting a NEW job
-    // If a job was already running, we'd have returned earlier
+    // Only reset processed to 0 when starting a NEW job (not continuing)
+    // When continuing, keep the existing processed count
     await setSyncState({
       status: 'running',
-      queued: newEmails.length,
-      processed: 0, // Reset only when starting new job
-      errors: 0,
+      queued: isContinuing ? (currentSyncState.queued || newEmails.length) : newEmails.length,
+      processed: isContinuing ? (currentSyncState.processed || 0) : 0,
+      errors: isContinuing ? (currentSyncState.errors || 0) : 0,
       startedAt: jobStartedAt,
       finishedAt: null,
     });
@@ -83,6 +88,8 @@ export async function POST(request: NextRequest) {
     const BATCH_SIZE = 5; // Process 5 emails per request to stay well within timeout
     const batchToProcess = newEmails.slice(0, BATCH_SIZE);
     const remainingEmails = newEmails.slice(BATCH_SIZE);
+    
+    console.log(`[SYNC] Processing batch: ${batchToProcess.length} emails, ${remainingEmails.length} remaining`);
 
     let batchProcessed = 0;
     let batchErrors = 0;
