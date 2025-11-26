@@ -256,10 +256,11 @@ export default function Page() {
     )
   }
 
-  const processedDelta = syncStatus?.processing
-    ? syncStatus.processed ?? 0
-    : Math.max(0, (syncStatus?.sentWithEmbeddings ?? 0) - syncBaseline)
-  const toastTarget = syncStatus?.processing ? syncStatus.queued ?? syncTarget : syncTarget
+  // Use the processed count directly from sync status (consistent source of truth)
+  const processedDelta = syncStatus?.processed ?? 0
+  const toastTarget = syncStatus?.processing 
+    ? (syncStatus.queued ?? syncTarget ?? 0)
+    : (syncStatus?.sentWithEmbeddings ?? syncTarget ?? 0)
   
   // Check if sync is complete (not processing and no pending emails)
   const isSyncComplete = !syncStatus?.processing && !syncInProgress && 

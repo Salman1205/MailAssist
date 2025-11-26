@@ -304,7 +304,12 @@ async function processEmailsInBackground(emails: any[], startedAt: number) {
 export async function GET() {
   try {
     const storedEmails = await loadStoredEmails();
-    const sentEmails = storedEmails.filter(e => e.isSent && e.isReply && e.embedding.length > 0);
+    
+    // Count ALL sent emails with embeddings (not just replies)
+    const allSentWithEmbeddings = storedEmails.filter(e => e.isSent && e.embedding.length > 0);
+    // Also count replies separately for backward compatibility
+    const repliesWithEmbeddings = storedEmails.filter(e => e.isSent && e.isReply && e.embedding.length > 0);
+    
     const syncState = await getSyncState();
 
     // Use syncState to determine "pending" so the UI isn't stuck if some
@@ -314,14 +319,20 @@ export async function GET() {
         ? Math.max(0, syncState.queued - syncState.processed)
         : 0;
 
+    // When sync is running, use the job's processed count
+    // When not running, use the actual stored count
+    const actualProcessed = syncState.status === 'running' 
+      ? (syncState.processed ?? 0)
+      : allSentWithEmbeddings.length;
+
     return NextResponse.json({
       totalStored: storedEmails.length,
-      sentWithEmbeddings: sentEmails.length,
-      completedReplies: sentEmails.length,
+      sentWithEmbeddings: allSentWithEmbeddings.length, // All sent emails with embeddings
+      completedReplies: repliesWithEmbeddings.length, // Replies with embeddings (for compatibility)
       pendingReplies: pendingFromJob,
       processing: syncState.status === 'running',
       queued: syncState.queued,
-      processed: syncState.processed,
+      processed: actualProcessed, // Use actual processed count
       errors: syncState.errors,
       startedAt: syncState.startedAt,
       finishedAt: syncState.finishedAt,

@@ -40,22 +40,34 @@ export async function generateDraftReply(
   }
 
   // Find similar past emails to match tone and style
-  // If no embedding was generated, use all past emails
-  const similarEmails = queryEmbedding.length > 0
-    ? findSimilarEmails(
-        queryEmbedding,
-        pastEmails.map((email) => ({
-          emailId: email.id,
-          embedding: email.embedding,
-          email,
-        })),
-        5 // Top 5 most similar emails
-      )
-    : pastEmails.slice(0, 5).map((email) => ({
+  // If no embedding was generated, use first 5 past emails as fallback
+  let similarEmails: Array<{ emailId: string; similarity: number; email: any }>;
+  if (queryEmbedding.length > 0 && pastEmails.length > 0) {
+    similarEmails = findSimilarEmails(
+      queryEmbedding,
+      pastEmails.map((email) => ({
+        emailId: email.id,
+        embedding: email.embedding,
+        email,
+      })),
+      5 // Top 5 most similar emails
+    );
+    // If no similar emails found, use first few as fallback
+    if (similarEmails.length === 0) {
+      similarEmails = pastEmails.slice(0, 5).map((email) => ({
         emailId: email.id,
         email,
-        similarity: 0,
+        similarity: 0.5, // Default similarity for fallback
       }));
+    }
+  } else {
+    // Fallback: use first 5 past emails if embedding generation failed
+    similarEmails = pastEmails.slice(0, 5).map((email) => ({
+      emailId: email.id,
+      email,
+      similarity: 0.5, // Default similarity for fallback
+    }));
+  }
 
   // Build context from similar emails
   const styleExamples = similarEmails
