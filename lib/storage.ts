@@ -176,10 +176,7 @@ export async function saveStoredEmails(emails: StoredEmail[], retries = 1) {
     
     const { error } = await supabase
       .from('emails')
-      .upsert(payload);
-        },
-        { onConflict: 'id' }
-      );
+      .upsert(payload, { onConflict: 'id' });
 
     if (error) {
       console.error('Error saving stored email to Supabase:', error, 'for email id', email.id);
