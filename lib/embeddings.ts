@@ -39,45 +39,106 @@ async function generateEmbeddingHuggingFace(
 ): Promise<number[]> {
   const model = 'sentence-transformers/all-MiniLM-L6-v2'; // free, small, sentence-level encoder
   
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-
-  if (apiKey) {
-    headers['Authorization'] = `Bearer ${apiKey}`;
+  if (!apiKey) {
+    throw new Error('EMBEDDING_API_KEY must be set to use Hugging Face embeddings');
   }
 
-  try {
-    const response = await fetch(
-      `https://api-inference.huggingface.co/pipeline/feature-extraction/${model}`,
-      {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${apiKey}`,
+  };
+
+  // Use the correct Hugging Face Inference API endpoint
+  const url = `https://api-inference.huggingface.co/models/${model}`;
+  
+  // Truncate text to reasonable length (Hugging Face has limits)
+  const truncatedText = text.slice(0, 512);
+
+  let lastError: Error | null = null;
+  const maxRetries = 3;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, {
         method: 'POST',
         headers,
         body: JSON.stringify({
-          inputs: text,
+          inputs: truncatedText,
           options: {
             wait_for_model: true,
           },
         }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorMessage = `Hugging Face API error: ${response.status} ${response.statusText}`;
+        
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorMessage = errorJson.error || errorMessage;
+        } catch {
+          // If not JSON, use the text as-is
+          if (errorText) {
+            errorMessage = `${errorMessage} - ${errorText.slice(0, 200)}`;
+          }
+        }
+        
+        // Handle rate limiting (429) or model loading (503) with retry
+        if (response.status === 429 || response.status === 503) {
+          const waitTime = attempt * 2000; // 2s, 4s, 6s
+          console.warn(`Hugging Face rate limit/model loading (${response.status}), retrying in ${waitTime}ms...`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+          continue; // Retry
+        }
+        
+        throw new Error(errorMessage);
       }
-    );
 
-    if (!response.ok) {
-      throw new Error(`Hugging Face API error: ${response.statusText}`);
+      const embedding = await response.json();
+      
+      // Handle different response formats
+      if (Array.isArray(embedding)) {
+        // If it's an array of arrays (batch response), take first
+        if (Array.isArray(embedding[0])) {
+          return embedding[0] as number[];
+        }
+        // If it's a single array, return it
+        if (typeof embedding[0] === 'number') {
+          return embedding as number[];
+        }
+      }
+      
+      // Sometimes HF returns an object with the embedding
+      if (embedding && Array.isArray(embedding.embedding)) {
+        return embedding.embedding as number[];
+      }
+      
+      throw new Error(`Unexpected Hugging Face response format: ${JSON.stringify(embedding).slice(0, 100)}`);
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      
+      // Don't retry on certain errors (auth, bad request)
+      if (error instanceof Error && (
+        error.message.includes('401') || 
+        error.message.includes('403') ||
+        error.message.includes('400')
+      )) {
+        throw lastError;
+      }
+      
+      // Wait before retrying (except on last attempt)
+      if (attempt < maxRetries) {
+        const waitTime = attempt * 1000; // 1s, 2s, 3s
+        console.warn(`Hugging Face embedding attempt ${attempt} failed, retrying in ${waitTime}ms...`, lastError.message);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
     }
-
-    const embedding = await response.json();
-    
-    // Handle array of arrays (batch) or single array
-    if (Array.isArray(embedding) && Array.isArray(embedding[0])) {
-      return embedding[0] as number[];
-    }
-    
-    return embedding as number[];
-  } catch (error) {
-    console.error('Error generating embedding with Hugging Face:', error);
-    throw error;
   }
+  
+  // All retries failed
+  console.error('Error generating embedding with Hugging Face after', maxRetries, 'attempts:', lastError);
+  throw lastError || new Error('Failed to generate embedding with Hugging Face');
 }
 
 /**
