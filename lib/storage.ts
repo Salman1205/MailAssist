@@ -259,20 +259,55 @@ export async function storeSentEmail(email: {
   labels?: string[];
   isReply?: boolean;
 }) {
-  const storedEmails = await loadStoredEmails();
+  // Quick check: if email already exists with embedding, skip it
+  if (supabase) {
+    try {
+      const userEmail = await getCurrentUserEmail();
+      let query = supabase
+        .from('emails')
+        .select('id, embedding')
+        .eq('id', email.id)
+        .eq('is_sent', true);
+      
+      if (userEmail) {
+        query = query.eq('user_email', userEmail);
+      }
+      
+      const { data: existingEmail } = await query.limit(1).maybeSingle();
+      
+      // If email exists and has embedding, return early (skip re-embedding)
+      if (existingEmail && existingEmail.embedding && Array.isArray(existingEmail.embedding) && existingEmail.embedding.length > 0) {
+        // Return the existing email structure (we'll need to load it fully if needed)
+        return {
+          id: email.id,
+          threadId: email.threadId,
+          subject: email.subject,
+          from: email.from,
+          to: email.to,
+          body: email.body,
+          date: email.date,
+          embedding: existingEmail.embedding,
+          labels: email.labels,
+          isSent: true,
+          isReply: email.isReply,
+        } as StoredEmail;
+      }
+    } catch (error) {
+      // If check fails, continue with normal flow
+      console.warn('Could not check existing email, continuing with normal flow:', error);
+    }
+  }
   
-  // Check if email already exists
+  // Load stored emails for the rest of the logic
+  const storedEmails = await loadStoredEmails();
   const existing = storedEmails.find((e) => e.id === email.id);
   
   // Determine if this is a reply (check email.isReply or infer from subject)
   const isReply = email.isReply ?? /^(re|fwd?):\s*/i.test(email.subject || '');
   
-  if (existing) {
-    if (existing.embedding.length > 0) {
-      return existing; // Already processed with embedding
-    }
-    // If existing email has no embedding, we should process it
-    // (We now generate embeddings for all sent emails, not just replies)
+  // Double-check: if existing email has embedding, skip
+  if (existing && existing.embedding.length > 0) {
+    return existing; // Already processed with embedding
   }
 
   const trimmedBody = sanitizeEmailBody(email.body || '', 2000);

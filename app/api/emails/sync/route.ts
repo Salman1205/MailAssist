@@ -47,10 +47,17 @@ export async function POST(request: NextRequest) {
     
     // Get already stored emails to avoid duplicates
     const storedEmails = await loadStoredEmails();
-    const storedIds = new Set(storedEmails.map(e => e.id));
+    
+    // Only filter out emails that already have embeddings (skip re-embedding)
+    // Emails without embeddings will be processed
+    const emailsWithEmbeddings = new Set(
+      storedEmails
+        .filter(e => e.embedding && e.embedding.length > 0)
+        .map(e => e.id)
+    );
 
-    // Filter out already stored emails
-    const newEmails = sentEmails.filter(e => !storedIds.has(e.id));
+    // Filter out only emails that already have embeddings
+    const newEmails = sentEmails.filter(e => !emailsWithEmbeddings.has(e.id));
 
     if (newEmails.length === 0) {
       // Mark as complete if no new emails
