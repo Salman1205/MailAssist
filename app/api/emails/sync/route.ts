@@ -156,9 +156,9 @@ async function processEmailsBatch(emails: any[], startedAt: number): Promise<{ p
   const provider = (process.env.EMBEDDING_PROVIDER || 'local').toLowerCase();
   const isLocal = provider === 'local';
   
-  // For Hugging Face API, process 6 at a time (increased for speed)
+  // For Hugging Face API, process 10 at a time (increased for maximum speed)
   // For local, process all in parallel
-  const CONCURRENCY = isLocal ? emails.length : 6;
+  const CONCURRENCY = isLocal ? emails.length : 10;
   
   let processed = 0;
   let errors = 0;
@@ -206,11 +206,9 @@ async function processEmailsBatch(emails: any[], startedAt: number): Promise<{ p
       }
     }
     
-    // Small delay between parallel batches (only for API providers to respect rate limits)
-    // Reduced delay for faster processing
-    if (!isLocal && i + CONCURRENCY < emails.length) {
-      await new Promise(resolve => setTimeout(resolve, 50));
-    }
+    // No delay between batches - process as fast as possible
+    // Hugging Face API can handle the load, and we have retry logic for rate limits
+    // Only add minimal delay if we're hitting rate limits (which retry logic handles)
   }
 
   return { processed, errors };

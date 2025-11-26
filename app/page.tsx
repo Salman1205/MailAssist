@@ -135,9 +135,9 @@ export default function Page() {
       fetchSyncStatus()
       if (!hasAutoSynced) {
         setHasAutoSynced(true)
-        // Use a smaller batch size in production so sync jobs are less
-        // likely to be interrupted on serverless hosts.
-        startSync(75).catch((err) => setSyncError(err.message))
+        // Fetch up to 500 emails (enough for most users)
+        // The sync will process them in batches of 15 automatically
+        startSync(500).catch((err) => setSyncError(err.message))
       }
     } else {
       setUserProfile(null)
