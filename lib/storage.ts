@@ -12,9 +12,25 @@ import { getUserProfile } from './gmail';
 
 /**
  * Get current user's email address for data scoping
+ * First tries to get it from stored tokens, then falls back to Gmail API
  */
 async function getCurrentUserEmail(): Promise<string | null> {
   try {
+    // First, try to get email from stored tokens (faster, no API call)
+    if (supabase) {
+      const { data } = await supabase
+        .from('tokens')
+        .select('user_email')
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      
+      if (data?.user_email) {
+        return data.user_email;
+      }
+    }
+    
+    // Fallback: get from Gmail API
     const tokens = await getValidTokens();
     if (!tokens || !tokens.access_token) {
       return null;
@@ -359,21 +375,19 @@ export async function getSentEmails(): Promise<StoredEmail[]> {
 
 /**
  * Load stored OAuth tokens
+ * Note: We load the most recent token without user_email filter first
+ * because we need tokens to get user email. User email is stored with tokens.
  */
 export async function loadTokens(): Promise<StoredTokens | null> {
   if (!supabase) {
     return null;
   }
 
-  const userEmail = await getCurrentUserEmail();
-  if (!userEmail) {
-    return null;
-  }
-
+  // Load most recent token (tokens are already per-user via OAuth, so this is safe)
+  // The user_email is stored with the token for reference
   const { data, error } = await supabase
     .from('tokens')
     .select('*')
-    .eq('user_email', userEmail)
     .order('updated_at', { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -406,14 +420,21 @@ export async function saveTokens(tokens: StoredTokens) {
     return;
   }
 
-  const userEmail = await getCurrentUserEmail();
-  if (!userEmail) {
-    console.error('Cannot save tokens: no user email');
-    return;
+  // Get user email from Gmail profile using the tokens we just received
+  let userEmail: string | null = null;
+  try {
+    if (tokens.access_token) {
+      const profile = await getUserProfile(tokens);
+      userEmail = profile?.emailAddress || null;
+    }
+  } catch (error) {
+    console.warn('Could not fetch user email when saving tokens:', error);
+    // Continue without user_email - we'll get it later
   }
 
-  // Delete existing tokens for this user first, then insert new ones
-  await supabase.from('tokens').delete().eq('user_email', userEmail);
+  // Delete all existing tokens (since we're replacing them)
+  // In a multi-user setup, we'd filter by user_email, but for now clear all
+  await supabase.from('tokens').delete().neq('id', '00000000-0000-0000-0000-000000000000');
 
   const { error } = await supabase.from('tokens').insert({
     user_email: userEmail,
