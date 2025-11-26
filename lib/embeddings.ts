@@ -15,6 +15,8 @@ export async function generateEmbedding(text: string): Promise<number[]> {
   const embeddingEnvKey = process.env.EMBEDDING_API_KEY;
   const provider = (process.env.EMBEDDING_PROVIDER || 'local').toLowerCase();
 
+  console.log(`[EMBEDDING] Provider: ${provider}, Has API Key: ${!!embeddingEnvKey}, Has OpenAI Key: ${!!openAiKey}`);
+
   if (provider === 'openai') {
     const key = openAiKey || embeddingEnvKey;
     if (!key) {
@@ -57,8 +59,12 @@ async function generateEmbeddingHuggingFace(
   let lastError: Error | null = null;
   const maxRetries = 3;
   
+  console.log(`[HF Embedding] Starting embedding generation for text (${truncatedText.length} chars), model: ${model}`);
+  
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
+      console.log(`[HF Embedding] Attempt ${attempt}/${maxRetries} - Calling ${url}`);
+      
       const response = await fetch(url, {
         method: 'POST',
         headers,
@@ -70,13 +76,18 @@ async function generateEmbeddingHuggingFace(
         }),
       });
 
+      console.log(`[HF Embedding] Response status: ${response.status} ${response.statusText}`);
+
       if (!response.ok) {
         const errorText = await response.text();
+        console.error(`[HF Embedding] Error response body:`, errorText.slice(0, 500));
+        
         let errorMessage = `Hugging Face API error: ${response.status} ${response.statusText}`;
         
         try {
           const errorJson = JSON.parse(errorText);
-          errorMessage = errorJson.error || errorMessage;
+          errorMessage = errorJson.error || errorJson.message || errorMessage;
+          console.error(`[HF Embedding] Parsed error:`, errorJson);
         } catch {
           // If not JSON, use the text as-is
           if (errorText) {
@@ -87,7 +98,7 @@ async function generateEmbeddingHuggingFace(
         // Handle rate limiting (429) or model loading (503) with retry
         if (response.status === 429 || response.status === 503) {
           const waitTime = attempt * 2000; // 2s, 4s, 6s
-          console.warn(`Hugging Face rate limit/model loading (${response.status}), retrying in ${waitTime}ms...`);
+          console.warn(`[HF Embedding] Rate limit/model loading (${response.status}), retrying in ${waitTime}ms...`);
           await new Promise(resolve => setTimeout(resolve, waitTime));
           continue; // Retry
         }
@@ -96,6 +107,7 @@ async function generateEmbeddingHuggingFace(
       }
 
       const embedding = await response.json();
+      console.log(`[HF Embedding] Success! Response type:`, Array.isArray(embedding) ? 'array' : typeof embedding, 'Length:', Array.isArray(embedding) ? embedding.length : 'N/A');
       
       // Handle different response formats
       if (Array.isArray(embedding)) {
@@ -130,14 +142,16 @@ async function generateEmbeddingHuggingFace(
       // Wait before retrying (except on last attempt)
       if (attempt < maxRetries) {
         const waitTime = attempt * 1000; // 1s, 2s, 3s
-        console.warn(`Hugging Face embedding attempt ${attempt} failed, retrying in ${waitTime}ms...`, lastError.message);
+        console.warn(`[HF Embedding] Attempt ${attempt} failed:`, lastError.message, `Retrying in ${waitTime}ms...`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
+      } else {
+        console.error(`[HF Embedding] All ${maxRetries} attempts failed. Last error:`, lastError);
       }
     }
   }
   
   // All retries failed
-  console.error('Error generating embedding with Hugging Face after', maxRetries, 'attempts:', lastError);
+  console.error(`[HF Embedding] FAILED after ${maxRetries} attempts. Error:`, lastError?.message || lastError);
   throw lastError || new Error('Failed to generate embedding with Hugging Face');
 }
 

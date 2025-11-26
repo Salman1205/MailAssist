@@ -237,8 +237,9 @@ export async function storeSentEmail(email: {
     return storedEmail;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error(`Error generating embedding for email ${email.id}:`, errorMessage);
-    console.error('Full error:', error);
+    console.error(`[STORAGE] Error generating embedding for email ${email.id}:`, errorMessage);
+    console.error('[STORAGE] Full error details:', error);
+    console.error('[STORAGE] Stack trace:', error instanceof Error ? error.stack : 'N/A');
     
     // Store without embedding if embedding generation fails
     // This allows the app to continue working even if some embeddings fail
