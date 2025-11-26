@@ -51,7 +51,8 @@ async function generateEmbeddingHuggingFace(
   };
 
   // Use the new Hugging Face router endpoint (old api-inference.huggingface.co is deprecated)
-  const url = `https://router.huggingface.co/models/${model}`;
+  // Format: https://router.huggingface.co/hf-inference/models/{model}
+  const url = `https://router.huggingface.co/hf-inference/models/${model}`;
   
   // Truncate text to reasonable length (Hugging Face has limits)
   const truncatedText = text.slice(0, 512);
