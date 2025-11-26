@@ -1,0 +1,86 @@
+"use client"
+
+interface SidebarProps {
+  activeView: "inbox" | "drafts" | "settings"
+  setActiveView: (view: "inbox" | "drafts" | "settings") => void
+  onLogout?: () => void
+}
+
+const NAV_ITEMS = [
+  { id: "inbox", label: "Inbox", icon: InboxIcon },
+  { id: "drafts", label: "Drafts", icon: DraftIcon },
+  { id: "settings", label: "Settings", icon: SettingsIcon },
+] as const
+
+export default function Sidebar({ activeView, setActiveView, onLogout }: SidebarProps) {
+  return (
+    <aside className="hidden md:flex w-60 bg-card border-r border-border flex-col">
+      <nav className="flex-1 px-3 py-6 space-y-1">
+        {NAV_ITEMS.map((item) => {
+          const isActive = activeView === item.id
+          const Icon = item.icon
+
+          return (
+            <button
+              key={item.id}
+              onClick={() => setActiveView(item.id)}
+              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-left font-medium transition-all ${
+                isActive ? "bg-primary text-primary-foreground shadow-sm" : "text-foreground hover:bg-secondary"
+              }`}
+            >
+              <Icon className="w-5 h-5 flex-shrink-0" />
+              <span className="text-sm">{item.label}</span>
+            </button>
+          )
+        })}
+      </nav>
+
+      <div className="p-3 border-t border-border">
+        <button
+          onClick={onLogout}
+          className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-foreground hover:bg-secondary transition-all font-medium"
+        >
+          <LogoutIcon className="w-5 h-5 flex-shrink-0" />
+          <span className="text-sm">Logout</span>
+        </button>
+      </div>
+    </aside>
+  )
+}
+
+function InboxIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" {...props}>
+      <path d="M3 7l1.68-3.36A2 2 0 0 1 6.48 2h11.04a2 2 0 0 1 1.8 1.64L21 7v10a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V7z" />
+      <path d="M3 13h5l2 3h4l2-3h5" />
+    </svg>
+  )
+}
+
+function DraftIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" {...props}>
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+    </svg>
+  )
+}
+
+function SettingsIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" {...props}>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.09a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09c0 .66.39 1.26 1 1.51h.09c.61.24 1.3.1 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.09c.24.61.9 1 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  )
+}
+
+function LogoutIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" {...props}>
+      <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+      <polyline points="10 17 15 12 10 7" />
+      <line x1="15" y1="12" x2="3" y2="12" />
+    </svg>
+  )
+}

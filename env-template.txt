@@ -1,0 +1,32 @@
+# Copy this content to a new file named .env.local
+# Fill in your actual values below
+
+# ============================================
+# Gmail OAuth2 Credentials
+# Get from: https://console.cloud.google.com/
+# ============================================
+GMAIL_CLIENT_ID=your_gmail_client_id_here
+GMAIL_CLIENT_SECRET=your_gmail_client_secret_here
+GMAIL_REDIRECT_URI=http://localhost:3000/api/auth/gmail/callback
+
+# ============================================
+# Groq API Key (Required)
+# Get from: https://console.groq.com/
+# ============================================
+GROQ_API_KEY=your_groq_api_key_here
+
+# ============================================
+# Embedding configuration
+# By default we run MiniLM locally (no API key needed)
+# Set EMBEDDING_PROVIDER=openai to use OpenAI instead
+# Set EMBEDDING_PROVIDER=huggingface to call HF Inference API
+# ============================================
+EMBEDDING_PROVIDER=local
+EMBEDDING_API_KEY=
+
+# ============================================
+# Frontend URL
+# ============================================
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+
+
