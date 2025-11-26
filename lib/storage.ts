@@ -438,26 +438,25 @@ export async function saveTokens(tokens: StoredTokens) {
     return;
   }
 
-  // Get user email from Gmail profile using the tokens we just received
+  // Try to get user email from Gmail profile (non-blocking - if it fails, continue without it)
   let userEmail: string | null = null;
   try {
-    if (tokens.access_token) {
-      const profile = await getUserProfile(tokens);
-      userEmail = profile?.emailAddress || null;
-      console.log('Fetched user email for token storage:', userEmail);
-    }
+    const profile = await getUserProfile(tokens);
+    userEmail = profile?.emailAddress || null;
   } catch (error) {
-    console.warn('Could not fetch user email when saving tokens (will continue without it):', error);
-    // Continue without user_email - we'll get it later
+    // Silently continue - user_email is optional for backward compatibility
+    // We'll get it later when needed
   }
 
   // Delete all existing tokens (since we're replacing them)
-  const deleteResult = await supabase.from('tokens').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-  if (deleteResult.error) {
-    console.warn('Error deleting old tokens (continuing anyway):', deleteResult.error);
+  // Use a safe delete that won't fail if table is empty
+  try {
+    await supabase.from('tokens').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+  } catch (deleteError) {
+    // Ignore delete errors - table might be empty or have different structure
   }
 
-  // Build insert payload
+  // Build insert payload (only include fields that definitely exist)
   const insertPayload: any = {
     access_token: tokens.access_token,
     refresh_token: tokens.refresh_token ?? null,
@@ -466,20 +465,28 @@ export async function saveTokens(tokens: StoredTokens) {
     scope: tokens.scope ?? null,
   };
   
-  // Only add user_email if we have it (and column might exist)
+  // Only add user_email if we have it (column might not exist yet)
   if (userEmail) {
     insertPayload.user_email = userEmail;
   }
 
-  console.log('Saving tokens to Supabase...');
-  const { data, error } = await supabase.from('tokens').insert(insertPayload).select();
+  // Try to insert tokens
+  const { error } = await supabase.from('tokens').insert(insertPayload);
 
   if (error) {
-    console.error('Error saving tokens to Supabase:', error);
-    console.error('Token payload:', { ...insertPayload, access_token: '[REDACTED]' });
-    throw error; // Re-throw so caller knows it failed
-  } else {
-    console.log('Tokens saved successfully to Supabase');
+    // If error is about user_email column not existing, try without it
+    if (error.message?.includes('user_email') || error.message?.includes('column')) {
+      console.warn('user_email column might not exist, retrying without it...');
+      delete insertPayload.user_email;
+      const { error: retryError } = await supabase.from('tokens').insert(insertPayload);
+      if (retryError) {
+        console.error('Error saving tokens to Supabase (after retry):', retryError);
+        throw retryError;
+      }
+    } else {
+      console.error('Error saving tokens to Supabase:', error);
+      throw error;
+    }
   }
 }
 
