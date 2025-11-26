@@ -260,7 +260,25 @@ export default function Page() {
     ? syncStatus.processed ?? 0
     : Math.max(0, (syncStatus?.sentWithEmbeddings ?? 0) - syncBaseline)
   const toastTarget = syncStatus?.processing ? syncStatus.queued ?? syncTarget : syncTarget
-  const showSyncToast = ((syncStatus?.processing ?? syncInProgress) || syncError) && !hideSyncToast
+  
+  // Check if sync is complete (not processing and no pending emails)
+  const isSyncComplete = !syncStatus?.processing && !syncInProgress && 
+    syncStatus?.pendingReplies === 0 && 
+    processedDelta > 0 &&
+    !syncError
+  
+  // Auto-hide toast after 3 seconds when sync completes
+  useEffect(() => {
+    if (isSyncComplete && !hideSyncToast) {
+      const timer = setTimeout(() => {
+        setHideSyncToast(true)
+        setSyncInProgress(false)
+      }, 3000) // Hide after 3 seconds
+      return () => clearTimeout(timer)
+    }
+  }, [isSyncComplete, hideSyncToast])
+  
+  const showSyncToast = ((syncStatus?.processing ?? syncInProgress) || syncError || isSyncComplete) && !hideSyncToast
 
   return (
     <>

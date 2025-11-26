@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
     // On Vercel, serverless functions have time limits (~10s free tier)
     // Process a batch synchronously (await it) so it completes within timeout
     // Frontend will call sync again to continue processing remaining emails
-    const BATCH_SIZE = 15; // Process 15 emails per request (increased from 5 for speed)
+    const BATCH_SIZE = 30; // Process 30 emails per request (increased for maximum speed)
     const batchToProcess = newEmails.slice(0, BATCH_SIZE);
     const remainingEmails = newEmails.slice(BATCH_SIZE);
     
@@ -156,9 +156,9 @@ async function processEmailsBatch(emails: any[], startedAt: number): Promise<{ p
   const provider = (process.env.EMBEDDING_PROVIDER || 'local').toLowerCase();
   const isLocal = provider === 'local';
   
-  // For Hugging Face API, process 10 at a time (increased for maximum speed)
+  // For Hugging Face API, process 20 at a time (maximum speed while staying within rate limits)
   // For local, process all in parallel
-  const CONCURRENCY = isLocal ? emails.length : 10;
+  const CONCURRENCY = isLocal ? emails.length : 20;
   
   let processed = 0;
   let errors = 0;

@@ -56,8 +56,8 @@ async function generateEmbeddingHuggingFace(
   const truncatedText = text.slice(0, 512);
 
   let lastError: Error | null = null;
-  const maxRetries = 3;
-  const REQUEST_TIMEOUT = 15000; // 15 seconds timeout per request
+  const maxRetries = 1; // Reduced retries for speed (fail fast if API is down)
+  const REQUEST_TIMEOUT = 10; // 10 seconds timeout (reduced for faster failure detection)
   
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -95,7 +95,7 @@ async function generateEmbeddingHuggingFace(
           
           // Handle rate limiting (429) or model loading (503) with retry
           if (response.status === 429 || response.status === 503) {
-            const waitTime = Math.min(attempt * 1500, 5000); // 1.5s, 3s, 4.5s (max 5s)
+            const waitTime = Math.min(attempt * 1000, 3000); // 1s, 2s (max 3s) - faster retry
             if (attempt < maxRetries) {
               await new Promise(resolve => setTimeout(resolve, waitTime));
               continue; // Retry
@@ -142,11 +142,9 @@ async function generateEmbeddingHuggingFace(
         throw lastError;
       }
       
-      // Exponential backoff with jitter for retries
+      // Faster retry with minimal delay
       if (attempt < maxRetries) {
-        const baseDelay = Math.min(1000 * Math.pow(1.5, attempt - 1), 3000); // 1s, 1.5s, 2.25s (max 3s)
-        const jitter = Math.random() * 500; // Add up to 500ms jitter
-        const waitTime = baseDelay + jitter;
+        const waitTime = attempt * 500; // 500ms, 1000ms - faster retries
         await new Promise(resolve => setTimeout(resolve, waitTime));
       }
     }

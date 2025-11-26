@@ -26,10 +26,13 @@ interface SyncToastProps {
 }
 
 export default function SyncToast({ syncing, status, processed, target, error, onDismiss }: SyncToastProps) {
-  if (!syncing && !error) return null
+  // Show toast if syncing, has error, or just completed (pending === 0 and processed > 0)
+  const isComplete = !syncing && !error && status?.pendingReplies === 0 && processed > 0
+  
+  if (!syncing && !error && !isComplete) return null
 
   const effectiveTarget = target ?? status?.queued ?? null
-  const progress = effectiveTarget ? Math.min(1, Math.max(0, processed / effectiveTarget)) : 0
+  const progress = effectiveTarget ? Math.min(1, Math.max(0, processed / effectiveTarget)) : (isComplete ? 1 : 0)
 
   return (
     <div className="fixed bottom-4 right-4 z-50 w-full max-w-xs sm:max-w-sm">
@@ -37,12 +40,14 @@ export default function SyncToast({ syncing, status, processed, target, error, o
         <div className="flex items-center justify-between gap-4">
           <div>
             <p className="text-sm font-semibold text-foreground">
-              {error ? "Embedding failed" : syncing ? "Processing your sent emails" : "Embedding complete"}
+              {error ? "Embedding failed" : isComplete ? "Embedding complete!" : syncing ? "Processing your sent emails" : "Embedding complete"}
             </p>
             <p className="text-xs text-muted-foreground">
               {error
                 ? error
-                : "We’re learning your tone so drafts match how you write."}
+                : isComplete
+                ? `Successfully embedded ${processed} emails.`
+                : "We're learning your tone so drafts match how you write."}
             </p>
           </div>
           {onDismiss && (
