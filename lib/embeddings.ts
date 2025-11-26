@@ -48,8 +48,8 @@ async function generateEmbeddingHuggingFace(
     'Authorization': `Bearer ${apiKey}`,
   };
 
-  // Use the correct Hugging Face Inference API endpoint
-  const url = `https://api-inference.huggingface.co/models/${model}`;
+  // Use the new Hugging Face router endpoint (old api-inference.huggingface.co is deprecated)
+  const url = `https://router.huggingface.co/models/${model}`;
   
   // Truncate text to reasonable length (Hugging Face has limits)
   const truncatedText = text.slice(0, 512);
