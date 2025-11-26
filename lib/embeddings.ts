@@ -39,9 +39,9 @@ async function generateEmbeddingHuggingFace(
   text: string,
   apiKey?: string
 ): Promise<number[]> {
-  // Use sentence-transformers/all-MiniLM-L6-v2 (same as local) but via API
-  // Try using feature-extraction task explicitly
-  const model = 'sentence-transformers/all-MiniLM-L6-v2';
+  // Use BAAI/bge-small-en-v1.5 - works reliably with router API
+  // sentence-transformers/all-MiniLM-L6-v2 has pipeline routing issues on router API
+  const model = 'BAAI/bge-small-en-v1.5';
   
   if (!apiKey) {
     throw new Error('EMBEDDING_API_KEY must be set to use Hugging Face embeddings');
@@ -52,9 +52,8 @@ async function generateEmbeddingHuggingFace(
     'Authorization': `Bearer ${apiKey}`,
   };
 
-  // Try using the feature-extraction endpoint explicitly
-  // Some models work better with the task-specific endpoint
-  const url = `https://router.huggingface.co/hf-inference/pipeline/feature-extraction/${model}`;
+  // Use the router models endpoint (not pipeline endpoint - that's 404)
+  const url = `https://router.huggingface.co/hf-inference/models/${model}`;
   
   // Truncate text to reasonable length (Hugging Face has limits)
   const truncatedText = text.slice(0, 512);
