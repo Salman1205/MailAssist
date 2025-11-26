@@ -83,16 +83,50 @@ export async function POST(
     }
 
     // Generate draft reply
-    const draft = await generateDraftReply(incomingEmail, pastEmails, groqApiKey);
+    let draft: string;
+    try {
+      draft = await generateDraftReply(incomingEmail, pastEmails, groqApiKey);
+    } catch (draftError) {
+      console.error('[Draft] Error in generateDraftReply:', draftError);
+      const errorMessage = draftError instanceof Error ? draftError.message : String(draftError);
+      
+      // If it's a Groq API error, provide more details
+      if (errorMessage.includes('Groq API') || errorMessage.includes('401') || errorMessage.includes('403')) {
+        return NextResponse.json(
+          { 
+            error: 'Failed to generate draft',
+            details: errorMessage,
+            hint: 'Please check your GROQ_API_KEY environment variable'
+          },
+          { status: 500 }
+        );
+      }
+      
+      throw draftError; // Re-throw to be caught by outer catch
+    }
 
-    const savedDraft = await storeDraft({
-      emailId: incomingEmail.id || emailId,
-      subject: incomingEmail.subject || '',
-      from: incomingEmail.from || '',
-      to: incomingEmail.to || '',
-      originalBody: incomingEmail.body || incomingEmail.snippet || '',
-      draftText: draft,
-    });
+    // Save draft
+    let savedDraft;
+    try {
+      savedDraft = await storeDraft({
+        emailId: incomingEmail.id || emailId,
+        subject: incomingEmail.subject || '',
+        from: incomingEmail.from || '',
+        to: incomingEmail.to || '',
+        originalBody: incomingEmail.body || incomingEmail.snippet || '',
+        draftText: draft,
+      });
+    } catch (storeError) {
+      console.error('[Draft] Error storing draft:', storeError);
+      // Still return the draft even if storing fails
+      return NextResponse.json({ 
+        draft,
+        emailId: incomingEmail.id,
+        subject: incomingEmail.subject,
+        draftId: null,
+        warning: 'Draft generated but could not be saved'
+      });
+    }
 
     return NextResponse.json({ 
       draft,
@@ -101,9 +135,16 @@ export async function POST(
       draftId: savedDraft.id,
     });
   } catch (error) {
-    console.error('Error generating draft:', error);
+    console.error('[Draft] Unexpected error generating draft:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    
     return NextResponse.json(
-      { error: 'Failed to generate draft', details: (error as Error).message },
+      { 
+        error: 'Failed to generate draft',
+        details: errorMessage,
+        ...(errorStack && { stack: errorStack })
+      },
       { status: 500 }
     );
   }
