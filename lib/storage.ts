@@ -18,15 +18,20 @@ async function getCurrentUserEmail(): Promise<string | null> {
   try {
     // First, try to get email from stored tokens (faster, no API call)
     if (supabase) {
-      const { data } = await supabase
-        .from('tokens')
-        .select('user_email')
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      
-      if (data?.user_email) {
-        return data.user_email;
+      try {
+        const { data } = await supabase
+          .from('tokens')
+          .select('user_email')
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        
+        if (data?.user_email) {
+          return data.user_email;
+        }
+      } catch (err) {
+        // If user_email column doesn't exist yet, that's okay - continue to fallback
+        // This happens if SQL migration hasn't been run yet
       }
     }
     
@@ -38,7 +43,7 @@ async function getCurrentUserEmail(): Promise<string | null> {
     const profile = await getUserProfile(tokens);
     return profile?.emailAddress || null;
   } catch (error) {
-    console.error('Error getting user email:', error);
+    // Don't log errors here - it's expected to fail if user isn't logged in
     return null;
   }
 }
@@ -104,16 +109,18 @@ export async function loadStoredEmails(): Promise<StoredEmail[]> {
   }
 
   const userEmail = await getCurrentUserEmail();
-  if (!userEmail) {
-    return [];
-  }
-
-  const { data, error } = await supabase
+  
+  let query = supabase
     .from('emails')
     .select('*')
-    .eq('is_sent', true)
-    .eq('user_email', userEmail)
-    .order('date', { ascending: false });
+    .eq('is_sent', true);
+  
+  // Only filter by user_email if we have it and column exists
+  if (userEmail) {
+    query = query.eq('user_email', userEmail);
+  }
+  
+  const { data, error } = await query.order('date', { ascending: false });
 
   if (error) {
     console.error('Error loading stored emails from Supabase:', error);
@@ -145,29 +152,31 @@ export async function saveStoredEmails(emails: StoredEmail[], retries = 1) {
   }
 
   const userEmail = await getCurrentUserEmail();
-  if (!userEmail) {
-    console.error('Cannot save emails: no user email');
-    return;
-  }
 
   // Upsert each email by id
   for (const email of emails) {
+    const payload: any = {
+      id: email.id,
+      thread_id: email.threadId ?? null,
+      subject: email.subject,
+      from_address: email.from,
+      to_address: email.to,
+      body: email.body,
+      date: email.date,
+      embedding: email.embedding,
+      labels: email.labels ?? [],
+      is_sent: email.isSent,
+      is_reply: email.isReply ?? null,
+    };
+    
+    // Only add user_email if we have it (column might not exist yet)
+    if (userEmail) {
+      payload.user_email = userEmail;
+    }
+    
     const { error } = await supabase
       .from('emails')
-      .upsert(
-        {
-          id: email.id,
-          user_email: userEmail,
-          thread_id: email.threadId ?? null,
-          subject: email.subject,
-          from_address: email.from,
-          to_address: email.to,
-          body: email.body,
-          date: email.date,
-          embedding: email.embedding,
-          labels: email.labels ?? [],
-          is_sent: email.isSent,
-          is_reply: email.isReply ?? null,
+      .upsert(payload);
         },
         { onConflict: 'id' }
       );
@@ -184,15 +193,13 @@ export async function loadDrafts(): Promise<StoredDraft[]> {
   }
 
   const userEmail = await getCurrentUserEmail();
-  if (!userEmail) {
-    return [];
+  
+  let query = supabase.from('drafts').select('*');
+  if (userEmail) {
+    query = query.eq('user_email', userEmail);
   }
-
-  const { data, error } = await supabase
-    .from('drafts')
-    .select('*')
-    .eq('user_email', userEmail)
-    .order('created_at', { ascending: false });
+  
+  const { data, error } = await query.order('created_at', { ascending: false });
 
   if (error) {
     console.error('Error loading drafts from Supabase:', error);
@@ -383,33 +390,41 @@ export async function loadTokens(): Promise<StoredTokens | null> {
     return null;
   }
 
-  // Load most recent token (tokens are already per-user via OAuth, so this is safe)
-  // The user_email is stored with the token for reference
-  const { data, error } = await supabase
-    .from('tokens')
-    .select('*')
-    .order('updated_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  try {
+    // Load most recent token (tokens are already per-user via OAuth, so this is safe)
+    // The user_email is stored with the token for reference
+    const { data, error } = await supabase
+      .from('tokens')
+      .select('*')
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-  if (error) {
-    console.error('Error loading tokens from Supabase:', error);
+    if (error) {
+      // If error is about missing column, that's okay - user_email might not exist yet
+      if (!error.message?.includes('column') && !error.message?.includes('user_email')) {
+        console.error('Error loading tokens from Supabase:', error);
+      }
+      return null;
+    }
+
+    if (!data) {
+      return null;
+    }
+
+    const tokens: StoredTokens = {
+      access_token: data.access_token,
+      refresh_token: data.refresh_token,
+      expiry_date: data.expiry_date,
+      token_type: data.token_type,
+      scope: data.scope,
+    };
+
+    return tokens;
+  } catch (error) {
+    console.error('Error loading tokens:', error);
     return null;
   }
-
-  if (!data) {
-    return null;
-  }
-
-  const tokens: StoredTokens = {
-    access_token: data.access_token,
-    refresh_token: data.refresh_token,
-    expiry_date: data.expiry_date,
-    token_type: data.token_type,
-    scope: data.scope,
-  };
-
-  return tokens;
 }
 
 /**
@@ -433,17 +448,23 @@ export async function saveTokens(tokens: StoredTokens) {
   }
 
   // Delete all existing tokens (since we're replacing them)
-  // In a multi-user setup, we'd filter by user_email, but for now clear all
   await supabase.from('tokens').delete().neq('id', '00000000-0000-0000-0000-000000000000');
 
-  const { error } = await supabase.from('tokens').insert({
-    user_email: userEmail,
+  // Build insert payload - only include user_email if column exists
+  const insertPayload: any = {
     access_token: tokens.access_token ?? null,
     refresh_token: tokens.refresh_token ?? null,
     expiry_date: tokens.expiry_date ?? null,
     token_type: tokens.token_type ?? null,
     scope: tokens.scope ?? null,
-  });
+  };
+  
+  // Only add user_email if we have it (and column might exist)
+  if (userEmail) {
+    insertPayload.user_email = userEmail;
+  }
+
+  const { error } = await supabase.from('tokens').insert(insertPayload);
 
   if (error) {
     console.error('Error saving tokens to Supabase:', error);
@@ -531,16 +552,13 @@ export async function loadSyncState(): Promise<SyncState> {
   }
 
   const userEmail = await getCurrentUserEmail();
-  if (!userEmail) {
-    return { ...defaultSyncState };
+  
+  let query = supabase.from('sync_state').select('*');
+  if (userEmail) {
+    query = query.eq('user_email', userEmail);
   }
-
-  const { data, error } = await supabase
-    .from('sync_state')
-    .select('*')
-    .eq('user_email', userEmail)
-    .limit(1)
-    .maybeSingle();
+  
+  const { data, error } = await query.limit(1).maybeSingle();
 
   if (error) {
     console.error('Error loading sync state from Supabase:', error);
