@@ -6,7 +6,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getValidTokens } from '@/lib/token-refresh';
 import { fetchSentEmails } from '@/lib/gmail';
-import { loadStoredEmails, storeSentEmail, loadSyncState, saveSyncState, SyncState } from '@/lib/storage';
+import { loadStoredEmails, storeSentEmail, loadSyncState, saveSyncState, saveStoredEmails, SyncState } from '@/lib/storage';
+import { createEmailContext } from '@/lib/similarity';
 
 // Don't use in-memory cache on Vercel (serverless instances don't share memory)
 // Always read from Supabase to get the real state
@@ -92,7 +93,7 @@ export async function POST(request: NextRequest) {
     // On Vercel, serverless functions have time limits (~10s free tier)
     // Process a batch synchronously (await it) so it completes within timeout
     // Frontend will call sync again to continue processing remaining emails
-    const BATCH_SIZE = 30; // Process 30 emails per request (increased for maximum speed)
+    const BATCH_SIZE = 50; // Process 50 emails per request (maximized for speed)
     const batchToProcess = newEmails.slice(0, BATCH_SIZE);
     const remainingEmails = newEmails.slice(BATCH_SIZE);
     
@@ -155,60 +156,112 @@ async function processEmailsBatch(emails: any[], startedAt: number): Promise<{ p
   // Determine delay and concurrency based on embedding provider
   const provider = (process.env.EMBEDDING_PROVIDER || 'local').toLowerCase();
   const isLocal = provider === 'local';
-  
-  // For Hugging Face API, process 20 at a time (maximum speed while staying within rate limits)
-  // For local, process all in parallel
-  const CONCURRENCY = isLocal ? emails.length : 20;
+  const embeddingApiKey = process.env.EMBEDDING_API_KEY;
   
   let processed = 0;
   let errors = 0;
 
-  // Process emails in parallel batches
-  for (let i = 0; i < emails.length; i += CONCURRENCY) {
-    const batch = emails.slice(i, i + CONCURRENCY);
+  // For Hugging Face, use batch API calls (much faster - one API call for multiple embeddings)
+  // For local, process individually
+  if (!isLocal && embeddingApiKey && provider === 'huggingface') {
+    // Process in batches of 20 for batch API calls (optimal batch size for HF)
+    const BATCH_SIZE = 20;
     
-    // Process this batch in parallel
-    const results = await Promise.allSettled(
-      batch.map(email => storeSentEmail(email))
-    );
-    
-    // Count successes and errors
-    for (let idx = 0; idx < results.length; idx++) {
-      const result = results[idx];
-      const email = batch[idx];
+    for (let i = 0; i < emails.length; i += BATCH_SIZE) {
+      const batch = emails.slice(i, i + BATCH_SIZE);
       
-      if (result.status === 'fulfilled') {
-        processed++;
-      } else {
-        const errorMessage = (result.reason as Error)?.message || String(result.reason);
+      try {
+        // Prepare email contexts for batch embedding
+        const { generateEmbeddingsBatchHF } = await import('@/lib/embeddings');
         
-        // Only count as error if it's not a recoverable file system error
-        const isRecoverableError = 
-          errorMessage.includes('ENOENT') ||
-          errorMessage.includes('EEXIST') ||
-          errorMessage.includes('EPERM') ||
-          errorMessage.includes('no such file or directory');
+        // Helper function to sanitize email body (same as in storage.ts)
+        const sanitizeEmailBody = (text: string, maxLength: number): string => {
+          if (!text) return '';
+          const withoutScripts = text.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ');
+          const withoutTags = withoutScripts.replace(/<\/?[^>]+>/g, ' ');
+          const normalized = withoutTags.replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim();
+          return normalized.length <= maxLength ? normalized : normalized.slice(0, maxLength);
+        };
         
-        if (!isRecoverableError) {
-          errors++;
-          console.error(`Error processing email ${email.id}:`, result.reason);
-        } else {
-          // For recoverable errors, try once more
+        const contexts = batch.map(email => {
+          const trimmedBody = sanitizeEmailBody(email.body || '', 2000);
+          return createEmailContext(email.subject, trimmedBody);
+        });
+        
+        // Generate all embeddings in one API call (much faster!)
+        const embeddings = await generateEmbeddingsBatchHF(contexts, embeddingApiKey);
+        
+        // Store emails with their embeddings
+        for (let idx = 0; idx < batch.length; idx++) {
+          const email = batch[idx];
+          const embedding = embeddings[idx] || [];
+          
           try {
-            await new Promise(resolve => setTimeout(resolve, 200));
+            const isReply = email.isReply ?? /^(re|fwd?):\s*/i.test(email.subject || '');
+            const trimmedBody = sanitizeEmailBody(email.body || '', 2000);
+            
+            const storedEmail = {
+              ...email,
+              body: trimmedBody,
+              embedding,
+              isSent: true,
+              isReply: isReply,
+            };
+            
+            // Save to database (using same logic as storeSentEmail)
+            const storedEmails = await loadStoredEmails();
+            const existing = storedEmails.find((e) => e.id === email.id);
+            
+            if (existing) {
+              Object.assign(existing, storedEmail);
+            } else {
+              storedEmails.push(storedEmail);
+            }
+            
+            await saveStoredEmails(storedEmails);
+            processed++;
+          } catch (saveError) {
+            errors++;
+            console.error(`Error saving email ${email.id}:`, saveError);
+          }
+        }
+      } catch (batchError) {
+        // If batch fails, fall back to individual processing
+        console.warn('Batch embedding failed, falling back to individual:', batchError);
+        for (const email of batch) {
+          try {
             await storeSentEmail(email);
             processed++;
-          } catch (retryError) {
+          } catch (err) {
             errors++;
-            console.error(`Error processing email ${email.id} after retry:`, retryError);
+            console.error(`Error processing email ${email.id}:`, err);
           }
         }
       }
     }
+  } else {
+    // For local or non-HF providers, process individually with high concurrency
+    const CONCURRENCY = isLocal ? emails.length : 30;
     
-    // No delay between batches - process as fast as possible
-    // Hugging Face API can handle the load, and we have retry logic for rate limits
-    // Only add minimal delay if we're hitting rate limits (which retry logic handles)
+    for (let i = 0; i < emails.length; i += CONCURRENCY) {
+      const batch = emails.slice(i, i + CONCURRENCY);
+      
+      const results = await Promise.allSettled(
+        batch.map(email => storeSentEmail(email))
+      );
+      
+      for (let idx = 0; idx < results.length; idx++) {
+        const result = results[idx];
+        const email = batch[idx];
+        
+        if (result.status === 'fulfilled') {
+          processed++;
+        } else {
+          errors++;
+          console.error(`Error processing email ${email.id}:`, result.reason);
+        }
+      }
+    }
   }
 
   return { processed, errors };

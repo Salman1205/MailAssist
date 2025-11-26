@@ -14,7 +14,7 @@ import { getUserProfile } from './gmail';
  * Get current user's email address for data scoping
  * First tries to get it from stored tokens, then falls back to Gmail API
  */
-async function getCurrentUserEmail(): Promise<string | null> {
+export async function getCurrentUserEmail(): Promise<string | null> {
   try {
     // First, try to get email from stored tokens (faster, no API call)
     if (supabase) {
@@ -316,6 +316,7 @@ export async function storeSentEmail(email: {
   // This allows the AI to learn from the user's complete writing style
   try {
     const context = createEmailContext(email.subject, trimmedBody);
+    // Use direct embedding generation (batch processing is handled at sync level)
     const embedding = await generateEmbeddingWithRetry(context);
 
     const storedEmail: StoredEmail = {

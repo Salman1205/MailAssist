@@ -31,8 +31,13 @@ export default function SyncToast({ syncing, status, processed, target, error, o
   
   if (!syncing && !error && !isComplete) return null
 
+  // When complete, use sentWithEmbeddings as the source of truth (consistent with backend)
+  // When processing, use the processed count from the job
   const effectiveTarget = target ?? status?.queued ?? null
-  const progress = effectiveTarget ? Math.min(1, Math.max(0, processed / effectiveTarget)) : (isComplete ? 1 : 0)
+  const effectiveProcessed = isComplete ? (status?.sentWithEmbeddings ?? processed) : processed
+  const progress = effectiveTarget && effectiveTarget > 0 
+    ? Math.min(1, Math.max(0, effectiveProcessed / effectiveTarget)) 
+    : (isComplete ? 1 : 0)
 
   return (
     <div className="fixed bottom-4 right-4 z-50 w-full max-w-xs sm:max-w-sm">
@@ -46,7 +51,7 @@ export default function SyncToast({ syncing, status, processed, target, error, o
               {error
                 ? error
                 : isComplete
-                ? `Successfully embedded ${processed} emails.`
+                ? `Successfully embedded ${effectiveProcessed} emails.`
                 : "We're learning your tone so drafts match how you write."}
             </p>
           </div>
@@ -66,11 +71,11 @@ export default function SyncToast({ syncing, status, processed, target, error, o
             <Progress value={progress * 100} />
             <div className="flex justify-between text-xs text-muted-foreground">
               <span>
-                {processed} embedded
-                {status?.pendingReplies !== undefined ? ` · ${status.pendingReplies} pending` : ""}
+                {effectiveProcessed} embedded
+                {status?.pendingReplies !== undefined && status.pendingReplies > 0 ? ` · ${status.pendingReplies} pending` : ""}
               </span>
               <span>
-                {effectiveTarget
+                {effectiveTarget && effectiveTarget > 0
                   ? `${Math.round(progress * 100)}% of ${effectiveTarget}`
                   : `${status?.sentWithEmbeddings ?? 0} total`}
               </span>

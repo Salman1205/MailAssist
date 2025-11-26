@@ -31,7 +31,72 @@ export async function generateEmbedding(text: string): Promise<number[]> {
 }
 
 /**
+ * Generate embeddings for multiple texts in batch (much faster than individual calls)
+ */
+export async function generateEmbeddingsBatchHF(
+  texts: string[],
+  apiKey: string
+): Promise<number[][]> {
+  const model = 'BAAI/bge-small-en-v1.5';
+  const url = `https://router.huggingface.co/hf-inference/models/${model}`;
+  
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${apiKey}`,
+  };
+
+  // Truncate and prepare texts
+  const truncatedTexts = texts.map(t => t.slice(0, 512));
+  
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s for batch
+  
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        inputs: truncatedTexts, // Send array of texts for batch processing
+        options: {
+          wait_for_model: true,
+        },
+      }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      throw new Error(`Hugging Face API error: ${response.status} ${response.statusText} - ${errorText.slice(0, 200)}`);
+    }
+
+    const embeddings = await response.json();
+    
+    // Handle batch response - should be array of arrays
+    if (Array.isArray(embeddings)) {
+      if (Array.isArray(embeddings[0]) && typeof embeddings[0][0] === 'number') {
+        return embeddings as number[][];
+      }
+      // If single array returned, wrap it
+      if (typeof embeddings[0] === 'number') {
+        return [embeddings as number[]];
+      }
+    }
+    
+    throw new Error(`Unexpected batch response format`);
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new Error('Batch request timeout');
+    }
+    throw error;
+  }
+}
+
+/**
  * Generate embedding using Hugging Face Inference API (free tier)
+ * For single embeddings, use this. For multiple, use generateEmbeddingsBatchHF
  */
 async function generateEmbeddingHuggingFace(
   text: string,
@@ -56,8 +121,8 @@ async function generateEmbeddingHuggingFace(
   const truncatedText = text.slice(0, 512);
 
   let lastError: Error | null = null;
-  const maxRetries = 2; // Reduced retries for speed (fail fast if API is down)
-  const REQUEST_TIMEOUT = 10000; // 10 seconds timeout in milliseconds
+  const maxRetries = 1; // Single retry for speed (fail fast if API is down)
+  const REQUEST_TIMEOUT = 8000; // 8 seconds timeout (faster failure detection)
   
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {

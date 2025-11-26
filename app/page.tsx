@@ -256,7 +256,9 @@ export default function Page() {
     )
   }
 
-  // Use the processed count directly from sync status (consistent source of truth)
+  // Use processed from sync status (backend calculates it correctly:
+  // - When running: uses job's processed count
+  // - When not running: uses actual sentWithEmbeddings count)
   const processedDelta = syncStatus?.processed ?? 0
   const toastTarget = syncStatus?.processing 
     ? (syncStatus.queued ?? syncTarget ?? 0)

@@ -55,9 +55,9 @@ export default function SettingsView({ status, syncing, onSync, error }: Setting
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="rounded-lg border border-border p-4">
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">Replies embedded</p>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide">Emails embedded</p>
             <p className="text-2xl font-semibold text-foreground mt-2">
-              {status?.completedReplies ?? status?.sentWithEmbeddings ?? 0}
+              {status?.sentWithEmbeddings ?? 0}
             </p>
           </div>
           <div className="rounded-lg border border-border p-4">
