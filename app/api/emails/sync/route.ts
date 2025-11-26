@@ -188,14 +188,20 @@ export async function GET() {
   try {
     const storedEmails = await loadStoredEmails();
     const sentEmails = storedEmails.filter(e => e.isSent && e.isReply && e.embedding.length > 0);
-    const pendingReplies = storedEmails.filter(e => e.isSent && e.isReply && e.embedding.length === 0).length;
     const syncState = await getSyncState();
-    
+
+    // Use syncState to determine "pending" so the UI isn't stuck if some
+    // embeddings fail and are stored without vectors.
+    const pendingFromJob =
+      syncState.status === 'running'
+        ? Math.max(0, syncState.queued - syncState.processed)
+        : 0;
+
     return NextResponse.json({
       totalStored: storedEmails.length,
       sentWithEmbeddings: sentEmails.length,
       completedReplies: sentEmails.length,
-      pendingReplies,
+      pendingReplies: pendingFromJob,
       processing: syncState.status === 'running',
       queued: syncState.queued,
       processed: syncState.processed,
