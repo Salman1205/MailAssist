@@ -28,18 +28,27 @@ export async function GET(request: NextRequest) {
     }
 
     // Exchange code for tokens
+    console.log('Exchanging authorization code for tokens...');
     const tokens = await getTokensFromCode(code);
     
+    if (!tokens || !tokens.access_token) {
+      throw new Error('Failed to get access token from OAuth provider');
+    }
+    
+    console.log('Tokens received, saving to database...');
     // Store tokens
     await saveTokens(tokens);
+    console.log('Tokens saved successfully');
 
     // Redirect to frontend with success
     const frontendUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
     return NextResponse.redirect(`${frontendUrl}?auth=success`);
   } catch (error) {
     console.error('Error in OAuth callback:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Error details:', errorMessage);
     const frontendUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-    return NextResponse.redirect(`${frontendUrl}?auth=error&message=${encodeURIComponent((error as Error).message)}`);
+    return NextResponse.redirect(`${frontendUrl}?auth=error&message=${encodeURIComponent(errorMessage)}`);
   }
 }
 

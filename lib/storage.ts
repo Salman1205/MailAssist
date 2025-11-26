@@ -429,6 +429,12 @@ export async function loadTokens(): Promise<StoredTokens | null> {
  */
 export async function saveTokens(tokens: StoredTokens) {
   if (!supabase) {
+    console.error('Cannot save tokens: Supabase client not initialized');
+    return;
+  }
+
+  if (!tokens.access_token) {
+    console.error('Cannot save tokens: no access_token provided');
     return;
   }
 
@@ -438,18 +444,22 @@ export async function saveTokens(tokens: StoredTokens) {
     if (tokens.access_token) {
       const profile = await getUserProfile(tokens);
       userEmail = profile?.emailAddress || null;
+      console.log('Fetched user email for token storage:', userEmail);
     }
   } catch (error) {
-    console.warn('Could not fetch user email when saving tokens:', error);
+    console.warn('Could not fetch user email when saving tokens (will continue without it):', error);
     // Continue without user_email - we'll get it later
   }
 
   // Delete all existing tokens (since we're replacing them)
-  await supabase.from('tokens').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+  const deleteResult = await supabase.from('tokens').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+  if (deleteResult.error) {
+    console.warn('Error deleting old tokens (continuing anyway):', deleteResult.error);
+  }
 
-  // Build insert payload - only include user_email if column exists
+  // Build insert payload
   const insertPayload: any = {
-    access_token: tokens.access_token ?? null,
+    access_token: tokens.access_token,
     refresh_token: tokens.refresh_token ?? null,
     expiry_date: tokens.expiry_date ?? null,
     token_type: tokens.token_type ?? null,
@@ -461,10 +471,15 @@ export async function saveTokens(tokens: StoredTokens) {
     insertPayload.user_email = userEmail;
   }
 
-  const { error } = await supabase.from('tokens').insert(insertPayload);
+  console.log('Saving tokens to Supabase...');
+  const { data, error } = await supabase.from('tokens').insert(insertPayload).select();
 
   if (error) {
     console.error('Error saving tokens to Supabase:', error);
+    console.error('Token payload:', { ...insertPayload, access_token: '[REDACTED]' });
+    throw error; // Re-throw so caller knows it failed
+  } else {
+    console.log('Tokens saved successfully to Supabase');
   }
 }
 
