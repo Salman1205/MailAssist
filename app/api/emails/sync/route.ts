@@ -8,17 +8,13 @@ import { getValidTokens } from '@/lib/token-refresh';
 import { fetchSentEmails } from '@/lib/gmail';
 import { loadStoredEmails, storeSentEmail, loadSyncState, saveSyncState, SyncState } from '@/lib/storage';
 
-let syncStateCache: SyncState | null = null;
-
+// Don't use in-memory cache on Vercel (serverless instances don't share memory)
+// Always read from Supabase to get the real state
 async function getSyncState(): Promise<SyncState> {
-  if (!syncStateCache) {
-    syncStateCache = await loadSyncState();
-  }
-  return syncStateCache;
+  return await loadSyncState();
 }
 
 async function setSyncState(state: SyncState) {
-  syncStateCache = state;
   await saveSyncState(state);
 }
 
@@ -69,19 +65,30 @@ export async function POST(request: NextRequest) {
     }
 
     const jobStartedAt = Date.now();
-
+    
+    // Only reset processed to 0 when starting a NEW job
+    // If a job was already running, we'd have returned earlier
     await setSyncState({
       status: 'running',
       queued: newEmails.length,
-      processed: 0,
+      processed: 0, // Reset only when starting new job
       errors: 0,
       startedAt: jobStartedAt,
       finishedAt: null,
     });
 
     // Process emails in background (don't await, return immediately)
-    processEmailsInBackground(newEmails, jobStartedAt).catch(err => {
+    processEmailsInBackground(newEmails, jobStartedAt).catch(async (err) => {
       console.error('Background email processing error:', err);
+      // On error, mark job as finished but keep whatever progress was made
+      const finalState = await getSyncState();
+      if (finalState.status === 'running' && finalState.startedAt === jobStartedAt) {
+        await setSyncState({
+          ...finalState,
+          status: 'idle',
+          finishedAt: Date.now(),
+        });
+      }
     });
 
     return NextResponse.json({
@@ -169,12 +176,14 @@ async function processEmailsInBackground(emails: any[], startedAt: number) {
     }
   }
 
+  // Keep the final processed count when finishing (don't reset to 0)
+  // This way the UI shows the actual progress even after job completes
   await setSyncState({
     status: 'idle',
-    queued: 0,
-    processed: 0,
-    errors: 0,
-    startedAt: null,
+    queued: emails.length, // Keep original queued count
+    processed, // Keep final processed count (not 0!)
+    errors,
+    startedAt,
     finishedAt: Date.now(),
   });
 
