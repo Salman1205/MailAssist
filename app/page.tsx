@@ -44,6 +44,7 @@ export default function Page() {
   const [syncBaseline, setSyncBaseline] = useState(0)
   const [syncError, setSyncError] = useState<string | null>(null)
   const [hideSyncToast, setHideSyncToast] = useState(false)
+  const [syncContinueCount, setSyncContinueCount] = useState(0) // Safety counter
 
   useEffect(() => {
     checkAuthStatus()
@@ -107,8 +108,25 @@ export default function Page() {
       setSyncTarget(data?.queued ?? maxResults)
       setSyncInProgress(true)
       await fetchSyncStatus()
+
+      // If there are remaining emails, continue syncing automatically
+      // Safety: limit to 100 continuation calls to prevent infinite loops
+      if (data?.continue && data?.remaining > 0 && syncContinueCount < 100) {
+        setSyncContinueCount((prev) => prev + 1)
+        // Wait a moment before continuing to avoid rate limits
+        setTimeout(() => {
+          startSync(maxResults).catch((err) => {
+            console.error('Error continuing sync:', err)
+            setSyncError(err.message)
+            setSyncContinueCount(0) // Reset on error
+          })
+        }, 1000)
+      } else if (!data?.continue) {
+        // Reset counter when sync completes
+        setSyncContinueCount(0)
+      }
     },
-    [isConnected, syncStatus, fetchSyncStatus]
+    [isConnected, syncStatus, fetchSyncStatus, syncTarget]
   )
 
   useEffect(() => {

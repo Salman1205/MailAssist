@@ -77,25 +77,52 @@ export async function POST(request: NextRequest) {
       finishedAt: null,
     });
 
-    // Process emails in background (don't await, return immediately)
-    processEmailsInBackground(newEmails, jobStartedAt).catch(async (err) => {
-      console.error('Background email processing error:', err);
-      // On error, mark job as finished but keep whatever progress was made
-      const finalState = await getSyncState();
-      if (finalState.status === 'running' && finalState.startedAt === jobStartedAt) {
-        await setSyncState({
-          ...finalState,
-          status: 'idle',
-          finishedAt: Date.now(),
-        });
+    // On Vercel, serverless functions have time limits (~10s free tier)
+    // Process a small batch synchronously (await it) so it completes within timeout
+    // Frontend will call sync again to continue processing remaining emails
+    const BATCH_SIZE = 5; // Process 5 emails per request to stay well within timeout
+    const batchToProcess = newEmails.slice(0, BATCH_SIZE);
+    const remainingEmails = newEmails.slice(BATCH_SIZE);
+
+    let batchProcessed = 0;
+    let batchErrors = 0;
+
+    if (batchToProcess.length > 0) {
+      // Process this batch synchronously (await it so it completes before function returns)
+      try {
+        const result = await processEmailsBatch(batchToProcess, jobStartedAt);
+        batchProcessed = result.processed;
+        batchErrors = result.errors;
+      } catch (err) {
+        console.error('Email batch processing error:', err);
+        batchErrors = batchToProcess.length;
       }
+    }
+
+    // Update state with progress
+    const currentState = await getSyncState();
+    const totalProcessed = (currentState.processed || 0) + batchProcessed;
+    const totalErrors = (currentState.errors || 0) + batchErrors;
+    const isComplete = remainingEmails.length === 0;
+
+    await setSyncState({
+      status: isComplete ? 'idle' : 'running',
+      queued: newEmails.length,
+      processed: totalProcessed,
+      errors: totalErrors,
+      startedAt: jobStartedAt,
+      finishedAt: isComplete ? Date.now() : null,
     });
 
     return NextResponse.json({
-      message: 'Email processing started in background',
+      message: isComplete 
+        ? 'Email processing complete' 
+        : `Processed ${batchProcessed} emails. ${remainingEmails.length} remaining.`,
       queued: newEmails.length,
-      total: sentEmails.length,
-      processing: true,
+      processed: totalProcessed,
+      remaining: remainingEmails.length,
+      processing: !isComplete,
+      continue: !isComplete, // Signal to frontend to call sync again
     });
   } catch (error) {
     console.error('Error syncing emails:', error);
@@ -107,7 +134,60 @@ export async function POST(request: NextRequest) {
 }
 
 /**
- * Process emails in the background with embeddings
+ * Process a small batch of emails synchronously (for Vercel timeout limits)
+ * Returns the number processed so caller can track progress
+ */
+async function processEmailsBatch(emails: any[], startedAt: number): Promise<{ processed: number; errors: number }> {
+  let processed = 0;
+  let errors = 0;
+  
+  // Determine delay based on embedding provider
+  const provider = (process.env.EMBEDDING_PROVIDER || 'local').toLowerCase();
+  const delayMs = provider === 'local' ? 100 : 500;
+
+  for (let i = 0; i < emails.length; i++) {
+    const email = emails[i];
+    
+    try {
+      await storeSentEmail(email);
+      processed++;
+    } catch (error) {
+      const errorMessage = (error as Error)?.message || String(error);
+      
+      // Only count as error if it's not a recoverable file system error
+      const isRecoverableError = 
+        errorMessage.includes('ENOENT') ||
+        errorMessage.includes('EEXIST') ||
+        errorMessage.includes('EPERM') ||
+        errorMessage.includes('no such file or directory');
+      
+      if (!isRecoverableError) {
+        errors++;
+        console.error(`Error processing email ${email.id}:`, error);
+      } else {
+        // Retry once for recoverable errors
+        try {
+          await new Promise(resolve => setTimeout(resolve, 200));
+          await storeSentEmail(email);
+          processed++;
+        } catch (retryError) {
+          errors++;
+          console.error(`Error processing email ${email.id} after retry:`, retryError);
+        }
+      }
+    }
+    
+    // Small delay between emails
+    if (i < emails.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+
+  return { processed, errors };
+}
+
+/**
+ * Process emails in the background with embeddings (legacy - kept for compatibility)
  * This runs asynchronously so the API can return immediately
  * Optimized for parallel processing with local embeddings
  */
