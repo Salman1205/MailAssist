@@ -83,9 +83,9 @@ export async function POST(request: NextRequest) {
     });
 
     // On Vercel, serverless functions have time limits (~10s free tier)
-    // Process a small batch synchronously (await it) so it completes within timeout
+    // Process a batch synchronously (await it) so it completes within timeout
     // Frontend will call sync again to continue processing remaining emails
-    const BATCH_SIZE = 5; // Process 5 emails per request to stay well within timeout
+    const BATCH_SIZE = 15; // Process 15 emails per request (increased from 5 for speed)
     const batchToProcess = newEmails.slice(0, BATCH_SIZE);
     const remainingEmails = newEmails.slice(BATCH_SIZE);
     
@@ -141,52 +141,67 @@ export async function POST(request: NextRequest) {
 }
 
 /**
- * Process a small batch of emails synchronously (for Vercel timeout limits)
+ * Process a batch of emails with parallel processing (for speed)
  * Returns the number processed so caller can track progress
  */
 async function processEmailsBatch(emails: any[], startedAt: number): Promise<{ processed: number; errors: number }> {
+  // Determine delay and concurrency based on embedding provider
+  const provider = (process.env.EMBEDDING_PROVIDER || 'local').toLowerCase();
+  const isLocal = provider === 'local';
+  
+  // For Hugging Face API, process 3 at a time to avoid rate limits
+  // For local, process all in parallel
+  const CONCURRENCY = isLocal ? emails.length : 3;
+  
   let processed = 0;
   let errors = 0;
-  
-  // Determine delay based on embedding provider
-  const provider = (process.env.EMBEDDING_PROVIDER || 'local').toLowerCase();
-  const delayMs = provider === 'local' ? 100 : 500;
 
-  for (let i = 0; i < emails.length; i++) {
-    const email = emails[i];
+  // Process emails in parallel batches
+  for (let i = 0; i < emails.length; i += CONCURRENCY) {
+    const batch = emails.slice(i, i + CONCURRENCY);
     
-    try {
-      await storeSentEmail(email);
-      processed++;
-    } catch (error) {
-      const errorMessage = (error as Error)?.message || String(error);
+    // Process this batch in parallel
+    const results = await Promise.allSettled(
+      batch.map(email => storeSentEmail(email))
+    );
+    
+    // Count successes and errors
+    for (let idx = 0; idx < results.length; idx++) {
+      const result = results[idx];
+      const email = batch[idx];
       
-      // Only count as error if it's not a recoverable file system error
-      const isRecoverableError = 
-        errorMessage.includes('ENOENT') ||
-        errorMessage.includes('EEXIST') ||
-        errorMessage.includes('EPERM') ||
-        errorMessage.includes('no such file or directory');
-      
-      if (!isRecoverableError) {
-        errors++;
-        console.error(`Error processing email ${email.id}:`, error);
+      if (result.status === 'fulfilled') {
+        processed++;
       } else {
-        // Retry once for recoverable errors
-        try {
-          await new Promise(resolve => setTimeout(resolve, 200));
-          await storeSentEmail(email);
-          processed++;
-        } catch (retryError) {
+        const errorMessage = (result.reason as Error)?.message || String(result.reason);
+        
+        // Only count as error if it's not a recoverable file system error
+        const isRecoverableError = 
+          errorMessage.includes('ENOENT') ||
+          errorMessage.includes('EEXIST') ||
+          errorMessage.includes('EPERM') ||
+          errorMessage.includes('no such file or directory');
+        
+        if (!isRecoverableError) {
           errors++;
-          console.error(`Error processing email ${email.id} after retry:`, retryError);
+          console.error(`Error processing email ${email.id}:`, result.reason);
+        } else {
+          // For recoverable errors, try once more
+          try {
+            await new Promise(resolve => setTimeout(resolve, 200));
+            await storeSentEmail(email);
+            processed++;
+          } catch (retryError) {
+            errors++;
+            console.error(`Error processing email ${email.id} after retry:`, retryError);
+          }
         }
       }
     }
     
-    // Small delay between emails
-    if (i < emails.length - 1) {
-      await new Promise(resolve => setTimeout(resolve, delayMs));
+    // Small delay between parallel batches (only for API providers to respect rate limits)
+    if (!isLocal && i + CONCURRENCY < emails.length) {
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
   }
 
