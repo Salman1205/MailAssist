@@ -7,6 +7,25 @@ import crypto from 'crypto';
 import { generateEmbedding } from './embeddings';
 import { createEmailContext } from './similarity';
 import { supabase } from './supabase';
+import { getValidTokens } from './token-refresh';
+import { getUserProfile } from './gmail';
+
+/**
+ * Get current user's email address for data scoping
+ */
+async function getCurrentUserEmail(): Promise<string | null> {
+  try {
+    const tokens = await getValidTokens();
+    if (!tokens || !tokens.access_token) {
+      return null;
+    }
+    const profile = await getUserProfile(tokens);
+    return profile?.emailAddress || null;
+  } catch (error) {
+    console.error('Error getting user email:', error);
+    return null;
+  }
+}
 
 export interface StoredEmail {
   id: string;
@@ -68,10 +87,16 @@ export async function loadStoredEmails(): Promise<StoredEmail[]> {
     return [];
   }
 
+  const userEmail = await getCurrentUserEmail();
+  if (!userEmail) {
+    return [];
+  }
+
   const { data, error } = await supabase
     .from('emails')
     .select('*')
     .eq('is_sent', true)
+    .eq('user_email', userEmail)
     .order('date', { ascending: false });
 
   if (error) {
@@ -103,6 +128,12 @@ export async function saveStoredEmails(emails: StoredEmail[], retries = 1) {
     return;
   }
 
+  const userEmail = await getCurrentUserEmail();
+  if (!userEmail) {
+    console.error('Cannot save emails: no user email');
+    return;
+  }
+
   // Upsert each email by id
   for (const email of emails) {
     const { error } = await supabase
@@ -110,6 +141,7 @@ export async function saveStoredEmails(emails: StoredEmail[], retries = 1) {
       .upsert(
         {
           id: email.id,
+          user_email: userEmail,
           thread_id: email.threadId ?? null,
           subject: email.subject,
           from_address: email.from,
@@ -135,9 +167,15 @@ export async function loadDrafts(): Promise<StoredDraft[]> {
     return [];
   }
 
+  const userEmail = await getCurrentUserEmail();
+  if (!userEmail) {
+    return [];
+  }
+
   const { data, error } = await supabase
     .from('drafts')
     .select('*')
+    .eq('user_email', userEmail)
     .order('created_at', { ascending: false });
 
   if (error) {
@@ -162,8 +200,15 @@ export async function saveDrafts(drafts: StoredDraft[]) {
     return;
   }
 
+  const userEmail = await getCurrentUserEmail();
+  if (!userEmail) {
+    console.error('Cannot save drafts: no user email');
+    return;
+  }
+
   const payload = drafts.map((draft) => ({
     id: draft.id,
+    user_email: userEmail,
     email_id: draft.emailId,
     subject: draft.subject,
     from: draft.from,
@@ -320,9 +365,15 @@ export async function loadTokens(): Promise<StoredTokens | null> {
     return null;
   }
 
+  const userEmail = await getCurrentUserEmail();
+  if (!userEmail) {
+    return null;
+  }
+
   const { data, error } = await supabase
     .from('tokens')
     .select('*')
+    .eq('user_email', userEmail)
     .order('updated_at', { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -355,7 +406,17 @@ export async function saveTokens(tokens: StoredTokens) {
     return;
   }
 
+  const userEmail = await getCurrentUserEmail();
+  if (!userEmail) {
+    console.error('Cannot save tokens: no user email');
+    return;
+  }
+
+  // Delete existing tokens for this user first, then insert new ones
+  await supabase.from('tokens').delete().eq('user_email', userEmail);
+
   const { error } = await supabase.from('tokens').insert({
+    user_email: userEmail,
     access_token: tokens.access_token ?? null,
     refresh_token: tokens.refresh_token ?? null,
     expiry_date: tokens.expiry_date ?? null,
@@ -376,7 +437,12 @@ export async function clearTokens() {
     return;
   }
 
-  const { error } = await supabase.from('tokens').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+  const userEmail = await getCurrentUserEmail();
+  if (!userEmail) {
+    return;
+  }
+
+  const { error } = await supabase.from('tokens').delete().eq('user_email', userEmail);
   if (error) {
     console.error('Error clearing tokens from Supabase:', error);
   }
@@ -391,10 +457,15 @@ export async function clearAllData() {
     return;
   }
 
+  const userEmail = await getCurrentUserEmail();
+  if (!userEmail) {
+    return;
+  }
+
   const tables = ['emails', 'drafts', 'sync_state', 'tokens'];
 
   for (const table of tables) {
-    const { error } = await supabase.from(table).delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    const { error } = await supabase.from(table).delete().eq('user_email', userEmail);
     if (error) {
       console.error(`Error clearing table ${table} in Supabase:`, error);
     }
@@ -438,9 +509,15 @@ export async function loadSyncState(): Promise<SyncState> {
     return { ...defaultSyncState };
   }
 
+  const userEmail = await getCurrentUserEmail();
+  if (!userEmail) {
+    return { ...defaultSyncState };
+  }
+
   const { data, error } = await supabase
     .from('sync_state')
     .select('*')
+    .eq('user_email', userEmail)
     .limit(1)
     .maybeSingle();
 
@@ -468,13 +545,21 @@ export async function saveSyncState(state: SyncState) {
     return;
   }
 
+  const userEmail = await getCurrentUserEmail();
+  if (!userEmail) {
+    console.error('Cannot save sync state: no user email');
+    return;
+  }
+
   const { data, error } = await supabase
     .from('sync_state')
     .select('id')
+    .eq('user_email', userEmail)
     .limit(1)
     .maybeSingle();
 
   const payload = {
+    user_email: userEmail,
     status: state.status,
     queued: state.queued,
     processed: state.processed,

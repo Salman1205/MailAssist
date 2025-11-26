@@ -15,8 +15,6 @@ export async function generateEmbedding(text: string): Promise<number[]> {
   const embeddingEnvKey = process.env.EMBEDDING_API_KEY;
   const provider = (process.env.EMBEDDING_PROVIDER || 'local').toLowerCase();
 
-  console.log(`[EMBEDDING] Provider: ${provider}, Has API Key: ${!!embeddingEnvKey}, Has OpenAI Key: ${!!openAiKey}`);
-
   if (provider === 'openai') {
     const key = openAiKey || embeddingEnvKey;
     if (!key) {
@@ -40,7 +38,6 @@ async function generateEmbeddingHuggingFace(
   apiKey?: string
 ): Promise<number[]> {
   // Use BAAI/bge-small-en-v1.5 - works reliably with router API
-  // sentence-transformers/all-MiniLM-L6-v2 has pipeline routing issues on router API
   const model = 'BAAI/bge-small-en-v1.5';
   
   if (!apiKey) {
@@ -52,7 +49,7 @@ async function generateEmbeddingHuggingFace(
     'Authorization': `Bearer ${apiKey}`,
   };
 
-  // Use the router models endpoint (not pipeline endpoint - that's 404)
+  // Use the router models endpoint
   const url = `https://router.huggingface.co/hf-inference/models/${model}`;
   
   // Truncate text to reasonable length (Hugging Face has limits)
@@ -60,100 +57,102 @@ async function generateEmbeddingHuggingFace(
 
   let lastError: Error | null = null;
   const maxRetries = 3;
-  
-  console.log(`[HF Embedding] Starting embedding generation for text (${truncatedText.length} chars), model: ${model}`);
+  const REQUEST_TIMEOUT = 15000; // 15 seconds timeout per request
   
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      console.log(`[HF Embedding] Attempt ${attempt}/${maxRetries} - Calling ${url}`);
+      // Create AbortController for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
       
-      const response = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          inputs: truncatedText,
-          options: {
-            wait_for_model: true,
-          },
-        }),
-      });
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            inputs: truncatedText,
+            options: {
+              wait_for_model: true,
+            },
+          }),
+          signal: controller.signal,
+        });
 
-      console.log(`[HF Embedding] Response status: ${response.status} ${response.statusText}`);
+        clearTimeout(timeoutId);
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`[HF Embedding] Error response body:`, errorText.slice(0, 500));
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => '');
+          let errorMessage = `Hugging Face API error: ${response.status} ${response.statusText}`;
+          
+          try {
+            const errorJson = JSON.parse(errorText);
+            errorMessage = errorJson.error || errorJson.message || errorMessage;
+          } catch {
+            if (errorText) {
+              errorMessage = `${errorMessage} - ${errorText.slice(0, 200)}`;
+            }
+          }
+          
+          // Handle rate limiting (429) or model loading (503) with retry
+          if (response.status === 429 || response.status === 503) {
+            const waitTime = Math.min(attempt * 1500, 5000); // 1.5s, 3s, 4.5s (max 5s)
+            if (attempt < maxRetries) {
+              await new Promise(resolve => setTimeout(resolve, waitTime));
+              continue; // Retry
+            }
+          }
+          
+          throw new Error(errorMessage);
+        }
+
+        const embedding = await response.json();
         
-        let errorMessage = `Hugging Face API error: ${response.status} ${response.statusText}`;
-        
-        try {
-          const errorJson = JSON.parse(errorText);
-          errorMessage = errorJson.error || errorJson.message || errorMessage;
-          console.error(`[HF Embedding] Parsed error:`, errorJson);
-        } catch {
-          // If not JSON, use the text as-is
-          if (errorText) {
-            errorMessage = `${errorMessage} - ${errorText.slice(0, 200)}`;
+        // Handle different response formats
+        if (Array.isArray(embedding)) {
+          if (Array.isArray(embedding[0])) {
+            return embedding[0] as number[];
+          }
+          if (typeof embedding[0] === 'number') {
+            return embedding as number[];
           }
         }
         
-        // Handle rate limiting (429) or model loading (503) with retry
-        if (response.status === 429 || response.status === 503) {
-          const waitTime = attempt * 2000; // 2s, 4s, 6s
-          console.warn(`[HF Embedding] Rate limit/model loading (${response.status}), retrying in ${waitTime}ms...`);
-          await new Promise(resolve => setTimeout(resolve, waitTime));
-          continue; // Retry
+        if (embedding && Array.isArray(embedding.embedding)) {
+          return embedding.embedding as number[];
         }
         
-        throw new Error(errorMessage);
-      }
-
-      const embedding = await response.json();
-      console.log(`[HF Embedding] Success! Response type:`, Array.isArray(embedding) ? 'array' : typeof embedding, 'Length:', Array.isArray(embedding) ? embedding.length : 'N/A');
-      
-      // Handle different response formats
-      if (Array.isArray(embedding)) {
-        // If it's an array of arrays (batch response), take first
-        if (Array.isArray(embedding[0])) {
-          return embedding[0] as number[];
+        throw new Error(`Unexpected response format`);
+      } catch (fetchError: any) {
+        clearTimeout(timeoutId);
+        if (fetchError.name === 'AbortError') {
+          throw new Error('Request timeout after 15 seconds');
         }
-        // If it's a single array, return it
-        if (typeof embedding[0] === 'number') {
-          return embedding as number[];
-        }
+        throw fetchError;
       }
-      
-      // Sometimes HF returns an object with the embedding
-      if (embedding && Array.isArray(embedding.embedding)) {
-        return embedding.embedding as number[];
-      }
-      
-      throw new Error(`Unexpected Hugging Face response format: ${JSON.stringify(embedding).slice(0, 100)}`);
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
       
-      // Don't retry on certain errors (auth, bad request)
+      // Don't retry on certain errors (auth, bad request, timeout on last attempt)
       if (error instanceof Error && (
         error.message.includes('401') || 
         error.message.includes('403') ||
-        error.message.includes('400')
+        error.message.includes('400') ||
+        (error.message.includes('timeout') && attempt === maxRetries)
       )) {
         throw lastError;
       }
       
-      // Wait before retrying (except on last attempt)
+      // Exponential backoff with jitter for retries
       if (attempt < maxRetries) {
-        const waitTime = attempt * 1000; // 1s, 2s, 3s
-        console.warn(`[HF Embedding] Attempt ${attempt} failed:`, lastError.message, `Retrying in ${waitTime}ms...`);
+        const baseDelay = Math.min(1000 * Math.pow(1.5, attempt - 1), 3000); // 1s, 1.5s, 2.25s (max 3s)
+        const jitter = Math.random() * 500; // Add up to 500ms jitter
+        const waitTime = baseDelay + jitter;
         await new Promise(resolve => setTimeout(resolve, waitTime));
-      } else {
-        console.error(`[HF Embedding] All ${maxRetries} attempts failed. Last error:`, lastError);
       }
     }
   }
   
   // All retries failed
-  console.error(`[HF Embedding] FAILED after ${maxRetries} attempts. Error:`, lastError?.message || lastError);
   throw lastError || new Error('Failed to generate embedding with Hugging Face');
 }
 
