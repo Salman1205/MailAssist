@@ -55,6 +55,61 @@ export function getGmailClient(tokens: { access_token?: string | null; refresh_t
   return google.gmail({ version: 'v1', auth: oauth2Client });
 }
 
+interface SendReplyOptions {
+  to: string;
+  subject: string;
+  body: string;
+  threadId?: string;
+  inReplyTo?: string;
+  references?: string;
+  from?: string;
+}
+
+/**
+ * Send a reply email through Gmail
+ */
+export async function sendReplyMessage(
+  tokens: { access_token?: string | null; refresh_token?: string | null },
+  options: SendReplyOptions
+) {
+  const gmail = getGmailClient(tokens);
+  const {
+    to,
+    subject,
+    body,
+    threadId,
+    inReplyTo,
+    references,
+    from,
+  } = options;
+
+  const headers = [
+    `To: ${to}`,
+    from ? `From: ${from}` : null,
+    `Subject: ${subject}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/plain; charset="UTF-8"',
+    inReplyTo ? `In-Reply-To: ${inReplyTo}` : null,
+    references ? `References: ${references}` : null,
+  ]
+    .filter(Boolean)
+    .join('\r\n');
+
+  const normalizedBody = body.replace(/\r?\n/g, '\r\n');
+  const message = `${headers}\r\n\r\n${normalizedBody}`;
+  const encodedMessage = encodeBase64Url(message);
+
+  const response = await gmail.users.messages.send({
+    userId: 'me',
+    requestBody: {
+      raw: encodedMessage,
+      threadId,
+    },
+  });
+
+  return response.data;
+}
+
 /**
  * Fetch latest inbox emails
  */
@@ -185,6 +240,7 @@ function parseEmailMessage(message: any) {
   const inReplyTo = getHeader('in-reply-to');
   const references = getHeader('references');
   const subject = getHeader('subject');
+  const messageIdHeader = getHeader('message-id');
   const isReply = Boolean(
     inReplyTo || 
     references || 
@@ -194,6 +250,7 @@ function parseEmailMessage(message: any) {
   return {
     id: message.id,
     threadId: message.threadId,
+    messageId: messageIdHeader,
     snippet: message.snippet || '',
     subject,
     from: getHeader('from'),
@@ -203,6 +260,14 @@ function parseEmailMessage(message: any) {
     labels: message.labelIds || [],
     isReply,
   };
+}
+
+function encodeBase64Url(input: string) {
+  return Buffer.from(input)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
 }
 
 

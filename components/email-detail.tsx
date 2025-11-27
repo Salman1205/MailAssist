@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
+import { useToast } from "@/components/ui/use-toast"
 
 interface EmailDetailProps {
   emailId: string
@@ -25,8 +26,10 @@ export default function EmailDetail({ emailId, onDraftGenerated }: EmailDetailPr
   const [showDraft, setShowDraft] = useState(false)
   const [draftText, setDraftText] = useState("")
   const [generating, setGenerating] = useState(false)
+  const [sending, setSending] = useState(false)
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const { toast } = useToast()
 
   useEffect(() => {
     if (emailId) {
@@ -100,6 +103,48 @@ export default function EmailDetail({ emailId, onDraftGenerated }: EmailDetailPr
 
   const handleRegenerate = async () => {
     await handleGenerateDraft()
+  }
+
+  const handleSendReply = async () => {
+    if (!emailId) return
+
+    if (!draftText.trim()) {
+      setError("Draft is empty. Please edit it before sending.")
+      return
+    }
+
+    try {
+      setSending(true)
+      setError(null)
+      const response = await fetch(`/api/emails/${emailId}/reply`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ draftText }),
+      })
+
+      const data = await response.json().catch(() => ({}))
+
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.error || "Failed to send reply")
+      }
+
+      toast({
+        title: "Reply sent",
+        description: "Your draft was delivered via Gmail.",
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to send reply"
+      setError(message)
+      toast({
+        title: "Couldn't send reply",
+        description: message,
+        variant: "destructive",
+      })
+    } finally {
+      setSending(false)
+    }
   }
 
   if (loading) {
@@ -199,21 +244,30 @@ export default function EmailDetail({ emailId, onDraftGenerated }: EmailDetailPr
               />
             </div>
 
-            <div className="flex gap-3">
+            <div className="flex flex-col gap-3">
               <Button
-                onClick={handleCopy}
-                variant="outline"
-                className="flex-1 rounded-lg h-10 border-border text-foreground hover:bg-secondary bg-transparent"
+                onClick={handleSendReply}
+                disabled={sending}
+                className="rounded-lg h-10 bg-primary text-primary-foreground hover:bg-primary/90"
               >
-                {copied ? "✓ Copied!" : "Copy Draft"}
+                {sending ? "Sending..." : "Send Reply"}
               </Button>
-              <Button
-                onClick={handleRegenerate}
-                variant="outline"
-                className="flex-1 rounded-lg h-10 border-border text-foreground hover:bg-secondary bg-transparent"
-              >
-                Regenerate
-              </Button>
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <Button
+                  onClick={handleCopy}
+                  variant="outline"
+                  className="flex-1 rounded-lg h-10 border-border text-foreground hover:bg-secondary bg-transparent"
+                >
+                  {copied ? "✓ Copied!" : "Copy Draft"}
+                </Button>
+                <Button
+                  onClick={handleRegenerate}
+                  variant="outline"
+                  className="flex-1 rounded-lg h-10 border-border text-foreground hover:bg-secondary bg-transparent"
+                >
+                  Regenerate
+                </Button>
+              </div>
             </div>
           </div>
         )}
