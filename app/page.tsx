@@ -269,18 +269,26 @@ export default function Page() {
     )
   }
 
-  // Use processed from sync status (backend calculates it correctly:
-  // - When running: uses job's processed count
-  // - When not running: uses actual sentWithEmbeddings count)
-  const processedDelta = syncStatus?.processed ?? 0
-  const toastTarget = syncStatus?.processing 
-    ? (syncStatus.queued ?? syncTarget ?? 0)
-    : (syncStatus?.sentWithEmbeddings ?? syncTarget ?? 0)
+  const embeddedCount = syncStatus?.sentWithEmbeddings ?? 0
+  const pendingCount = syncStatus?.pendingReplies ?? 0
+  const processedDisplay = embeddedCount
+  const toastTarget = (() => {
+    if (pendingCount > 0) {
+      return embeddedCount + pendingCount
+    }
+    if (syncStatus?.queued && syncStatus.queued > 0) {
+      return syncStatus.queued
+    }
+    if (syncTarget && syncTarget > 0) {
+      return syncTarget
+    }
+    return embeddedCount > 0 ? embeddedCount : null
+  })()
   
   // Check if sync is complete (not processing and no pending emails)
   const isSyncComplete = !syncStatus?.processing && !syncInProgress && 
-    syncStatus?.pendingReplies === 0 && 
-    processedDelta > 0 &&
+    pendingCount === 0 && 
+    processedDisplay > 0 &&
     !syncError
   
   // Auto-hide toast after 3 seconds when sync completes
@@ -327,7 +335,7 @@ export default function Page() {
         <SyncToast
           syncing={syncInProgress}
           status={syncStatus}
-          processed={processedDelta}
+          processed={processedDisplay}
           target={toastTarget}
           error={syncError}
           onDismiss={() => setHideSyncToast(true)}

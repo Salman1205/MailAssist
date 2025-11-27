@@ -34,7 +34,7 @@ export default function SyncToast({ syncing, status, processed, target, error, o
   // When complete, use sentWithEmbeddings as the source of truth (consistent with backend)
   // When processing, use the processed count from the job
   const effectiveTarget = target ?? status?.queued ?? null
-  const effectiveProcessed = isComplete ? (status?.sentWithEmbeddings ?? processed) : processed
+  const effectiveProcessed = processed
   const progress = effectiveTarget && effectiveTarget > 0 
     ? Math.min(1, Math.max(0, effectiveProcessed / effectiveTarget)) 
     : (isComplete ? 1 : 0)
