@@ -4,10 +4,12 @@ import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { useToast } from "@/components/ui/use-toast"
+import { ArrowLeft } from "lucide-react"
 
 interface EmailDetailProps {
   emailId: string
   onDraftGenerated?: () => void
+  onBack?: () => void
 }
 
 interface Email {
@@ -20,7 +22,7 @@ interface Email {
   snippet?: string
 }
 
-export default function EmailDetail({ emailId, onDraftGenerated }: EmailDetailProps) {
+export default function EmailDetail({ emailId, onDraftGenerated, onBack }: EmailDetailProps) {
   const [email, setEmail] = useState<Email | null>(null)
   const [loading, setLoading] = useState(true)
   const [showDraft, setShowDraft] = useState(false)
@@ -183,6 +185,17 @@ export default function EmailDetail({ emailId, onDraftGenerated }: EmailDetailPr
   if (error && !email) {
     return (
       <div className="p-6 flex flex-col items-center justify-center space-y-2">
+        {onBack && (
+          <Button
+            onClick={onBack}
+            variant="ghost"
+            size="sm"
+            className="md:hidden self-start -mt-2 -ml-2"
+          >
+            <ArrowLeft className="w-4 h-4 mr-1" />
+            Back to inbox
+          </Button>
+        )}
         <div className="text-sm text-destructive">{error}</div>
         <button
           onClick={fetchEmail}
@@ -212,6 +225,19 @@ export default function EmailDetail({ emailId, onDraftGenerated }: EmailDetailPr
 
   return (
     <div className="p-6 space-y-6 max-w-3xl h-full">
+      {onBack && (
+        <div className="md:hidden">
+          <Button
+            onClick={onBack}
+            variant="ghost"
+            size="sm"
+            className="-ml-2 text-muted-foreground"
+          >
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back to inbox
+          </Button>
+        </div>
+      )}
       <Card className="border border-border p-6 space-y-4 overflow-hidden">
         <div>
           <h2 className="text-2xl font-semibold text-foreground">

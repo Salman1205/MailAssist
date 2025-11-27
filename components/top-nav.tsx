@@ -51,35 +51,39 @@ export default function TopNav({ isConnected, userProfile, onLogout }: TopNavPro
         )}
 
         {isConnected && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-secondary transition-colors">
-              <div className="text-right">
-                <div className="text-sm font-medium text-foreground">
-                  {userProfile?.name || "Connected"}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-secondary transition-colors">
+                <div className="hidden text-right sm:block">
+                  <div className="text-sm font-medium text-foreground">
+                    {userProfile?.name || "Connected"}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {userProfile?.email || "Loading profile..."}
+                  </div>
                 </div>
-                <div className="text-xs text-muted-foreground">
-                  {userProfile?.email || "Loading profile..."}
-                </div>
-              </div>
-              <Avatar className="h-8 w-8">
-                {userProfile?.picture ? (
-                  <img src={userProfile.picture} alt={userProfile.name || "User"} className="rounded-full" />
-                ) : (
-                  <AvatarFallback className="bg-primary text-primary-foreground text-xs font-medium">
-                    {initials}
-                  </AvatarFallback>
-                )}
-              </Avatar>
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
-            <DropdownMenuItem onClick={onLogout} className="text-destructive">
-              Logout
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
+                <Avatar className="h-9 w-9">
+                  {userProfile?.picture ? (
+                    <img src={userProfile.picture} alt={userProfile.name || "User"} className="rounded-full" />
+                  ) : (
+                    <AvatarFallback className="bg-primary text-primary-foreground text-xs font-medium">
+                      {initials}
+                    </AvatarFallback>
+                  )}
+                </Avatar>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48 sm:w-56">
+              <DropdownMenuItem className="block sm:hidden text-left">
+                <p className="text-sm font-medium text-foreground">{userProfile?.name || "Connected"}</p>
+                <p className="text-xs text-muted-foreground">{userProfile?.email || "Loading profile..."}</p>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={onLogout} className="text-destructive">
+                Logout
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
     </header>
   )

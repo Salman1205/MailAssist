@@ -30,7 +30,11 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
 
       <div className={`flex-1 overflow-y-auto ${showDetail ? "flex" : "hidden md:flex"}`}>
         {selectedEmail ? (
-          <EmailDetail emailId={selectedEmail} onDraftGenerated={onDraftGenerated} />
+          <EmailDetail
+            emailId={selectedEmail}
+            onDraftGenerated={onDraftGenerated}
+            onBack={() => onSelectEmail(null)}
+          />
         ) : (
           <div className="flex items-center justify-center md:justify-start h-full px-6 md:pl-48 py-10">
             <div className="text-center md:text-left space-y-4 max-w-md">
