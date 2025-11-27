@@ -28,8 +28,18 @@ export default function EmailDetail({ emailId, onDraftGenerated }: EmailDetailPr
   const [generating, setGenerating] = useState(false)
   const [sending, setSending] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [sendSuccess, setSendSuccess] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const { toast } = useToast()
+  const [sendResetTimer, setSendResetTimer] = useState<NodeJS.Timeout | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (sendResetTimer) {
+        clearTimeout(sendResetTimer)
+      }
+    }
+  }, [sendResetTimer])
 
   useEffect(() => {
     if (emailId) {
@@ -113,6 +123,8 @@ export default function EmailDetail({ emailId, onDraftGenerated }: EmailDetailPr
       return
     }
 
+    setSendSuccess(false)
+
     try {
       setSending(true)
       setError(null)
@@ -130,6 +142,16 @@ export default function EmailDetail({ emailId, onDraftGenerated }: EmailDetailPr
         throw new Error(data?.error || "Failed to send reply")
       }
 
+      setSendSuccess(true)
+      if (sendResetTimer) {
+        clearTimeout(sendResetTimer)
+      }
+      setSendResetTimer(
+        setTimeout(() => {
+          setSendSuccess(false)
+          setSendResetTimer(null)
+        }, 3000)
+      )
       toast({
         title: "Reply sent",
         description: "Your draft was delivered via Gmail.",
@@ -137,6 +159,7 @@ export default function EmailDetail({ emailId, onDraftGenerated }: EmailDetailPr
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to send reply"
       setError(message)
+      setSendSuccess(false)
       toast({
         title: "Couldn't send reply",
         description: message,
@@ -247,10 +270,10 @@ export default function EmailDetail({ emailId, onDraftGenerated }: EmailDetailPr
             <div className="flex flex-col gap-3">
               <Button
                 onClick={handleSendReply}
-                disabled={sending}
+                disabled={sending || sendSuccess}
                 className="rounded-lg h-10 bg-primary text-primary-foreground hover:bg-primary/90"
               >
-                {sending ? "Sending..." : "Send Reply"}
+                {sendSuccess ? "Reply sent" : sending ? "Sending..." : "Send Reply"}
               </Button>
               <div className="flex flex-col gap-3 sm:flex-row">
                 <Button
