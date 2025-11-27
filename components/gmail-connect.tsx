@@ -31,8 +31,8 @@ export default function GmailConnect({ onConnect }: GmailConnectProps) {
   }
 
   return (
-    <div className="min-h-screen w-full bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 flex flex-col items-center justify-start md:justify-center px-4 py-10 overflow-y-auto md:overflow-visible">
-      <div className="max-w-2xl w-full space-y-12 bg-card/95 border border-border rounded-3xl p-8 md:p-12 shadow-2xl">
+    <div className="min-h-screen w-full bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 flex flex-col items-stretch md:items-center justify-start md:justify-center px-4 py-10 md:overflow-visible">
+      <div className="max-w-2xl w-full space-y-12 bg-card/95 border border-border rounded-3xl p-8 md:p-12 shadow-2xl overflow-y-auto max-h-[90vh] md:max-h-none">
         {/* Header section */}
         <div className="space-y-4 text-left">
           <Logo size="large" showText={true} />
