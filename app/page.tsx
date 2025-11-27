@@ -149,8 +149,10 @@ export default function Page() {
     }
   }, [isConnected, hasAutoSynced, fetchSyncStatus, startSync])
 
+  const shouldPoll = syncInProgress || (syncStatus?.processing ?? false)
+
   useEffect(() => {
-    if (!syncInProgress) return
+    if (!shouldPoll) return
 
     const interval = setInterval(() => {
       fetchSyncStatus()
@@ -159,7 +161,18 @@ export default function Page() {
     return () => {
       clearInterval(interval)
     }
-  }, [syncInProgress, fetchSyncStatus])
+  }, [shouldPoll, fetchSyncStatus])
+
+  useEffect(() => {
+    if (!isConnected) return
+    if (syncStatus?.processing && !syncInProgress) {
+      setHideSyncToast(false)
+      startSync(500).catch((err) => {
+        console.error("Error resuming sync:", err)
+        setSyncError(err instanceof Error ? err.message : "Failed to resume sync")
+      })
+    }
+  }, [isConnected, syncStatus?.processing, syncInProgress, startSync])
 
   const checkAuthStatus = async () => {
     try {
