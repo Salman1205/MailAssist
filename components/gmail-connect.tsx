@@ -34,14 +34,14 @@ export default function GmailConnect({ onConnect }: GmailConnectProps) {
     <div className="min-h-screen w-full bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 flex flex-col items-center justify-center px-4 py-10">
       <div className="max-w-2xl w-full space-y-12 bg-card/95 border border-border rounded-3xl p-8 md:p-12 shadow-2xl">
         {/* Header section */}
-        <div className="space-y-4 text-center md:text-left">
+        <div className="space-y-4 text-left">
           <Logo size="large" showText={true} />
           <h1 className="text-3xl md:text-5xl font-bold text-foreground leading-tight">
             Write emails that sound
             <br className="hidden md:block" />
             like you
           </h1>
-          <p className="text-base md:text-lg text-muted-foreground max-w-xl leading-relaxed mx-auto md:mx-0">
+          <p className="text-base md:text-lg text-muted-foreground max-w-xl leading-relaxed">
             Mail Assistant learns your writing style and email habits to generate personalized drafts that match how you
             naturally end conversations. Work faster while staying authentic.
           </p>
@@ -49,8 +49,8 @@ export default function GmailConnect({ onConnect }: GmailConnectProps) {
 
         {/* Features grid */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="space-y-3 text-center md:text-left">
-            <div className="mx-auto md:mx-0 w-12 h-12 rounded-lg bg-primary/15 dark:bg-primary/20 flex items-center justify-center">
+          <div className="space-y-3 text-left">
+            <div className="w-12 h-12 rounded-lg bg-primary/15 dark:bg-primary/20 flex items-center justify-center">
               <svg
                 className="w-6 h-6 text-primary"
                 viewBox="0 0 24 24"
@@ -67,8 +67,8 @@ export default function GmailConnect({ onConnect }: GmailConnectProps) {
             </p>
           </div>
 
-          <div className="space-y-3 text-center md:text-left">
-            <div className="mx-auto md:mx-0 w-12 h-12 rounded-lg bg-primary/15 dark:bg-primary/20 flex items-center justify-center">
+          <div className="space-y-3 text-left">
+            <div className="w-12 h-12 rounded-lg bg-primary/15 dark:bg-primary/20 flex items-center justify-center">
               <svg
                 className="w-6 h-6 text-primary"
                 viewBox="0 0 24 24"
@@ -85,8 +85,8 @@ export default function GmailConnect({ onConnect }: GmailConnectProps) {
             </p>
           </div>
 
-          <div className="space-y-3 text-center md:text-left">
-            <div className="mx-auto md:mx-0 w-12 h-12 rounded-lg bg-primary/15 dark:bg-primary/20 flex items-center justify-center">
+          <div className="space-y-3 text-left">
+            <div className="w-12 h-12 rounded-lg bg-primary/15 dark:bg-primary/20 flex items-center justify-center">
               <svg
                 className="w-6 h-6 text-primary"
                 viewBox="0 0 24 24"
@@ -104,7 +104,7 @@ export default function GmailConnect({ onConnect }: GmailConnectProps) {
         </div>
 
         {/* CTA Button */}
-        <div>
+        <div className="text-left">
           <Button
             onClick={handleConnect}
             disabled={connecting}
@@ -118,7 +118,7 @@ export default function GmailConnect({ onConnect }: GmailConnectProps) {
             </svg>
             Connect Gmail Account
           </Button>
-          <p className="text-xs text-muted-foreground text-center mt-4">No credit card required. Get started in seconds.</p>
+          <p className="text-xs text-muted-foreground mt-4">No credit card required. Get started in seconds.</p>
         </div>
       </div>
     </div>
