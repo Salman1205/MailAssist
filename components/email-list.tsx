@@ -48,10 +48,11 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
       if (viewType === "sent") {
         url = `/api/emails?type=sent&maxResults=${newLimit}`
       } else if (viewType === "spam") {
-        // Use Gmail search query to only retrieve spam
-        url = `/api/emails?type=inbox&maxResults=${newLimit}&q=label:SPAM`
+        // Use Gmail search query to only retrieve spam (in:spam is the standard Gmail syntax)
+        url = `/api/emails?type=inbox&maxResults=${newLimit}&q=in:spam`
       } else if (viewType === "trash") {
-        url = `/api/emails?type=inbox&maxResults=${newLimit}&q=label:TRASH`
+        // Use Gmail search query to only retrieve trash (in:trash is the standard Gmail syntax)
+        url = `/api/emails?type=inbox&maxResults=${newLimit}&q=in:trash`
       } else {
         // default inbox view; backend already filters out SPAM/TRASH when creating tickets
         url = `/api/emails?type=inbox&maxResults=${newLimit}`

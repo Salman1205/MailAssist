@@ -64,29 +64,45 @@ export async function GET(request: NextRequest) {
         emails = await fetchInboxEmails(tokens, maxResults);
       }
       
-      // Filter out obvious spam/trash so we don't create tickets for them
-      emails = emails.filter((email) => {
-        const labels = email.labels || [];
-        const blockedLabels = ['SPAM', 'TRASH'];
-        return !labels.some((label) => blockedLabels.includes(label));
-      });
+      // Check if user is specifically requesting spam or trash emails
+      const isViewingSpam = q?.includes('label:SPAM') || q?.includes('in:spam');
+      const isViewingTrash = q?.includes('label:TRASH') || q?.includes('in:trash');
+      
+      // Only filter out spam/trash if user is NOT specifically viewing them
+      // This allows users to see spam/trash when they explicitly request it
+      if (!isViewingSpam && !isViewingTrash) {
+        // Filter out obvious spam/trash so we don't create tickets for them
+        emails = emails.filter((email) => {
+          const labels = email.labels || [];
+          const blockedLabels = ['SPAM', 'TRASH'];
+          return !labels.some((label) => blockedLabels.includes(label));
+        });
+      }
       
       // Store received emails (without embeddings) and ensure tickets exist/are updated
+      // Skip ticket creation for spam/trash emails even if viewing them
       await Promise.all(
         emails.map(async (email: any) => {
           try {
             await storeReceivedEmail(email);
-            await ensureTicketForEmail(
-              {
-                id: email.id,
-                threadId: email.threadId,
-                subject: email.subject,
-                from: email.from,
-                to: email.to,
-                date: email.date,
-              },
-              false
-            );
+            
+            // Don't create tickets for spam/trash emails
+            const labels = email.labels || [];
+            const isSpamOrTrash = labels.some((label: string) => ['SPAM', 'TRASH'].includes(label));
+            
+            if (!isSpamOrTrash) {
+              await ensureTicketForEmail(
+                {
+                  id: email.id,
+                  threadId: email.threadId,
+                  subject: email.subject,
+                  from: email.from,
+                  to: email.to,
+                  date: email.date,
+                },
+                false
+              );
+            }
           } catch (error) {
             console.error(`Error processing received email ${email.id}:`, error);
           }
