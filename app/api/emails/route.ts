@@ -32,25 +32,29 @@ export async function GET(request: NextRequest) {
       // Fetch sent emails
       emails = await fetchSentEmails(tokens, maxResults);
       
-      // Store sent emails with embeddings and ensure tickets exist/are updated
-      for (const email of emails) {
-        try {
-          await storeSentEmail(email);
-          await ensureTicketForEmail(
-            {
-              id: email.id,
-              threadId: email.threadId,
-              subject: email.subject,
-              from: email.from,
-              to: email.to,
-              date: email.date,
-            },
-            true
-          );
-        } catch (error) {
-          console.error(`Error processing sent email ${email.id}:`, error);
-        }
-      }
+      // Process sent emails in parallel: store metadata/embeddings (if needed)
+      // and update ticket timestamps. This significantly reduces latency when
+      // compared to serial processing.
+      await Promise.all(
+        emails.map(async (email: any) => {
+          try {
+            await storeSentEmail(email);
+            await ensureTicketForEmail(
+              {
+                id: email.id,
+                threadId: email.threadId,
+                subject: email.subject,
+                from: email.from,
+                to: email.to,
+                date: email.date,
+              },
+              true
+            );
+          } catch (error) {
+            console.error(`Error processing sent email ${email.id}:`, error);
+          }
+        })
+      );
     } else {
       // Fetch inbox emails (optionally with query for specific labels)
       if (q) {
@@ -68,24 +72,26 @@ export async function GET(request: NextRequest) {
       });
       
       // Store received emails (without embeddings) and ensure tickets exist/are updated
-      for (const email of emails) {
-        try {
-          await storeReceivedEmail(email);
-          await ensureTicketForEmail(
-            {
-              id: email.id,
-              threadId: email.threadId,
-              subject: email.subject,
-              from: email.from,
-              to: email.to,
-              date: email.date,
-            },
-            false
-          );
-        } catch (error) {
-          console.error(`Error processing received email ${email.id}:`, error);
-        }
-      }
+      await Promise.all(
+        emails.map(async (email: any) => {
+          try {
+            await storeReceivedEmail(email);
+            await ensureTicketForEmail(
+              {
+                id: email.id,
+                threadId: email.threadId,
+                subject: email.subject,
+                from: email.from,
+                to: email.to,
+                date: email.date,
+              },
+              false
+            );
+          } catch (error) {
+            console.error(`Error processing received email ${email.id}:`, error);
+          }
+        })
+      );
     }
 
     return NextResponse.json({ emails, count: emails.length });

@@ -22,16 +22,16 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [limit, setLimit] = useState(50)
+  const [limit, setLimit] = useState(20)
   const [hasMore, setHasMore] = useState(true)
 
   useEffect(() => {
     // Reset state and fetch fresh emails whenever the view type changes
     setEmails([])
     setError(null)
-    setLimit(50)
+    setLimit(20)
     setHasMore(true)
-    fetchEmails(50)
+    fetchEmails(20)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewType])
 
@@ -83,7 +83,7 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
   }
 
   const handleLoadMore = () => {
-    const nextLimit = limit + 50
+    const nextLimit = limit + 20
     fetchEmails(nextLimit, true)
   }
 
