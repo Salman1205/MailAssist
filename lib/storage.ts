@@ -9,14 +9,21 @@ import { createEmailContext } from './similarity';
 import { supabase } from './supabase';
 import { getValidTokens } from './token-refresh';
 import { getUserProfile } from './gmail';
+import { getSessionUserEmail } from './session';
 
 /**
  * Get current user's email address for data scoping
- * First tries to get it from stored tokens, then falls back to Gmail API
+ * First tries to get it from session cookie, then from stored tokens, then falls back to Gmail API
  */
 export async function getCurrentUserEmail(): Promise<string | null> {
   try {
-    // First, try to get email from stored tokens (faster, no API call)
+    // First, try to get email from session cookie (most reliable for multi-user scenarios)
+    const sessionEmail = await getSessionUserEmail();
+    if (sessionEmail) {
+      return sessionEmail;
+    }
+    
+    // Fallback: try to get email from stored tokens (faster, no API call)
     if (supabase) {
       try {
         const { data } = await supabase
@@ -35,7 +42,7 @@ export async function getCurrentUserEmail(): Promise<string | null> {
       }
     }
     
-    // Fallback: get from Gmail API
+    // Last resort: get from Gmail API (requires valid tokens)
     const tokens = await getValidTokens();
     if (!tokens || !tokens.access_token) {
       return null;
@@ -414,24 +421,32 @@ export async function getSentEmails(): Promise<StoredEmail[]> {
 }
 
 /**
- * Load stored OAuth tokens
- * Note: We load the most recent token without user_email filter first
- * because we need tokens to get user email. User email is stored with tokens.
+ * Load stored OAuth tokens for a specific user
+ * @param userEmail - Optional user email to filter tokens. If not provided, uses session cookie.
  */
-export async function loadTokens(): Promise<StoredTokens | null> {
+export async function loadTokens(userEmail?: string | null): Promise<StoredTokens | null> {
   if (!supabase) {
     return null;
   }
 
   try {
-    // Load most recent token (tokens are already per-user via OAuth, so this is safe)
-    // The user_email is stored with the token for reference
-    const { data, error } = await supabase
+    // Get user email from parameter or session cookie
+    let targetUserEmail = userEmail;
+    if (!targetUserEmail) {
+      targetUserEmail = await getSessionUserEmail();
+    }
+
+    let query = supabase
       .from('tokens')
       .select('*')
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .order('updated_at', { ascending: false });
+
+    // Filter by user_email if we have it (critical for multi-user security)
+    if (targetUserEmail) {
+      query = query.eq('user_email', targetUserEmail);
+    }
+
+    const { data, error } = await query.limit(1).maybeSingle();
 
     if (error) {
       // If error is about missing column, that's okay - user_email might not exist yet
@@ -461,17 +476,19 @@ export async function loadTokens(): Promise<StoredTokens | null> {
 }
 
 /**
- * Save OAuth tokens
+ * Save OAuth tokens for a specific user
+ * CRITICAL: Only deletes tokens for this user, not all users (prevents cross-user data access)
+ * @returns The user email if successful, null if failed
  */
-export async function saveTokens(tokens: StoredTokens) {
+export async function saveTokens(tokens: StoredTokens): Promise<string | null> {
   if (!supabase) {
     console.error('Cannot save tokens: Supabase client not initialized');
-    return;
+    return null;
   }
 
   if (!tokens.access_token) {
     console.error('Cannot save tokens: no access_token provided');
-    return;
+    return null;
   }
 
   // Try to get user email from Gmail profile (non-blocking - if it fails, continue without it)
@@ -484,12 +501,25 @@ export async function saveTokens(tokens: StoredTokens) {
     // We'll get it later when needed
   }
 
-  // Delete all existing tokens (since we're replacing them)
-  // Use a safe delete that won't fail if table is empty
+  if (!userEmail) {
+    console.error('Cannot save tokens: unable to determine user email');
+    throw new Error('User email is required to save tokens securely');
+  }
+
+  // CRITICAL SECURITY FIX: Only delete tokens for THIS user, not all users
+  // This prevents one user's login from affecting another user's session
   try {
-    await supabase.from('tokens').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    await supabase.from('tokens').delete().eq('user_email', userEmail);
   } catch (deleteError) {
-    // Ignore delete errors - table might be empty or have different structure
+    // If user_email column doesn't exist, try deleting all (backward compatibility)
+    // But this should only happen during migration
+    console.warn('user_email column might not exist, using fallback delete:', deleteError);
+    try {
+      await supabase.from('tokens').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    } catch (fallbackError) {
+      // Ignore delete errors - table might be empty or have different structure
+      console.warn('Fallback delete also failed:', fallbackError);
+    }
   }
 
   // Build insert payload (only include fields that definitely exist)
@@ -499,12 +529,8 @@ export async function saveTokens(tokens: StoredTokens) {
     expiry_date: tokens.expiry_date ?? null,
     token_type: tokens.token_type ?? null,
     scope: tokens.scope ?? null,
+    user_email: userEmail, // Always include user_email for proper scoping
   };
-  
-  // Only add user_email if we have it (column might not exist yet)
-  if (userEmail) {
-    insertPayload.user_email = userEmail;
-  }
 
   // Try to insert tokens
   const { error } = await supabase.from('tokens').insert(insertPayload);
@@ -524,22 +550,25 @@ export async function saveTokens(tokens: StoredTokens) {
       throw error;
     }
   }
+  
+  return userEmail; // Return user email so caller can set session cookie
 }
 
 /**
  * Clear stored tokens (for logout)
+ * Only clears tokens for the current user from session
  */
-export async function clearTokens() {
+export async function clearTokens(userEmail?: string | null) {
   if (!supabase) {
     return;
   }
 
-  const userEmail = await getCurrentUserEmail();
-  if (!userEmail) {
+  const targetUserEmail = userEmail || await getCurrentUserEmail();
+  if (!targetUserEmail) {
     return;
   }
 
-  const { error } = await supabase.from('tokens').delete().eq('user_email', userEmail);
+  const { error } = await supabase.from('tokens').delete().eq('user_email', targetUserEmail);
   if (error) {
     console.error('Error clearing tokens from Supabase:', error);
   }

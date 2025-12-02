@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getTokensFromCode } from '@/lib/gmail';
 import { saveTokens } from '@/lib/storage';
+import { setSessionUserEmailInResponse } from '@/lib/session';
 
 export async function GET(request: NextRequest) {
   try {
@@ -36,13 +37,20 @@ export async function GET(request: NextRequest) {
     }
     
     console.log('Tokens received, saving to database...');
-    // Store tokens
-    await saveTokens(tokens);
-    console.log('Tokens saved successfully');
+    // Store tokens (this now returns the user email)
+    const userEmail = await saveTokens(tokens);
+    console.log('Tokens saved successfully for user:', userEmail);
 
     // Redirect to frontend with success
     const frontendUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-    return NextResponse.redirect(`${frontendUrl}?auth=success`);
+    const response = NextResponse.redirect(`${frontendUrl}?auth=success`);
+    
+    // CRITICAL: Set session cookie to identify this user on this device
+    if (userEmail) {
+      setSessionUserEmailInResponse(response, userEmail);
+    }
+    
+    return response;
   } catch (error) {
     console.error('Error in OAuth callback:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
