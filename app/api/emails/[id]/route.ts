@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getValidTokens } from '@/lib/token-refresh';
 import { getEmailById } from '@/lib/gmail';
 import { loadStoredEmails, storeReceivedEmail } from '@/lib/storage';
+import { ensureTicketForEmail } from '@/lib/tickets';
 
 type RouteContext =
   | { params: { id: string } }
@@ -59,6 +60,19 @@ export async function GET(
 
     // Store for future requests (without embeddings)
     await storeReceivedEmail(email);
+
+    // Ensure ticket exists/updated for this email (treat as customer message)
+    await ensureTicketForEmail(
+      {
+        id: email.id,
+        threadId: email.threadId,
+        subject: email.subject,
+        from: email.from,
+        to: email.to,
+        date: email.date,
+      },
+      false
+    );
 
     return NextResponse.json({ email });
   } catch (error) {

@@ -1,13 +1,16 @@
 "use client"
 
 interface SidebarProps {
-  activeView: "inbox" | "drafts" | "settings"
-  setActiveView: (view: "inbox" | "drafts" | "settings") => void
+  activeView: "inbox" | "sent" | "spam" | "trash" | "drafts" | "settings"
+  setActiveView: (view: "inbox" | "sent" | "spam" | "trash" | "drafts" | "settings") => void
   onLogout?: () => void
 }
 
 const NAV_ITEMS = [
   { id: "inbox", label: "Inbox", icon: InboxIcon },
+  { id: "sent", label: "Sent", icon: SentIcon },
+  { id: "spam", label: "Spam", icon: SpamIcon },
+  { id: "trash", label: "Trash", icon: TrashIcon },
   { id: "drafts", label: "Drafts", icon: DraftIcon },
   { id: "settings", label: "Settings", icon: SettingsIcon },
 ] as const
@@ -53,6 +56,36 @@ function InboxIcon(props: React.SVGProps<SVGSVGElement>) {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" {...props}>
       <path d="M3 7l1.68-3.36A2 2 0 0 1 6.48 2h11.04a2 2 0 0 1 1.8 1.64L21 7v10a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V7z" />
       <path d="M3 13h5l2 3h4l2-3h5" />
+    </svg>
+  )
+}
+
+function SentIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" {...props}>
+      <path d="M4 4l16 8-16 8 4-8-4-8z" />
+    </svg>
+  )
+}
+
+function SpamIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" {...props}>
+      <polygon points="7 2 17 2 22 7 22 17 17 22 7 22 2 17 2 7 7 2" />
+      <line x1="9" y1="9" x2="15" y2="15" />
+      <line x1="15" y1="9" x2="9" y2="15" />
+    </svg>
+  )
+}
+
+function TrashIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" {...props}>
+      <path d="M3 6h18" />
+      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+      <line x1="10" y1="11" x2="10" y2="17" />
+      <line x1="14" y1="11" x2="14" y2="17" />
     </svg>
   )
 }

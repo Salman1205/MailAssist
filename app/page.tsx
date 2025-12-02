@@ -9,7 +9,7 @@ import SettingsView from "@/components/settings-view"
 import DraftsView from "@/components/drafts-view"
 import SyncToast from "@/components/sync-toast"
 
-type View = "inbox" | "drafts" | "settings"
+type View = "inbox" | "sent" | "spam" | "trash" | "drafts" | "settings"
 
 interface UserProfile {
   name?: string
@@ -45,6 +45,7 @@ export default function Page() {
   const [syncError, setSyncError] = useState<string | null>(null)
   const [hideSyncToast, setHideSyncToast] = useState(false)
   const [syncContinueCount, setSyncContinueCount] = useState(0) // Safety counter
+  const LOCAL_STORAGE_KEY = "gmail_connected"
 
   useEffect(() => {
     checkAuthStatus()
@@ -52,6 +53,11 @@ export default function Page() {
     const params = new URLSearchParams(window.location.search)
     if (params.get("auth") === "success") {
       setIsConnected(true)
+      try {
+        window.localStorage.setItem(LOCAL_STORAGE_KEY, "true")
+      } catch {
+        // Ignore localStorage errors (e.g. in private mode)
+      }
       window.history.replaceState({}, "", window.location.pathname)
     }
   }, [])
@@ -176,8 +182,34 @@ export default function Page() {
 
   const checkAuthStatus = async () => {
     try {
+      // Only treat the user as "connected" on this device if they have
+      // previously completed the OAuth flow in this browser.
+      // This prevents other people's logins (on other laptops) from
+      // automatically making this browser look logged in.
+      const hasLocalConnection =
+        typeof window !== "undefined" &&
+        window.localStorage.getItem(LOCAL_STORAGE_KEY) === "true"
+
+      if (!hasLocalConnection) {
+        setIsConnected(false)
+        return
+      }
+
+      // If this browser has a local connection flag, verify that the
+      // backend tokens are still valid.
       const response = await fetch("/api/emails?type=inbox&maxResults=1")
-      setIsConnected(response.ok)
+
+      if (response.ok) {
+        setIsConnected(true)
+      } else {
+        // If tokens are no longer valid, clear local flag
+        setIsConnected(false)
+        try {
+          window.localStorage.removeItem(LOCAL_STORAGE_KEY)
+        } catch {
+          // ignore
+        }
+      }
     } catch {
       setIsConnected(false)
     } finally {
@@ -230,12 +262,40 @@ export default function Page() {
         )
       case "drafts":
         return <DraftsView refreshKey={draftsVersion} />
+      case "sent":
+        return (
+          <InboxView
+            selectedEmail={selectedEmail}
+            onSelectEmail={setSelectedEmail}
+            onDraftGenerated={handleDraftGenerated}
+            viewType="sent"
+          />
+        )
+      case "spam":
+        return (
+          <InboxView
+            selectedEmail={selectedEmail}
+            onSelectEmail={setSelectedEmail}
+            onDraftGenerated={handleDraftGenerated}
+            viewType="spam"
+          />
+        )
+      case "trash":
+        return (
+          <InboxView
+            selectedEmail={selectedEmail}
+            onSelectEmail={setSelectedEmail}
+            onDraftGenerated={handleDraftGenerated}
+            viewType="trash"
+          />
+        )
       default:
         return (
           <InboxView
             selectedEmail={selectedEmail}
             onSelectEmail={setSelectedEmail}
             onDraftGenerated={handleDraftGenerated}
+            viewType="inbox"
           />
         )
     }
@@ -246,6 +306,7 @@ export default function Page() {
 
     const tabs: { id: View; label: string }[] = [
       { id: "inbox", label: "Inbox" },
+      { id: "sent", label: "Sent" },
       { id: "drafts", label: "Drafts" },
       { id: "settings", label: "Settings" },
     ]

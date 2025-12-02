@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getValidTokens } from '@/lib/token-refresh';
 import { fetchInboxEmails, fetchSentEmails } from '@/lib/gmail';
 import { storeSentEmail, storeReceivedEmail } from '@/lib/storage';
+import { ensureTicketForEmail } from '@/lib/tickets';
 
 export async function GET(request: NextRequest) {
   try {
@@ -22,6 +23,7 @@ export async function GET(request: NextRequest) {
 
     const searchParams = request.nextUrl.searchParams;
     const type = searchParams.get('type') || 'inbox'; // 'inbox' or 'sent'
+    const q = searchParams.get('q'); // optional Gmail query (labels etc.)
     const maxResults = parseInt(searchParams.get('maxResults') || '50');
 
     let emails;
@@ -30,24 +32,58 @@ export async function GET(request: NextRequest) {
       // Fetch sent emails
       emails = await fetchSentEmails(tokens, maxResults);
       
-      // Store sent emails with embeddings
+      // Store sent emails with embeddings and ensure tickets exist/are updated
       for (const email of emails) {
         try {
           await storeSentEmail(email);
+          await ensureTicketForEmail(
+            {
+              id: email.id,
+              threadId: email.threadId,
+              subject: email.subject,
+              from: email.from,
+              to: email.to,
+              date: email.date,
+            },
+            true
+          );
         } catch (error) {
-          console.error(`Error storing sent email ${email.id}:`, error);
+          console.error(`Error processing sent email ${email.id}:`, error);
         }
       }
     } else {
-      // Fetch inbox emails
-      emails = await fetchInboxEmails(tokens, maxResults);
+      // Fetch inbox emails (optionally with query for specific labels)
+      if (q) {
+        // When a search query is provided, pass it through to Gmail
+        emails = await fetchInboxEmails(tokens, maxResults, q);
+      } else {
+        emails = await fetchInboxEmails(tokens, maxResults);
+      }
       
-      // Store received emails (without embeddings)
+      // Filter out obvious spam/trash so we don't create tickets for them
+      emails = emails.filter((email) => {
+        const labels = email.labels || [];
+        const blockedLabels = ['SPAM', 'TRASH'];
+        return !labels.some((label) => blockedLabels.includes(label));
+      });
+      
+      // Store received emails (without embeddings) and ensure tickets exist/are updated
       for (const email of emails) {
         try {
           await storeReceivedEmail(email);
+          await ensureTicketForEmail(
+            {
+              id: email.id,
+              threadId: email.threadId,
+              subject: email.subject,
+              from: email.from,
+              to: email.to,
+              date: email.date,
+            },
+            false
+          );
         } catch (error) {
-          console.error(`Error storing received email ${email.id}:`, error);
+          console.error(`Error processing received email ${email.id}:`, error);
         }
       }
     }

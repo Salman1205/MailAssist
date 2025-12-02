@@ -26,7 +26,8 @@ interface StoredEmail extends Email {
 export async function generateDraftReply(
   incomingEmail: Email,
   pastEmails: StoredEmail[],
-  groqApiKey: string
+  groqApiKey: string,
+  conversationMessages?: Email[]
 ): Promise<string> {
   // Generate embedding for the incoming email
   let queryEmbedding: number[];
@@ -76,8 +77,8 @@ export async function generateDraftReply(
     )
     .join('\n\n---\n\n');
 
-  // Create prompt for Groq
-  const prompt = createDraftPrompt(incomingEmail, styleExamples);
+  // Create prompt for Groq, including optional conversation history
+  const prompt = createDraftPrompt(incomingEmail, styleExamples, conversationMessages);
 
   // Call Groq API
   const draft = await callGroqAPI(prompt, groqApiKey);
@@ -88,7 +89,26 @@ export async function generateDraftReply(
 /**
  * Create prompt for draft generation
  */
-function createDraftPrompt(incomingEmail: Email, styleExamples: string): string {
+function createDraftPrompt(
+  incomingEmail: Email,
+  styleExamples: string,
+  conversationMessages?: Email[]
+): string {
+  const history = (conversationMessages || [])
+    // Exclude the incoming email itself if it's in the list
+    .filter((msg) => msg.id !== incomingEmail.id)
+    // Take up to the last 5 messages for context
+    .slice(-5)
+    .map((msg) => {
+      const direction = msg.from === incomingEmail.to ? 'Agent' : 'Customer';
+      return `${direction} (${msg.from} → ${msg.to} at ${msg.date || 'unknown time'}):\n${msg.body}`;
+    })
+    .join('\n\n---\n\n');
+
+  const historySection = history
+    ? `\n\nCONVERSATION HISTORY (most recent messages first):\n${history}\n`
+    : '';
+
   return `You are an AI assistant helping to draft email replies. Your task is to generate a professional, contextually appropriate email draft that matches the user's writing style.
 
 INCOMING EMAIL TO REPLY TO:
@@ -96,6 +116,8 @@ Subject: ${incomingEmail.subject}
 From: ${incomingEmail.from}
 Body:
 ${incomingEmail.body}
+
+${historySection}
 
 USER'S PAST EMAIL STYLE EXAMPLES (use these to match tone and style):
 ${styleExamples || 'No past examples available. Use a professional, friendly tone.'}

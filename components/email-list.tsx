@@ -14,9 +14,10 @@ interface EmailListProps {
   selectedEmail: string | null
   onSelectEmail: (id: string) => void
   onLoadingChange?: (loading: boolean) => void
+  viewType?: "inbox" | "sent" | "spam" | "trash"
 }
 
-export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChange }: EmailListProps) {
+export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChange, viewType = "inbox" }: EmailListProps) {
   const [emails, setEmails] = useState<Email[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -25,9 +26,14 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
   const [hasMore, setHasMore] = useState(true)
 
   useEffect(() => {
-    fetchEmails(limit)
+    // Reset state and fetch fresh emails whenever the view type changes
+    setEmails([])
+    setError(null)
+    setLimit(50)
+    setHasMore(true)
+    fetchEmails(50)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [viewType])
 
   const fetchEmails = async (newLimit = limit, isLoadMore = false) => {
     try {
@@ -38,7 +44,20 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
       }
       setError(null)
       onLoadingChange?.(true)
-      const response = await fetch(`/api/emails?type=inbox&maxResults=${newLimit}`)
+      let url = `/api/emails?maxResults=${newLimit}`
+      if (viewType === "sent") {
+        url = `/api/emails?type=sent&maxResults=${newLimit}`
+      } else if (viewType === "spam") {
+        // Use Gmail search query to only retrieve spam
+        url = `/api/emails?type=inbox&maxResults=${newLimit}&q=label:SPAM`
+      } else if (viewType === "trash") {
+        url = `/api/emails?type=inbox&maxResults=${newLimit}&q=label:TRASH`
+      } else {
+        // default inbox view; backend already filters out SPAM/TRASH when creating tickets
+        url = `/api/emails?type=inbox&maxResults=${newLimit}`
+      }
+
+      const response = await fetch(url)
       
       if (!response.ok) {
         if (response.status === 401) {

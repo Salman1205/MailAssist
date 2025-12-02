@@ -12,8 +12,21 @@ interface EmailDetailProps {
   onBack?: () => void
 }
 
-interface Email {
+interface EmailMessage {
   id: string
+  threadId?: string
+  subject: string
+  from: string
+  to: string
+  date: string
+  body: string
+  snippet?: string
+  labels?: string[]
+}
+
+interface EmailSummary {
+  id: string
+  threadId?: string
   subject: string
   from: string
   to: string
@@ -23,7 +36,8 @@ interface Email {
 }
 
 export default function EmailDetail({ emailId, onDraftGenerated, onBack }: EmailDetailProps) {
-  const [email, setEmail] = useState<Email | null>(null)
+  const [threadMessages, setThreadMessages] = useState<EmailMessage[]>([])
+  const [emailSummary, setEmailSummary] = useState<EmailSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [showDraft, setShowDraft] = useState(false)
   const [draftText, setDraftText] = useState("")
@@ -51,27 +65,53 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack }: Email
       setCopied(false)
       setGenerating(false)
       setError(null)
-      fetchEmail()
+      setEmailSummary(null)
+      setThreadMessages([])
+      fetchThread()
     }
   }, [emailId])
 
-  const fetchEmail = async () => {
+  const fetchThread = async () => {
     try {
       setLoading(true)
       setError(null)
-      const response = await fetch(`/api/emails/${emailId}`)
-      
-      if (!response.ok) {
-        if (response.status === 404) {
-          setError('Email not found')
-        } else {
-          throw new Error('Failed to fetch email')
-        }
+
+      // 1) Fetch the individual email to get its threadId
+      const emailResponse = await fetch(`/api/emails/${emailId}`)
+      let threadId = emailId
+
+      if (emailResponse.ok) {
+        const emailData = await emailResponse.json()
+        const email: EmailSummary = emailData.email
+        setEmailSummary(email)
+        threadId = email.threadId || email.id
+      } else if (emailResponse.status === 404) {
+        // If the specific message isn't cached or found, we can still try
+        // to load the conversation using the provided id as a thread id.
+        console.warn("Email not found, attempting to load conversation with thread id only")
+      } else {
+        const text = await emailResponse.text().catch(() => "")
+        console.error("Failed to fetch email details", text)
+        setError("Failed to fetch email details")
+      }
+
+      // 2) Fetch the full thread using threadId
+      const threadResponse = await fetch(`/api/emails/threads/${encodeURIComponent(threadId)}`)
+
+      if (threadResponse.ok) {
+        const threadData = await threadResponse.json()
+        setThreadMessages(threadData.thread?.messages || [])
+        // Clear any previous transient errors now that we have conversation data
+        setError(null)
+      } else if (threadResponse.status === 404) {
+        setError("Conversation not found")
+        return
+      } else {
+        const text = await threadResponse.text().catch(() => "")
+        console.error("Failed to fetch conversation", text)
+        setError("Failed to fetch conversation")
         return
       }
-      
-      const data = await response.json()
-      setEmail(data.email)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load email')
       console.error('Error fetching email:', err)
@@ -182,7 +222,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack }: Email
     )
   }
 
-  if (error && !email) {
+  if (error && threadMessages.length === 0) {
     return (
       <div className="p-6 flex flex-col items-center justify-center space-y-2">
         {onBack && (
@@ -198,7 +238,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack }: Email
         )}
         <div className="text-sm text-destructive">{error}</div>
         <button
-          onClick={fetchEmail}
+          onClick={fetchThread}
           className="text-xs text-primary hover:underline"
         >
           Retry
@@ -207,7 +247,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack }: Email
     )
   }
 
-  if (!email) {
+  if (threadMessages.length === 0 && !emailSummary) {
     return (
       <div className="p-6 flex items-center justify-center">
         <div className="text-sm text-muted-foreground">No email selected</div>
@@ -241,29 +281,37 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack }: Email
       <Card className="border border-border p-6 space-y-4 overflow-hidden">
         <div>
           <h2 className="text-2xl font-semibold text-foreground">
-            {email.subject || '(No subject)'}
+            {threadMessages[threadMessages.length - 1]?.subject || emailSummary?.subject || "(No subject)"}
           </h2>
         </div>
 
-        <div className="space-y-3 text-sm">
-          <div className="flex gap-4">
-            <span className="font-medium text-muted-foreground w-12">From:</span>
-            <span className="text-foreground">{email.from}</span>
-          </div>
-          <div className="flex gap-4">
-            <span className="font-medium text-muted-foreground w-12">To:</span>
-            <span className="text-foreground">{email.to}</span>
-          </div>
-          <div className="flex gap-4">
-            <span className="font-medium text-muted-foreground w-12">Date:</span>
-            <span className="text-foreground">{formatDate(email.date)}</span>
-          </div>
-        </div>
-
-        <div className="pt-4 border-t border-border overflow-auto max-h-[55vh] pr-1">
-          <p className="text-foreground leading-relaxed text-sm whitespace-pre-wrap break-words">
-            {email.body || email.snippet || 'No content'}
-          </p>
+        <div className="space-y-3 text-sm max-h-[55vh] overflow-auto pr-1">
+          {threadMessages.map((msg, index) => (
+            <div
+              key={msg.id}
+              className="mb-4 pb-4 border-b border-border last:border-b-0 last:pb-0"
+            >
+              <div className="flex justify-between items-start gap-4">
+                <div className="space-y-1">
+                  <div className="text-xs text-muted-foreground">
+                    {index === 0 ? "Conversation started" : "Message"}
+                  </div>
+                  <div className="text-sm font-medium text-foreground">
+                    {msg.from}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    To: {msg.to}
+                  </div>
+                </div>
+                <div className="text-xs text-muted-foreground flex-shrink-0">
+                  {formatDate(msg.date)}
+                </div>
+              </div>
+              <div className="mt-3 text-sm text-foreground whitespace-pre-wrap break-words">
+                {msg.body || msg.snippet || "No content"}
+              </div>
+            </div>
+          ))}
         </div>
       </Card>
 

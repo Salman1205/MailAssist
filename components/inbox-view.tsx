@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import EmailList from "@/components/email-list"
 import EmailDetail from "@/components/email-detail"
 
@@ -8,11 +8,18 @@ interface InboxViewProps {
   selectedEmail: string | null
   onSelectEmail: (id: string | null) => void
   onDraftGenerated?: () => void
+  viewType?: "inbox" | "sent" | "spam" | "trash"
 }
 
-export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerated }: InboxViewProps) {
+export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerated, viewType = "inbox" }: InboxViewProps) {
   const [listLoading, setListLoading] = useState(true)
   const showDetail = Boolean(selectedEmail)
+
+  // When switching between Inbox/Sent/Spam/Trash, clear the current selection
+  // so the detail view doesn't show stale data from the previous view.
+  useEffect(() => {
+    onSelectEmail(null)
+  }, [viewType, onSelectEmail])
 
   return (
     <div className="flex flex-col md:flex-row h-full bg-background">
@@ -25,6 +32,7 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
           selectedEmail={selectedEmail}
           onSelectEmail={onSelectEmail}
           onLoadingChange={setListLoading}
+          viewType={viewType}
         />
       </div>
 

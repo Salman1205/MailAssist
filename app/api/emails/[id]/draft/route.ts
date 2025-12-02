@@ -4,7 +4,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getValidTokens } from '@/lib/token-refresh';
-import { getEmailById } from '@/lib/gmail';
+import { getEmailById, getThreadById } from '@/lib/gmail';
 import { getSentEmails, storeDraft, loadStoredEmails } from '@/lib/storage';
 import { generateDraftReply } from '@/lib/ai-draft';
 
@@ -96,10 +96,27 @@ export async function POST(
       );
     }
 
+    // Load conversation history (full thread) for better context
+    let conversationMessages: {
+      id: string;
+      subject: string;
+      from: string;
+      to: string;
+      body: string;
+      date?: string;
+    }[] = [];
+    try {
+      const threadIdForContext = incomingEmail.threadId || incomingEmail.id;
+      const thread = await getThreadById(tokens, threadIdForContext);
+      conversationMessages = thread.messages || [];
+    } catch (threadError) {
+      console.warn('[Draft] Could not load conversation thread for context:', threadError);
+    }
+
     // Generate draft reply
     let draft: string;
     try {
-      draft = await generateDraftReply(incomingEmail, pastEmails, groqApiKey);
+      draft = await generateDraftReply(incomingEmail, pastEmails, groqApiKey, conversationMessages);
     } catch (draftError) {
       console.error('[Draft] Error in generateDraftReply:', draftError);
       const errorMessage = draftError instanceof Error ? draftError.message : String(draftError);

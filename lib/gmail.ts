@@ -115,14 +115,15 @@ export async function sendReplyMessage(
  */
 export async function fetchInboxEmails(
   tokens: { access_token?: string | null; refresh_token?: string | null },
-  maxResults: number = 50
+  maxResults: number = 50,
+  query?: string
 ) {
   const gmail = getGmailClient(tokens);
   
   const response = await gmail.users.messages.list({
     userId: 'me',
     maxResults,
-    q: 'in:inbox',
+    q: query || 'in:inbox',
   });
 
   const messages = response.data.messages || [];
@@ -178,7 +179,7 @@ export async function getEmailById(
   emailId: string
 ) {
   const gmail = getGmailClient(tokens);
-  
+
   const response = await gmail.users.messages.get({
     userId: 'me',
     id: emailId,
@@ -186,6 +187,41 @@ export async function getEmailById(
   });
 
   return parseEmailMessage(response.data);
+}
+
+/**
+ * Fetch an entire Gmail thread (all messages in a conversation).
+ * This is used for the helpdesk ticket detail view so we can show
+ * both customer and agent messages in one timeline.
+ */
+export async function getThreadById(
+  tokens: { access_token?: string | null; refresh_token?: string | null },
+  threadId: string
+) {
+  const gmail = getGmailClient(tokens);
+
+  const response = await gmail.users.threads.get({
+    userId: 'me',
+    id: threadId,
+    format: 'full',
+  });
+
+  const messages = response.data.messages || [];
+
+  const parsed = messages.map((message) => parseEmailMessage(message));
+
+  // Sort by date ascending so UI can render top-to-bottom conversation
+  parsed.sort((a, b) => {
+    const da = new Date(a.date || '').getTime() || 0;
+    const db = new Date(b.date || '').getTime() || 0;
+    return da - db;
+  });
+
+  return {
+    threadId: response.data.id,
+    historyId: response.data.historyId,
+    messages: parsed,
+  };
 }
 
 /**
@@ -206,6 +242,47 @@ export async function getUserProfile(
     threadsTotal: response.data.threadsTotal,
     historyId: response.data.historyId,
   };
+}
+
+/**
+ * Start a Gmail History watch using Google Pub/Sub.
+ * NOTE: This requires you to configure a Pub/Sub topic and grant Gmail
+ * permission to publish to it. The topic name must be provided via
+ * GMAIL_HISTORY_TOPIC environment variable.
+ */
+export async function startHistoryWatch(
+  tokens: { access_token?: string | null; refresh_token?: string | null }
+) {
+  const gmail = getGmailClient(tokens);
+
+  const topicName = process.env.GMAIL_HISTORY_TOPIC;
+  if (!topicName) {
+    throw new Error(
+      'GMAIL_HISTORY_TOPIC is not set. Configure a Pub/Sub topic and set its full resource name in env.'
+    );
+  }
+
+  const labelIds = ['INBOX', 'SENT'];
+
+  const res = await gmail.users.watch({
+    userId: 'me',
+    requestBody: {
+      topicName,
+      labelIds,
+    },
+  });
+
+  return res.data;
+}
+
+/**
+ * Stop an existing Gmail History watch.
+ */
+export async function stopHistoryWatch(
+  tokens: { access_token?: string | null; refresh_token?: string | null }
+) {
+  const gmail = getGmailClient(tokens);
+  await gmail.users.stop({ userId: 'me' });
 }
 
 /**
