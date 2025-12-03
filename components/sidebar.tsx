@@ -1,9 +1,10 @@
 "use client"
 
 interface SidebarProps {
-  activeView: "inbox" | "sent" | "spam" | "trash" | "drafts" | "settings"
-  setActiveView: (view: "inbox" | "sent" | "spam" | "trash" | "drafts" | "settings") => void
+  activeView: "inbox" | "sent" | "spam" | "trash" | "drafts" | "settings" | "users"
+  setActiveView: (view: "inbox" | "sent" | "spam" | "trash" | "drafts" | "settings" | "users") => void
   onLogout?: () => void
+  currentUser?: { id: string; name: string; role: string } | null
 }
 
 const NAV_ITEMS = [
@@ -15,7 +16,12 @@ const NAV_ITEMS = [
   { id: "settings", label: "Settings", icon: SettingsIcon },
 ] as const
 
-export default function Sidebar({ activeView, setActiveView, onLogout }: SidebarProps) {
+const ADMIN_NAV_ITEMS = [
+  { id: "users", label: "Team", icon: UsersIcon },
+] as const
+
+export default function Sidebar({ activeView, setActiveView, onLogout, currentUser }: SidebarProps) {
+  const isAdmin = currentUser?.role === "admin"
   return (
     <aside className="hidden md:flex w-60 bg-card border-r border-border flex-col">
       <nav className="flex-1 px-3 py-6 space-y-1">
@@ -36,6 +42,29 @@ export default function Sidebar({ activeView, setActiveView, onLogout }: Sidebar
             </button>
           )
         })}
+        
+        {isAdmin && (
+          <>
+            <div className="h-px bg-border my-2" />
+            {ADMIN_NAV_ITEMS.map((item) => {
+              const isActive = activeView === item.id
+              const Icon = item.icon
+
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setActiveView(item.id)}
+                  className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-left font-medium transition-all ${
+                    isActive ? "bg-primary text-primary-foreground shadow-sm" : "text-foreground hover:bg-secondary"
+                  }`}
+                >
+                  <Icon className="w-5 h-5 flex-shrink-0" />
+                  <span className="text-sm">{item.label}</span>
+                </button>
+              )
+            })}
+          </>
+        )}
       </nav>
 
       <div className="p-3 border-t border-border">
@@ -104,6 +133,17 @@ function SettingsIcon(props: React.SVGProps<SVGSVGElement>) {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" {...props}>
       <circle cx="12" cy="12" r="3" />
       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.09a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09c0 .66.39 1.26 1 1.51h.09c.61.24 1.3.1 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.09c.24.61.9 1 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  )
+}
+
+function UsersIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" {...props}>
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
     </svg>
   )
 }

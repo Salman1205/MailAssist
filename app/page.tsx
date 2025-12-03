@@ -8,8 +8,10 @@ import InboxView from "@/components/inbox-view"
 import SettingsView from "@/components/settings-view"
 import DraftsView from "@/components/drafts-view"
 import SyncToast from "@/components/sync-toast"
+import UserSelector from "@/components/user-selector"
+import UserManagement from "@/components/user-management"
 
-type View = "inbox" | "sent" | "spam" | "trash" | "drafts" | "settings"
+type View = "inbox" | "sent" | "spam" | "trash" | "drafts" | "settings" | "users"
 
 interface UserProfile {
   name?: string
@@ -37,6 +39,10 @@ export default function Page() {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
   const [draftsVersion, setDraftsVersion] = useState(0)
   const [hasAutoSynced, setHasAutoSynced] = useState(false)
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [checkingUser, setCheckingUser] = useState(true)
+  const [currentUser, setCurrentUser] = useState<{ id: string; name: string; role: string } | null>(null)
+  const [hasAdmin, setHasAdmin] = useState(false)
 
   const [syncStatus, setSyncStatus] = useState<SyncStats | null>(null)
   const [syncInProgress, setSyncInProgress] = useState(false)
@@ -49,6 +55,7 @@ export default function Page() {
 
   useEffect(() => {
     checkAuthStatus()
+    checkUserSelection()
 
     const params = new URLSearchParams(window.location.search)
     if (params.get("auth") === "success") {
@@ -59,8 +66,154 @@ export default function Page() {
         // Ignore localStorage errors (e.g. in private mode)
       }
       window.history.replaceState({}, "", window.location.pathname)
+      // After Gmail auth, check if user is selected
+      checkUserSelection()
     }
   }, [])
+
+  // Update browser tab title to show current user
+  useEffect(() => {
+    if (currentUser?.name) {
+      document.title = `${currentUser.name} (${currentUser.role}) - MailAssist`
+    } else if (isConnected) {
+      document.title = "MailAssist"
+    } else {
+      document.title = "MailAssist - Connect Gmail"
+    }
+  }, [currentUser, isConnected])
+
+  // Re-check admin status when currentUser changes
+  useEffect(() => {
+    if (currentUser && isConnected) {
+      checkAdminExists()
+    }
+  }, [currentUser, isConnected])
+
+  const checkAdminExists = async () => {
+    try {
+      const response = await fetch("/api/users")
+      if (response.ok) {
+        const data = await response.json()
+        const adminExists = data.users?.some((u: any) => u.role === "admin" && u.isActive) || false
+        setHasAdmin(adminExists)
+      }
+    } catch {
+      // Ignore errors
+    }
+  }
+
+  const checkUserSelection = async () => {
+    try {
+      // Check for admin existence first
+      await checkAdminExists()
+      
+      // First check sessionStorage (per-tab)
+      // But verify with API to ensure user belongs to current Gmail account
+      if (typeof window !== "undefined") {
+        const storedUserId = sessionStorage.getItem("current_user_id")
+        const storedUserName = sessionStorage.getItem("current_user_name")
+        const storedUserRole = sessionStorage.getItem("current_user_role")
+        
+        if (storedUserId && storedUserName && storedUserRole) {
+          // Verify user still belongs to current account
+          const verifyResponse = await fetch("/api/auth/current-user")
+          if (verifyResponse.ok) {
+            const verifyData = await verifyResponse.json()
+            if (verifyData.user && verifyData.user.id === storedUserId) {
+              // User is valid and belongs to current account
+              setCurrentUserId(storedUserId)
+              setCurrentUser({
+                id: storedUserId,
+                name: storedUserName,
+                role: storedUserRole,
+              })
+              setCheckingUser(false)
+              return
+            }
+          }
+          // If verification failed, clear sessionStorage
+          sessionStorage.removeItem("current_user_id")
+          sessionStorage.removeItem("current_user_name")
+          sessionStorage.removeItem("current_user_role")
+        }
+      }
+      
+      // Fallback: Check API (cookie-based, shared across tabs)
+      const response = await fetch("/api/auth/current-user")
+      if (response.ok) {
+        const data = await response.json()
+        if (data.user) {
+          setCurrentUserId(data.user.id)
+          setCurrentUser({
+            id: data.user.id,
+            name: data.user.name,
+            role: data.user.role,
+          })
+          // Store in sessionStorage for this tab
+          if (typeof window !== "undefined") {
+            sessionStorage.setItem("current_user_id", data.user.id)
+            sessionStorage.setItem("current_user_name", data.user.name)
+            sessionStorage.setItem("current_user_role", data.user.role)
+          }
+        }
+      } else if (response.status === 403 || response.status === 404) {
+        // User doesn't belong to current account or not found - clear sessionStorage
+        if (typeof window !== "undefined") {
+          sessionStorage.removeItem("current_user_id")
+          sessionStorage.removeItem("current_user_name")
+          sessionStorage.removeItem("current_user_role")
+        }
+        setCurrentUserId(null)
+        setCurrentUser(null)
+      }
+      // If 404, no user selected - that's okay, we'll show selector
+    } catch {
+      // Ignore errors
+    } finally {
+      setCheckingUser(false)
+    }
+  }
+
+  const handleUserSelected = async (userId: string) => {
+    setCurrentUserId(userId)
+    setCheckingUser(false)
+    
+    // Fetch user details
+    try {
+      const response = await fetch(`/api/users/${userId}`)
+      if (response.ok) {
+        const data = await response.json()
+        if (data.user) {
+          setCurrentUser({
+            id: data.user.id,
+            name: data.user.name,
+            role: data.user.role,
+          })
+          // Store in sessionStorage for this tab
+          if (typeof window !== "undefined") {
+            sessionStorage.setItem("current_user_id", data.user.id)
+            sessionStorage.setItem("current_user_name", data.user.name)
+            sessionStorage.setItem("current_user_role", data.user.role)
+          }
+          
+          // Refresh admin check after user selection
+          await checkAdminExists()
+          
+          // After user selection, navigate to inbox (default view)
+          setActiveView("inbox")
+        }
+      }
+    } catch {
+      // Ignore errors
+    }
+  }
+
+  const handleSwitchUser = (userId: string) => {
+    // User switching is handled in TopNav component
+    // This function is called after user is selected
+    setCurrentUserId(userId)
+    // Fetch user details will happen in TopNav
+  }
 
   const fetchSyncStatus = useCallback(async () => {
     if (!isConnected) return null
@@ -237,7 +390,15 @@ export default function Page() {
     try {
       await fetch("/api/auth/logout", { method: "POST" })
     } finally {
+      // Clear sessionStorage for this tab
+      if (typeof window !== "undefined") {
+        sessionStorage.removeItem("current_user_id")
+        sessionStorage.removeItem("current_user_name")
+        sessionStorage.removeItem("current_user_role")
+      }
       setIsConnected(false)
+      setCurrentUserId(null)
+      setCurrentUser(null)
       setActiveView("inbox")
       setSelectedEmail(null)
       setUserProfile(null)
@@ -258,7 +419,14 @@ export default function Page() {
             syncing={syncStatus?.processing ?? syncInProgress}
             onSync={startSync}
             error={syncError}
+            currentUserId={currentUserId}
           />
+        )
+      case "users":
+        return (
+          <div className="p-6">
+            <UserManagement currentUserId={currentUserId} />
+          </div>
         )
       case "drafts":
         return <DraftsView refreshKey={draftsVersion} />
@@ -310,6 +478,11 @@ export default function Page() {
       { id: "drafts", label: "Drafts" },
       { id: "settings", label: "Settings" },
     ]
+
+    // Add Team tab for admins
+    if (currentUser?.role === "admin") {
+      tabs.push({ id: "users", label: "Team" })
+    }
 
     return (
       <div className="md:hidden border-b border-border">
@@ -369,22 +542,40 @@ export default function Page() {
     <>
       <div className="flex h-screen bg-background text-foreground">
         {isConnected && (
-          <Sidebar activeView={activeView} setActiveView={setActiveView} onLogout={handleLogout} />
+          <Sidebar 
+            activeView={activeView} 
+            setActiveView={setActiveView} 
+            onLogout={handleLogout}
+            currentUser={currentUser}
+          />
         )}
 
         <div className="flex flex-col flex-1 min-h-0">
-          <TopNav isConnected={isConnected} userProfile={userProfile} onLogout={handleLogout} />
+          <TopNav 
+            isConnected={isConnected} 
+            userProfile={userProfile} 
+            currentUser={currentUser}
+            onLogout={handleLogout}
+            onSwitchUser={handleSwitchUser}
+          />
           {renderMobileTabs()}
 
           <main className="flex-1 overflow-hidden">
-            {checkingAuth ? (
+            {checkingAuth || checkingUser ? (
               <div className="flex items-center justify-center h-full">
-                <div className="text-sm text-muted-foreground">Checking authentication...</div>
+                <div className="text-sm text-muted-foreground">
+                  {checkingAuth ? "Checking authentication..." : "Loading..."}
+                </div>
               </div>
             ) : !isConnected ? (
               <div className="flex items-center justify-center h-full p-4">
                 <GmailConnect onConnect={handleConnect} />
               </div>
+            ) : !currentUserId || (!hasAdmin && currentUser && currentUser.role !== "admin") ? (
+              <UserSelector 
+                onUserSelected={handleUserSelected}
+                currentUserId={currentUserId}
+              />
             ) : (
               renderView()
             )}

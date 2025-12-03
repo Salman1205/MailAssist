@@ -42,12 +42,17 @@ export async function GET(request: NextRequest) {
     console.log('Tokens saved successfully for user:', userEmail);
 
     // Redirect to frontend with success
+    // After Gmail login, user will need to select/create a user account
+    // Then they'll be routed to inbox automatically
     const frontendUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
     const response = NextResponse.redirect(`${frontendUrl}?auth=success`);
     
-    // CRITICAL: Set session cookie to identify this user on this device
+    // CRITICAL: Set session cookie to identify this shared Gmail account on this device
     if (userEmail) {
       setSessionUserEmailInResponse(response, userEmail);
+      // CRITICAL: Clear any existing current_user_id cookie when switching Gmail accounts
+      // This ensures users from the previous account don't persist
+      response.cookies.delete('current_user_id');
     }
     
     return response;
