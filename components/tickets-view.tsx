@@ -8,7 +8,9 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
-import { Loader2, User, Mail, Clock, Tag, MessageSquare, Sparkles, X, Plus } from "lucide-react"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Label } from "@/components/ui/label"
+import { Loader2, User, Mail, Clock, Tag, MessageSquare, Sparkles, X, Plus, ChevronDown, ChevronUp, Edit2, Check, XCircle } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 
 interface Ticket {
@@ -18,7 +20,7 @@ interface Ticket {
   customerName?: string | null
   subject: string
   status: "open" | "pending" | "on_hold" | "closed"
-  priority: "low" | "medium" | "high" | "urgent"
+  priority?: "low" | "medium" | "high" | "urgent" | null
   assigneeUserId?: string | null
   assigneeName?: string | null
   tags: string[]
@@ -64,16 +66,26 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null)
-  const [activeTab, setActiveTab] = useState<"assigned" | "unassigned" | "all">("assigned")
+  const [activeTab, setActiveTab] = useState<"assigned" | "unassigned" | "all">("unassigned")
   
   // Filters
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [priorityFilter, setPriorityFilter] = useState<string>("all")
   const [assigneeFilter, setAssigneeFilter] = useState<string>("all")
+  const [tagsFilter, setTagsFilter] = useState<string>("all")
+  const [dateFilter, setDateFilter] = useState<string>("all") // "all", "today", "week", "month", "custom"
+  const [customDateStart, setCustomDateStart] = useState<string>("")
+  const [customDateEnd, setCustomDateEnd] = useState<string>("")
   const [searchQuery, setSearchQuery] = useState<string>("")
+  
+  // Typing indicator state
+  const [isTyping, setIsTyping] = useState(false)
+  const [typingTimeout, setTypingTimeout] = useState<NodeJS.Timeout | null>(null)
+  const [typingUsers, setTypingUsers] = useState<string[]>([])
   
   // Ticket detail state
   const [threadMessages, setThreadMessages] = useState<ThreadMessage[]>([])
+  const [loadingThread, setLoadingThread] = useState(false)
   const [notes, setNotes] = useState<TicketNote[]>([])
   const [replyText, setReplyText] = useState("")
   const [draftText, setDraftText] = useState("")
@@ -81,7 +93,13 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
   const [generatingDraft, setGeneratingDraft] = useState(false)
   const [sendingReply, setSendingReply] = useState(false)
   const [newNote, setNewNote] = useState("")
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null)
+  const [editingNoteContent, setEditingNoteContent] = useState("")
   const [newTag, setNewTag] = useState("")
+  const [assignPriority, setAssignPriority] = useState<string>("medium")
+  const [showAssignDialog, setShowAssignDialog] = useState(false)
+  const [pendingAssignment, setPendingAssignment] = useState<{ticketId: string, assigneeUserId: string | null} | null>(null)
+  const [conversationMinimized, setConversationMinimized] = useState(false)
   
   // Updating states
   const [updatingStatus, setUpdatingStatus] = useState(false)
@@ -98,24 +116,116 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
     fetchUsers()
   }, [])
 
+  const fetchTypingIndicator = async () => {
+    if (!selectedTicket) return
+    try {
+      const response = await fetch(`/api/tickets/${selectedTicket.id}/typing`)
+      if (response.ok) {
+        const data = await response.json()
+        const typingUserIds = data.typingUsers || []
+        // Always log to debug
+        if (typingUserIds.length > 0) {
+          console.log('[Typing Indicator] Setting typing users:', typingUserIds, 'Current state:', typingUsers)
+        }
+        setTypingUsers(prev => {
+          // Only update if different to avoid unnecessary re-renders
+          if (JSON.stringify(prev.sort()) !== JSON.stringify(typingUserIds.sort())) {
+            console.log('[Typing Indicator] State changed from', prev, 'to', typingUserIds)
+            return typingUserIds
+          }
+          return prev
+        })
+      }
+    } catch (err) {
+      console.error('[Typing Indicator] Error fetching:', err)
+    }
+  }
+
   useEffect(() => {
     if (selectedTicket) {
       fetchThread()
       fetchNotes()
+      // Start polling for typing indicators when ticket is selected
+      fetchTypingIndicator() // Fetch immediately
+      const typingInterval = setInterval(() => {
+        fetchTypingIndicator()
+      }, 2000) // Poll every 2 seconds
+      
+      return () => clearInterval(typingInterval)
+    } else {
+      setTypingUsers([]) // Clear when no ticket selected
     }
-  }, [selectedTicket])
+  }, [selectedTicket, users]) // Add users as dependency so we can match names
+  
+  const updateTypingStatus = async (typing: boolean) => {
+    if (!selectedTicket || !currentUserId) return
+    try {
+      await fetch(`/api/tickets/${selectedTicket.id}/typing`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ typing }),
+      })
+    } catch {
+      // Silently fail - typing indicator is not critical
+    }
+  }
+  
+  const handleTyping = () => {
+    if (!selectedTicket || !currentUserId) return
+    
+    // Clear existing timeout
+    if (typingTimeout) {
+      clearTimeout(typingTimeout)
+    }
+    
+    // Set typing status
+    setIsTyping(true)
+    updateTypingStatus(true)
+    
+    // Clear typing status after 3 seconds of inactivity
+    const timeout = setTimeout(() => {
+      setIsTyping(false)
+      updateTypingStatus(false)
+    }, 3000)
+    
+    setTypingTimeout(timeout)
+  }
+  
+  // Cleanup typing status on unmount or ticket change
+  useEffect(() => {
+    return () => {
+      if (typingTimeout) {
+        clearTimeout(typingTimeout)
+      }
+      if (selectedTicket && currentUserId) {
+        updateTypingStatus(false)
+      }
+    }
+  }, [selectedTicket, currentUserId])
 
   const fetchTickets = async () => {
     try {
       setLoading(true)
       setError(null)
+      console.log('[Tickets] Fetching tickets...')
       const response = await fetch("/api/tickets")
       if (!response.ok) {
         throw new Error("Failed to fetch tickets")
       }
       const data = await response.json()
+      console.log('[Tickets] Received tickets:', data.tickets?.length || 0)
+      if (data.tickets && data.tickets.length > 0) {
+        console.log('[Tickets] Sample ticket dates:', data.tickets.slice(0, 3).map((t: Ticket) => ({
+          id: t.id,
+          subject: t.subject,
+          lastCustomerReplyAt: t.lastCustomerReplyAt,
+          createdAt: t.createdAt,
+          date: t.lastCustomerReplyAt || t.createdAt
+        })))
+      }
       setTickets(data.tickets || [])
     } catch (err) {
+      console.error('[Tickets] Error fetching tickets:', err)
       setError(err instanceof Error ? err.message : "Failed to load tickets")
     } finally {
       setLoading(false)
@@ -136,6 +246,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
   const fetchThread = async () => {
     if (!selectedTicket) return
     try {
+      setLoadingThread(true)
       const response = await fetch(`/api/tickets/${selectedTicket.id}/thread`)
       if (response.ok) {
         const data = await response.json()
@@ -143,6 +254,8 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
       }
     } catch (err) {
       console.error("Error fetching thread:", err)
+    } finally {
+      setLoadingThread(false)
     }
   }
 
@@ -161,12 +274,33 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
 
   const handleTakeTicket = async () => {
     if (!selectedTicket || !currentUserId) return
+    
+    // If ticket is unassigned, require priority selection
+    if (!selectedTicket.assigneeUserId) {
+      setPendingAssignment({ ticketId: selectedTicket.id, assigneeUserId: currentUserId })
+      setShowAssignDialog(true)
+      return
+    }
+    
     await handleAssign(selectedTicket.id, currentUserId)
   }
 
-  const handleAssign = async (ticketId: string, assigneeUserId: string | null) => {
+  const handleAssign = async (ticketId: string, assigneeUserId: string | null, priority?: string) => {
     try {
       setAssigning(ticketId)
+      
+      // If assigning and priority is provided, update priority first
+      if (assigneeUserId && priority) {
+        const priorityResponse = await fetch(`/api/tickets/${ticketId}/priority`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ priority }),
+        })
+        if (!priorityResponse.ok) {
+          throw new Error("Failed to set priority")
+        }
+      }
+      
       const response = await fetch(`/api/tickets/${ticketId}/assign`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -184,12 +318,19 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
         setSelectedTicket(data.ticket)
       }
       toast({ title: "Ticket assigned successfully" })
+      setShowAssignDialog(false)
+      setPendingAssignment(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to assign ticket")
       toast({ title: "Error", description: err instanceof Error ? err.message : "Failed to assign ticket", variant: "destructive" })
     } finally {
       setAssigning(null)
     }
+  }
+
+  const handleConfirmAssign = () => {
+    if (!pendingAssignment) return
+    handleAssign(pendingAssignment.ticketId, pendingAssignment.assigneeUserId, assignPriority)
   }
 
   const handleUpdateStatus = async (status: Ticket["status"]) => {
@@ -293,6 +434,71 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
     }
   }
 
+  const handleStartEditNote = (note: TicketNote) => {
+    setEditingNoteId(note.id)
+    setEditingNoteContent(note.content)
+  }
+
+  const handleCancelEditNote = () => {
+    setEditingNoteId(null)
+    setEditingNoteContent("")
+  }
+
+  const handleUpdateNote = async () => {
+    if (!selectedTicket || !editingNoteId || !editingNoteContent.trim()) {
+      console.error('[Update Note] Missing required data:', { selectedTicket: !!selectedTicket, editingNoteId, editingNoteContent })
+      return
+    }
+    
+    // Find the note being edited to compare user IDs
+    const noteBeingEdited = notes.find(n => n.id === editingNoteId)
+    console.log('[Update Note] Frontend check:', {
+      currentUserId,
+      noteUserId: noteBeingEdited?.userId,
+      match: currentUserId === noteBeingEdited?.userId,
+      noteId: editingNoteId
+    })
+    
+    try {
+      setAddingNote(true)
+      console.log('[Update Note] Sending request:', { ticketId: selectedTicket.id, noteId: editingNoteId, content: editingNoteContent.trim() })
+      const response = await fetch(`/api/tickets/${selectedTicket.id}/notes`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          noteId: editingNoteId,
+          content: editingNoteContent.trim() 
+        }),
+      })
+
+      console.log('[Update Note] Response status:', response.status)
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+        console.error('[Update Note] Error response:', errorData)
+        throw new Error(errorData.error || "Failed to update note")
+      }
+      const data = await response.json()
+      console.log('[Update Note] Success, updating state:', data)
+      setNotes((prev) => {
+        const updated = prev.map(note => note.id === editingNoteId ? data.note : note)
+        console.log('[Update Note] Updated notes array:', updated)
+        return updated
+      })
+      setEditingNoteId(null)
+      setEditingNoteContent("")
+      toast({ title: "Note updated" })
+    } catch (err) {
+      console.error('[Update Note] Exception:', err)
+      toast({ 
+        title: "Error", 
+        description: err instanceof Error ? err.message : "Failed to update note", 
+        variant: "destructive" 
+      })
+    } finally {
+      setAddingNote(false)
+    }
+  }
+
   const handleGenerateDraft = async () => {
     if (!selectedTicket || !threadMessages.length) return
     try {
@@ -311,7 +517,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
       const data = await response.json()
       setDraftText(data.draft || "")
       setShowDraft(true)
-      setReplyText(data.draft || "")
+      // Don't set replyText here - let user click "Use This Draft" to copy it
       toast({ title: "Draft generated" })
     } catch (err) {
       toast({ title: "Error", description: err instanceof Error ? err.message : "Failed to generate draft", variant: "destructive" })
@@ -322,6 +528,14 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
 
   const handleSendReply = async () => {
     if (!selectedTicket || !replyText.trim() || !threadMessages.length) return
+    
+    // Clear typing status when sending
+    if (typingTimeout) {
+      clearTimeout(typingTimeout)
+    }
+    setIsTyping(false)
+    updateTypingStatus(false)
+    
     try {
       setSendingReply(true)
       // Use the first message ID from thread (the original email) to send reply
@@ -379,12 +593,16 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
   // Filter and sort tickets based on active tab and filters
   const getFilteredTickets = () => {
     let filtered = [...tickets]
+    console.log('[Filter] Starting with', filtered.length, 'tickets')
 
     // Tab-based filtering
+    console.log('[Filter] After tab filter (' + activeTab + '):', filtered.length)
     if (activeTab === "assigned") {
       filtered = filtered.filter(t => t.assigneeUserId === currentUserId)
+      console.log('[Filter] Assigned filter:', filtered.length)
     } else if (activeTab === "unassigned") {
       filtered = filtered.filter(t => t.assigneeUserId === null)
+      console.log('[Filter] Unassigned filter:', filtered.length)
     }
     // "all" tab shows all tickets (no filter)
 
@@ -408,12 +626,92 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
         (t.customerName && t.customerName.toLowerCase().includes(query))
       )
     }
+    
+    // Tags filter
+    if (tagsFilter !== "all") {
+      filtered = filtered.filter(t => t.tags.includes(tagsFilter))
+    }
+    
+    // Date filter
+    if (dateFilter !== "all") {
+      console.log('[Filter] Before date filter:', filtered.length, 'dateFilter:', dateFilter)
+      const now = new Date()
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+      const todayEnd = new Date(today)
+      todayEnd.setHours(23, 59, 59, 999)
+      
+      filtered = filtered.filter(t => {
+        // Use lastCustomerReplyAt if available, otherwise use createdAt
+        const ticketDateStr = t.lastCustomerReplyAt || t.createdAt
+        if (!ticketDateStr) return false
+        
+        const ticketDate = new Date(ticketDateStr)
+        
+        if (dateFilter === "today") {
+          // Simple date comparison - get date strings in YYYY-MM-DD format
+          const ticketYear = ticketDate.getFullYear()
+          const ticketMonth = ticketDate.getMonth()
+          const ticketDay = ticketDate.getDate()
+          
+          const todayYear = now.getFullYear()
+          const todayMonth = now.getMonth()
+          const todayDay = now.getDate()
+          
+          const isToday = ticketYear === todayYear && 
+                         ticketMonth === todayMonth && 
+                         ticketDay === todayDay
+          
+          if (!isToday) {
+            console.log('[Date Filter] Ticket not matching today:', {
+              ticket: {
+                id: t.id,
+                subject: t.subject,
+                dateStr: ticketDateStr,
+                year: ticketYear,
+                month: ticketMonth,
+                day: ticketDay,
+                fullDate: ticketDate.toISOString()
+              },
+              today: {
+                year: todayYear,
+                month: todayMonth,
+                day: todayDay,
+                fullDate: now.toISOString()
+              }
+            })
+          }
+          
+          return isToday
+        } else if (dateFilter === "week") {
+          const weekAgo = new Date(today)
+          weekAgo.setDate(weekAgo.getDate() - 7)
+          weekAgo.setHours(0, 0, 0, 0)
+          return ticketDate >= weekAgo
+        } else if (dateFilter === "month") {
+          const monthAgo = new Date(today)
+          monthAgo.setMonth(monthAgo.getMonth() - 1)
+          monthAgo.setHours(0, 0, 0, 0)
+          return ticketDate >= monthAgo
+        } else if (dateFilter === "custom") {
+          if (!customDateStart || !customDateEnd) return true
+          const start = new Date(customDateStart)
+          start.setHours(0, 0, 0, 0)
+          const end = new Date(customDateEnd)
+          end.setHours(23, 59, 59, 999)
+          return ticketDate >= start && ticketDate <= end
+        }
+        return true
+      })
+      console.log('[Filter] After date filter:', filtered.length)
+    }
 
     // Sort by last_customer_reply_at (oldest first, nulls last)
+    // Tickets that have been waiting longest (oldest last_customer_reply_at) are at the top
+    // When a customer replies, last_customer_reply_at updates to now, moving ticket down
     filtered.sort((a, b) => {
       const aDate = a.lastCustomerReplyAt ? new Date(a.lastCustomerReplyAt).getTime() : Infinity
       const bDate = b.lastCustomerReplyAt ? new Date(b.lastCustomerReplyAt).getTime() : Infinity
-      return aDate - bDate
+      return aDate - bDate // Ascending: oldest first
     })
 
     return filtered
@@ -446,7 +744,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
       <div className={`border-b md:border-b-0 md:border-r border-border bg-card overflow-y-auto ${
         selectedTicket ? "hidden md:flex md:w-96" : "flex w-full md:w-96"
       } flex-col`}>
-        <div className="p-4 border-b border-border space-y-4">
+        <div className="p-3 border-b border-border space-y-3">
           <h2 className="text-lg font-semibold">Tickets</h2>
           
           {/* Tabs */}
@@ -458,72 +756,144 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
             </TabsList>
           </Tabs>
 
-          {/* Search */}
-          <Input
-            placeholder="Search by subject or email..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-          
-          {/* Filters */}
-          <div className="space-y-2">
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger>
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Statuses</SelectItem>
-                <SelectItem value="open">Open</SelectItem>
-                <SelectItem value="pending">Pending</SelectItem>
-                <SelectItem value="on_hold">On Hold</SelectItem>
-                <SelectItem value="closed">Closed</SelectItem>
-              </SelectContent>
-            </Select>
+          {/* Search and Filters */}
+          <div className="space-y-2.5">
+            <Input
+              placeholder="Search by subject or email..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            
+            {/* Filters - Compact Horizontal Layout */}
+            <div className="flex flex-wrap gap-3">
+              <div className="flex flex-col gap-1.5 min-w-[140px]">
+                <Label className="text-xs font-medium text-muted-foreground">Status</Label>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="w-full [&>span]:!line-clamp-none [&>span]:truncate">
+                    <SelectValue placeholder="Status" />
+                  </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Statuses</SelectItem>
+                      <SelectItem value="open">Open</SelectItem>
+                      <SelectItem value="pending">Pending</SelectItem>
+                      <SelectItem value="on_hold">On Hold</SelectItem>
+                      <SelectItem value="closed">Closed</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
-            <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-              <SelectTrigger>
-                <SelectValue placeholder="Priority" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Priorities</SelectItem>
-                <SelectItem value="urgent">Urgent</SelectItem>
-                <SelectItem value="high">High</SelectItem>
-                <SelectItem value="medium">Medium</SelectItem>
-                <SelectItem value="low">Low</SelectItem>
-              </SelectContent>
-            </Select>
+              <div className="flex flex-col gap-1.5 min-w-[140px]">
+                <Label className="text-xs font-medium text-muted-foreground">Priority</Label>
+                <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+                  <SelectTrigger className="w-full [&>span]:!line-clamp-none [&>span]:truncate">
+                    <SelectValue placeholder="Priority" />
+                  </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Priorities</SelectItem>
+                      <SelectItem value="urgent">Urgent</SelectItem>
+                      <SelectItem value="high">High</SelectItem>
+                      <SelectItem value="medium">Medium</SelectItem>
+                      <SelectItem value="low">Low</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
-            <Select value={assigneeFilter} onValueChange={setAssigneeFilter}>
-              <SelectTrigger>
-                <SelectValue placeholder="Assignee" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Assignees</SelectItem>
-                <SelectItem value="unassigned">Unassigned</SelectItem>
-                {users.map((user) => (
-                  <SelectItem key={user.id} value={user.id}>
-                    {user.name}
-                  </SelectItem>
-                ))}
-                {currentUserId && (
-                  <SelectItem value={currentUserId}>Me</SelectItem>
-                )}
-              </SelectContent>
-            </Select>
+              <div className="flex flex-col gap-1.5 min-w-[160px]">
+                <Label className="text-xs font-medium text-muted-foreground">Assignee</Label>
+                <Select value={assigneeFilter} onValueChange={setAssigneeFilter}>
+                  <SelectTrigger className="w-full [&>span]:!line-clamp-none [&>span]:truncate">
+                    <SelectValue placeholder="Assignee" />
+                  </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Assignees</SelectItem>
+                      <SelectItem value="unassigned">Unassigned</SelectItem>
+                      {users.map((user) => (
+                        <SelectItem key={user.id} value={user.id}>
+                          {user.name}
+                        </SelectItem>
+                      ))}
+                      {currentUserId && (
+                        <SelectItem value={currentUserId}>Me</SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+              {/* Tags Filter */}
+              <div className="flex flex-col gap-1.5 min-w-[140px]">
+                <Label className="text-xs font-medium text-muted-foreground">Tags</Label>
+                <Select value={tagsFilter} onValueChange={setTagsFilter}>
+                  <SelectTrigger className="w-full [&>span]:!line-clamp-none [&>span]:truncate">
+                    <SelectValue placeholder="Tags" />
+                  </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Tags</SelectItem>
+                      {Array.from(new Set(tickets.flatMap(t => t.tags))).sort().map((tag) => (
+                        <SelectItem key={tag} value={tag}>
+                          {tag}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+              {/* Date Filter */}
+              <div className="flex flex-col gap-1.5 min-w-[160px]">
+                <Label className="text-xs font-medium text-muted-foreground">Date</Label>
+                <Select value={dateFilter} onValueChange={setDateFilter}>
+                  <SelectTrigger className="w-full [&>span]:!line-clamp-none [&>span]:truncate">
+                    <SelectValue placeholder="Date" />
+                  </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Dates</SelectItem>
+                      <SelectItem value="today">Today</SelectItem>
+                      <SelectItem value="week">Last 7 Days</SelectItem>
+                      <SelectItem value="month">Last 30 Days</SelectItem>
+                      <SelectItem value="custom">Custom Range</SelectItem>
+                    </SelectContent>
+                  </Select>
+              </div>
+            </div>
+            
+            {/* Custom Date Range Inputs */}
+            {dateFilter === "custom" && (
+              <div className="grid grid-cols-2 gap-2">
+                <Input
+                  type="date"
+                  placeholder="Start Date"
+                  value={customDateStart}
+                  onChange={(e) => setCustomDateStart(e.target.value)}
+                />
+                <Input
+                  type="date"
+                  placeholder="End Date"
+                  value={customDateEnd}
+                  onChange={(e) => setCustomDateEnd(e.target.value)}
+                />
+              </div>
+            )}
           </div>
         </div>
 
         <div className="flex-1 overflow-y-auto">
           {filteredTickets.length === 0 ? (
-            <div className="p-4 text-center text-muted-foreground">
+            <div className="p-4 text-center text-muted-foreground space-y-2">
+              <p>No tickets found</p>
+              {tickets.length > 0 && (
+                <p className="text-xs">Total tickets: {tickets.length} (filtered out by current filters)</p>
+              )}
+              {dateFilter !== "all" && (
+                <p className="text-xs">Active date filter: {dateFilter}</p>
+              )}
+              <p className="text-xs">Check browser console (F12) for debugging info</p>
               No tickets found
             </div>
           ) : (
             filteredTickets.map((ticket) => (
               <Card
                 key={ticket.id}
-                className={`m-2 cursor-pointer hover:bg-accent transition-colors ${
-                  selectedTicket?.id === ticket.id ? "bg-accent" : ""
+                className={`m-2 cursor-pointer hover:bg-muted/50 transition-all ${
+                  selectedTicket?.id === ticket.id ? "border-primary border-2 bg-muted/30" : "border-border"
                 }`}
                 onClick={() => setSelectedTicket(ticket)}
               >
@@ -536,9 +906,12 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                       <Badge className={`${getStatusColor(ticket.status)} text-white text-xs`}>
                         {ticket.status}
                       </Badge>
-                      <Badge className={`${getPriorityColor(ticket.priority)} text-white text-xs`}>
-                        {ticket.priority}
-                      </Badge>
+                      {/* Only show priority if ticket is assigned */}
+                      {ticket.assigneeUserId && (
+                        <Badge className={`${getPriorityColor(ticket.priority)} text-white text-xs`}>
+                          {ticket.priority}
+                        </Badge>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -579,9 +952,12 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                     <Badge className={getStatusColor(selectedTicket.status)}>
                       {selectedTicket.status}
                     </Badge>
-                    <Badge className={getPriorityColor(selectedTicket.priority)}>
-                      {selectedTicket.priority}
-                    </Badge>
+                    {/* Only show priority badge if ticket is assigned and has priority */}
+                    {selectedTicket.assigneeUserId && selectedTicket.priority && (
+                      <Badge className={getPriorityColor(selectedTicket.priority)}>
+                        {selectedTicket.priority}
+                      </Badge>
+                    )}
                     {selectedTicket.tags.map((tag, idx) => (
                       <Badge key={idx} variant="outline">{tag}</Badge>
                     ))}
@@ -602,7 +978,16 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                 {canAssign && (
                   <Select
                     value={selectedTicket.assigneeUserId || "unassigned"}
-                    onValueChange={(value) => handleAssign(selectedTicket.id, value === "unassigned" ? null : value)}
+                    onValueChange={(value) => {
+                      const assigneeId = value === "unassigned" ? null : value
+                      // If assigning to someone (not unassigning), require priority
+                      if (assigneeId && !selectedTicket.assigneeUserId) {
+                        setPendingAssignment({ ticketId: selectedTicket.id, assigneeUserId: assigneeId })
+                        setShowAssignDialog(true)
+                      } else {
+                        handleAssign(selectedTicket.id, assigneeId)
+                      }
+                    }}
                     disabled={assigning === selectedTicket.id}
                   >
                     <SelectTrigger className="w-48">
@@ -633,21 +1018,34 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                     <SelectItem value="closed">Closed</SelectItem>
                   </SelectContent>
                 </Select>
-                <Select
-                  value={selectedTicket.priority}
-                  onValueChange={(v) => handleUpdatePriority(v as Ticket["priority"])}
-                  disabled={updatingPriority}
-                >
-                  <SelectTrigger className="w-32">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="low">Low</SelectItem>
-                    <SelectItem value="medium">Medium</SelectItem>
-                    <SelectItem value="high">High</SelectItem>
-                    <SelectItem value="urgent">Urgent</SelectItem>
-                  </SelectContent>
-                </Select>
+                {/* Priority selector - only shown for assigned tickets and Admin/Manager */}
+                {selectedTicket.assigneeUserId ? (
+                  canAssign ? (
+                    <Select
+                      value={selectedTicket.priority || "medium"}
+                      onValueChange={(v) => handleUpdatePriority(v as Ticket["priority"])}
+                      disabled={updatingPriority}
+                    >
+                      <SelectTrigger className="w-32">
+                        <SelectValue placeholder="Priority" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="low">Low</SelectItem>
+                        <SelectItem value="medium">Medium</SelectItem>
+                        <SelectItem value="high">High</SelectItem>
+                        <SelectItem value="urgent">Urgent</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <div className="text-xs text-muted-foreground px-2 py-1.5 border border-border rounded-md">
+                      Priority: {selectedTicket.priority || "Not set"}
+                    </div>
+                  )
+                ) : (
+                  <div className="text-xs text-muted-foreground px-2 py-1.5 border border-border rounded-md">
+                    Priority: Set when assigned
+                  </div>
+                )}
               </div>
 
               {/* Tags Editor */}
@@ -697,25 +1095,48 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
               {/* Conversation Thread */}
               <Card>
                 <CardContent className="p-4">
-                  <h3 className="font-semibold mb-4 flex items-center gap-2">
-                    <MessageSquare className="w-4 h-4" />
-                    Conversation
-                  </h3>
-                  <div className="space-y-4">
-                    {threadMessages.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">Loading conversation...</p>
-                    ) : (
-                      threadMessages.map((msg, idx) => (
-                        <div key={idx} className="border-l-2 border-border pl-4 py-2">
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="text-sm font-medium">{msg.from}</span>
-                            <span className="text-xs text-muted-foreground">{formatDate(msg.date)}</span>
-                          </div>
-                          <div className="text-sm whitespace-pre-wrap">{msg.body || msg.subject}</div>
-                        </div>
-                      ))
-                    )}
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-semibold flex items-center gap-2">
+                      <MessageSquare className="w-4 h-4" />
+                      Conversation
+                    </h3>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setConversationMinimized(!conversationMinimized)}
+                      className="h-8 w-8 p-0"
+                    >
+                      {conversationMinimized ? (
+                        <ChevronDown className="w-4 h-4" />
+                      ) : (
+                        <ChevronUp className="w-4 h-4" />
+                      )}
+                    </Button>
                   </div>
+                  {!conversationMinimized && (
+                    <div className="space-y-4">
+                      {loadingThread ? (
+                        <div className="flex items-center justify-center py-8">
+                          <div className="flex flex-col items-center gap-2">
+                            <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                            <p className="text-sm text-muted-foreground">Loading conversation...</p>
+                          </div>
+                        </div>
+                      ) : threadMessages.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No messages yet</p>
+                      ) : (
+                        threadMessages.map((msg, idx) => (
+                          <div key={idx} className="border-l-2 border-border pl-4 py-2">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-sm font-medium">{msg.from}</span>
+                              <span className="text-xs text-muted-foreground">{formatDate(msg.date)}</span>
+                            </div>
+                            <div className="text-sm whitespace-pre-wrap">{msg.body || msg.subject}</div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -728,9 +1149,58 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                       <div key={note.id} className="border-l-2 border-primary pl-4 py-2 bg-muted/50 rounded">
                         <div className="flex items-center justify-between mb-1">
                           <span className="text-sm font-medium">{note.userName}</span>
-                          <span className="text-xs text-muted-foreground">{formatDate(note.createdAt)}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground">{formatDate(note.createdAt)}</span>
+                            {currentUserId === note.userId && (
+                              editingNoteId === note.id ? (
+                                <div className="flex items-center gap-1">
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-6 w-6 p-0"
+                                    onClick={(e) => {
+                                      e.preventDefault()
+                                      e.stopPropagation()
+                                      handleUpdateNote()
+                                    }}
+                                    disabled={addingNote || !editingNoteContent.trim()}
+                                    type="button"
+                                  >
+                                    <Check className="w-3 h-3 text-green-500" />
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-6 w-6 p-0"
+                                    onClick={handleCancelEditNote}
+                                    disabled={addingNote}
+                                  >
+                                    <XCircle className="w-3 h-3 text-red-500" />
+                                  </Button>
+                                </div>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-6 w-6 p-0"
+                                  onClick={() => handleStartEditNote(note)}
+                                >
+                                  <Edit2 className="w-3 h-3" />
+                                </Button>
+                              )
+                            )}
+                          </div>
                         </div>
-                        <p className="text-sm whitespace-pre-wrap">{note.content}</p>
+                        {editingNoteId === note.id ? (
+                          <Textarea
+                            value={editingNoteContent}
+                            onChange={(e) => setEditingNoteContent(e.target.value)}
+                            className="min-h-20 text-sm"
+                            autoFocus
+                          />
+                        ) : (
+                          <p className="text-sm whitespace-pre-wrap">{note.content}</p>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -800,10 +1270,25 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                       </Button>
                     </div>
                   )}
+                  {/* Typing Indicator */}
+                  {typingUsers.length > 0 && (
+                    <div className="mb-2 px-2 py-1 bg-primary/10 border border-primary/20 rounded text-xs text-primary italic flex items-center gap-1 animate-in fade-in">
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      <span>
+                        {typingUsers.map((userId) => {
+                          const user = users.find(u => u.id === userId)
+                          return user ? user.name : "Someone"
+                        }).filter(Boolean).join(", ")} {typingUsers.length === 1 ? 'is' : 'are'} typing...
+                      </span>
+                    </div>
+                  )}
                   <Textarea
                     placeholder="Type your reply..."
                     value={replyText}
-                    onChange={(e) => setReplyText(e.target.value)}
+                    onChange={(e) => {
+                      setReplyText(e.target.value)
+                      handleTyping()
+                    }}
                     className="min-h-32 mb-4"
                   />
                   <Button onClick={handleSendReply} disabled={!replyText.trim() || sendingReply}>
@@ -836,6 +1321,45 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
           </div>
         )}
       </div>
+
+      {/* Assignment Dialog with Priority Selection */}
+      <Dialog open={showAssignDialog} onOpenChange={setShowAssignDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Assign Ticket</DialogTitle>
+            <DialogDescription>
+              Select a priority for this ticket before assigning it.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="assign-priority">Priority *</Label>
+              <Select value={assignPriority} onValueChange={setAssignPriority}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="low">Low</SelectItem>
+                  <SelectItem value="medium">Medium</SelectItem>
+                  <SelectItem value="high">High</SelectItem>
+                  <SelectItem value="urgent">Urgent</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => {
+                setShowAssignDialog(false)
+                setPendingAssignment(null)
+              }}>
+                Cancel
+              </Button>
+              <Button onClick={handleConfirmAssign} disabled={assigning !== null}>
+                {assigning ? <Loader2 className="w-4 h-4 animate-spin" /> : "Assign"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

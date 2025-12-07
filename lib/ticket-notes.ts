@@ -109,6 +109,88 @@ export async function createTicketNote(
 }
 
 /**
+ * Update a note
+ * @param noteId - Note ID
+ * @param content - New note content
+ * @param userId - User ID (required, pass from API route)
+ */
+export async function updateTicketNote(
+  noteId: string,
+  content: string,
+  userId: string
+): Promise<TicketNote | null> {
+  if (!supabase) return null;
+
+  if (!userId) return null;
+
+  const nowIso = new Date().toISOString();
+
+  // First verify the note exists and belongs to this user
+  const { data: existingNote, error: fetchError } = await supabase
+    .from('ticket_notes')
+    .select('user_id')
+    .eq('id', noteId)
+    .maybeSingle();
+
+  if (fetchError || !existingNote) {
+    console.error('Error fetching note for update:', fetchError);
+    return null;
+  }
+
+  // Compare user IDs (convert to strings to ensure proper comparison)
+  const noteUserId = String(existingNote.user_id || '').trim();
+  const requestUserId = String(userId || '').trim();
+  
+  console.log('[Update Note] Comparing user IDs:', {
+    noteUserId,
+    requestUserId,
+    match: noteUserId === requestUserId,
+    noteUserIdType: typeof existingNote.user_id,
+    requestUserIdType: typeof userId
+  });
+
+  if (noteUserId !== requestUserId) {
+    console.error('User does not have permission to edit this note', {
+      noteUserId,
+      requestUserId
+    });
+    return null;
+  }
+
+  // Update the note
+  const { data, error } = await supabase
+    .from('ticket_notes')
+    .update({
+      content: content.trim(),
+      updated_at: nowIso,
+    })
+    .eq('id', noteId)
+    .eq('user_id', userId) // Ensure user can only update their own notes
+    .select(`
+      *,
+      user:users!ticket_notes_user_id_fkey(id, name)
+    `)
+    .maybeSingle();
+
+  if (error) {
+    console.error('Error updating ticket note:', error);
+    return null;
+  }
+
+  if (!data) return null;
+
+  return {
+    id: data.id,
+    ticketId: data.ticket_id,
+    userId: data.user_id,
+    userName: data.user?.name || 'Unknown',
+    content: data.content,
+    createdAt: data.created_at,
+    updatedAt: data.updated_at,
+  };
+}
+
+/**
  * Delete a note
  * @param noteId - Note ID
  * @param userId - User ID (required, pass from API route)

@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getTicketNotes, createTicketNote } from '@/lib/ticket-notes';
+import { getTicketNotes, createTicketNote, updateTicketNote } from '@/lib/ticket-notes';
 import { getCurrentUserIdFromRequest } from '@/lib/permissions';
 import { getCurrentUserEmail } from '@/lib/storage';
 
@@ -101,6 +101,59 @@ export async function POST(
     console.error('Error creating ticket note:', error);
     return NextResponse.json(
       { error: 'Failed to create note', details: (error as Error).message },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PATCH(
+  request: NextRequest,
+  context: RouteContext
+) {
+  try {
+    const paramsData = await Promise.resolve((context as any).params);
+    const ticketId = paramsData?.id;
+
+    if (!ticketId) {
+      return NextResponse.json(
+        { error: 'Missing ticket ID' },
+        { status: 400 }
+      );
+    }
+
+    const userId = getCurrentUserIdFromRequest(request);
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'Not authenticated' },
+        { status: 401 }
+      );
+    }
+
+    const body = await request.json();
+    const { noteId, content } = body;
+
+    if (!noteId || !content || typeof content !== 'string' || !content.trim()) {
+      return NextResponse.json(
+        { error: 'Note ID and content are required' },
+        { status: 400 }
+      );
+    }
+
+    console.log('[Update Note API] Request:', { ticketId, noteId, userId, contentLength: content.length });
+    const note = await updateTicketNote(noteId, content, userId);
+
+    if (!note) {
+      return NextResponse.json(
+        { error: 'Failed to update note. You can only edit your own notes.' },
+        { status: 403 }
+      );
+    }
+
+    return NextResponse.json({ note });
+  } catch (error) {
+    console.error('Error updating ticket note:', error);
+    return NextResponse.json(
+      { error: 'Failed to update note', details: (error as Error).message },
       { status: 500 }
     );
   }

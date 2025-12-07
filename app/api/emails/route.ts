@@ -91,17 +91,26 @@ export async function GET(request: NextRequest) {
             const isSpamOrTrash = labels.some((label: string) => ['SPAM', 'TRASH'].includes(label));
             
             if (!isSpamOrTrash) {
-              await ensureTicketForEmail(
-                {
-                  id: email.id,
-                  threadId: email.threadId,
-                  subject: email.subject,
-                  from: email.from,
-                  to: email.to,
-                  date: email.date,
-                },
-                false
-              );
+              try {
+                const ticket = await ensureTicketForEmail(
+                  {
+                    id: email.id,
+                    threadId: email.threadId,
+                    subject: email.subject,
+                    from: email.from,
+                    to: email.to,
+                    date: email.date,
+                  },
+                  false
+                );
+                if (ticket) {
+                  console.log(`[Ticket] Created/updated ticket ${ticket.id} for email ${email.id} (thread: ${email.threadId})`);
+                } else {
+                  console.warn(`[Ticket] Failed to create ticket for email ${email.id}`);
+                }
+              } catch (ticketError) {
+                console.error(`[Ticket] Error creating ticket for email ${email.id}:`, ticketError);
+              }
             }
           } catch (error) {
             console.error(`Error processing received email ${email.id}:`, error);

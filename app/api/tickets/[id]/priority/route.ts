@@ -5,7 +5,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { updateTicketPriority } from '@/lib/tickets';
 import { getCurrentUserEmail } from '@/lib/storage';
-import { getCurrentUserIdFromRequest } from '@/lib/permissions';
+import { getCurrentUserIdFromRequest, canReassignTickets } from '@/lib/permissions';
 
 type RouteContext =
   | { params: { id: string } }
@@ -39,6 +39,15 @@ export async function PATCH(
       return NextResponse.json(
         { error: 'No Gmail account connected' },
         { status: 400 }
+      );
+    }
+
+    // Check permissions - only Admin/Manager can update priority
+    const canEdit = await canReassignTickets(userId);
+    if (!canEdit) {
+      return NextResponse.json(
+        { error: 'Permission denied. Only Admin and Manager can update ticket priority.' },
+        { status: 403 }
       );
     }
 

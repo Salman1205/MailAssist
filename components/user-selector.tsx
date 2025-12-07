@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { User } from "lucide-react"
 import PromoteAdminDialog from "@/components/promote-admin-dialog"
 
 interface User {
@@ -168,27 +169,33 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
   }
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-background p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>Select Your Account</CardTitle>
-          <CardDescription>
-            Choose which team member you are, or create a new account
+    <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-background to-muted/20 p-4">
+      <Card className="w-full max-w-lg shadow-lg border-2">
+        <CardHeader className="text-center pb-4">
+          <CardTitle className="text-2xl">Welcome Back!</CardTitle>
+          <CardDescription className="text-base">
+            Select your team member account or create a new one
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-6">
           {error && (
-            <div className="p-3 bg-destructive/10 text-destructive text-sm rounded-md">
+            <div className="p-3 bg-destructive/10 text-destructive text-sm rounded-md border border-destructive/20">
               {error}
             </div>
           )}
 
           {users.length === 0 ? (
-            <div className="text-center py-8">
-              <p className="text-muted-foreground mb-4">No users found. Create the first user (will be Admin):</p>
+            <div className="text-center py-8 space-y-4">
+              <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto">
+                <User className="w-8 h-8 text-primary" />
+              </div>
+              <div>
+                <p className="text-lg font-medium mb-2">No team members yet</p>
+                <p className="text-muted-foreground mb-6">Create the first user (will be Admin):</p>
+              </div>
               <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
                 <DialogTrigger asChild>
-                  <Button>Create First User (Admin)</Button>
+                  <Button size="lg" className="w-full">Create First User (Admin)</Button>
                 </DialogTrigger>
                 <DialogContent>
                   <DialogHeader>
@@ -233,7 +240,7 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
                         The first user must be Admin to manage the system.
                       </p>
                     </div>
-                    <Button onClick={handleCreateUser} disabled={creating || !newUserName.trim() || newUserRole !== "admin"}>
+                    <Button onClick={handleCreateUser} disabled={creating || !newUserName.trim() || newUserRole !== "admin"} className="w-full">
                       {creating ? "Creating..." : "Create Admin User"}
                     </Button>
                   </div>
@@ -242,23 +249,49 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
             </div>
           ) : (
             <>
-              <div className="space-y-2">
-                {users.map((user) => (
-                  <Button
-                    key={user.id}
-                    variant="outline"
-                    className="w-full justify-start h-auto py-3"
-                    onClick={() => handleSelectUser(user.id)}
-                  >
-                    <div className="flex flex-col items-start">
-                      <span className="font-medium">{user.name}</span>
-                      {user.email && (
-                        <span className="text-xs text-muted-foreground">{user.email}</span>
-                      )}
-                      <span className="text-xs text-muted-foreground capitalize">{user.role}</span>
-                    </div>
-                  </Button>
-                ))}
+              <div className="space-y-3">
+                <p className="text-sm font-medium text-muted-foreground mb-2">Select your account:</p>
+                {users.map((user) => {
+                  const isSelected = currentUserId === user.id
+                  return (
+                    <Button
+                      key={user.id}
+                      variant="outline"
+                      className={`w-full justify-start h-auto py-4 px-4 transition-all relative ${
+                        isSelected 
+                          ? "border-primary border-2 bg-primary/10 shadow-md ring-2 ring-primary/20" 
+                          : "hover:bg-accent hover:border-primary/50 hover:border-2"
+                      }`}
+                      onClick={() => handleSelectUser(user.id)}
+                    >
+                      <div className="flex items-center gap-3 w-full">
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
+                          isSelected ? "bg-primary/20" : "bg-primary/10"
+                        }`}>
+                          <User className={`w-5 h-5 ${isSelected ? "text-primary" : "text-primary"}`} />
+                        </div>
+                        <div className="flex flex-col items-start flex-1 min-w-0">
+                          <span className={`font-semibold text-base ${
+                            isSelected ? "text-foreground" : "text-foreground"
+                          }`}>{user.name}</span>
+                          {user.email && (
+                            <span className={`text-xs truncate w-full ${
+                              isSelected ? "text-muted-foreground" : "text-muted-foreground"
+                            }`}>{user.email}</span>
+                          )}
+                          <span className={`text-xs font-medium capitalize mt-0.5 ${
+                            isSelected ? "text-primary" : "text-primary"
+                          }`}>{user.role}</span>
+                        </div>
+                        {isSelected && (
+                          <div className="flex-shrink-0">
+                            <div className="w-2 h-2 rounded-full bg-primary"></div>
+                          </div>
+                        )}
+                      </div>
+                    </Button>
+                  )
+                })}
               </div>
 
               {/* Only show create button if user is admin or no admin exists */}

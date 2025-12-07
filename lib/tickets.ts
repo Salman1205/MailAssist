@@ -11,7 +11,7 @@ export interface Ticket {
   customerName?: string | null;
   subject: string;
   status: TicketStatus;
-  priority: TicketPriority;
+  priority?: TicketPriority | null; // Optional - only set when ticket is assigned
   assignee?: string | null; // Legacy field (deprecated)
   assigneeUserId?: string | null; // New field - UUID of assigned user
   assigneeName?: string | null; // Name of assigned user (for display)
@@ -51,7 +51,7 @@ function mapRowToTicket(row: any): Ticket {
     customerName: row.customer_name,
     subject: row.subject,
     status: (row.status || 'open') as TicketStatus,
-    priority: (row.priority || 'medium') as TicketPriority,
+    priority: (row.priority || null) as TicketPriority | null,
     assignee: row.assignee, // Legacy field
     assigneeUserId: row.assignee_user_id || null,
     assigneeName: row.assignee_name || null, // Joined from users table
@@ -114,7 +114,7 @@ export async function getOrCreateTicketForThread(
     customer_name: seed.customerName ?? null,
     subject: seed.subject,
     status: seed.initialStatus ?? 'open',
-    priority: seed.priority ?? 'medium',
+    priority: seed.priority ?? null, // Don't set priority for unassigned tickets
     assignee: null, // Legacy field
     assignee_user_id: null, // New tickets are unassigned
     tags: seed.tags ?? [],
@@ -136,11 +136,16 @@ export async function getOrCreateTicketForThread(
 
   if (error) {
     console.error('Error creating ticket:', error);
+    console.error('Ticket payload:', payload);
     return null;
   }
 
-  if (!data) return null;
+  if (!data) {
+    console.warn('No data returned when creating ticket for thread:', threadId);
+    return null;
+  }
 
+  console.log(`[Ticket] Successfully created ticket ${data.id} for thread ${threadId}`);
   return mapRowToTicket(data);
 }
 
@@ -175,11 +180,19 @@ export async function ensureTicketForEmail(
       customerEmail,
       customerName: null,
       initialStatus: isFromAgent ? 'pending' : 'open',
-      priority: 'medium',
+      priority: null, // Don't set priority for unassigned tickets
       tags: [],
       lastCustomerReplyAt: isFromAgent ? undefined : dateIso,
       lastAgentReplyAt: isFromAgent ? dateIso : undefined,
     })!;
+    if (ticket) {
+      console.log(`[Ticket] Created ticket ${ticket.id} for email ${email.id}`, {
+        threadId,
+        lastCustomerReplyAt: ticket.lastCustomerReplyAt,
+        createdAt: ticket.createdAt,
+        dateIso
+      });
+    }
     return ticket;
   }
 
@@ -204,13 +217,16 @@ export async function ensureTicketForEmail(
     updates.user_email = userEmail;
   }
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('tickets')
     .update(updates)
-    .eq('thread_id', threadId)
-    .modify((qb) => {
-      if (userEmail) qb.eq('user_email', userEmail);
-    })
+    .eq('thread_id', threadId);
+  
+  if (userEmail) {
+    query = query.eq('user_email', userEmail);
+  }
+  
+  const { data, error } = await query
     .select('*')
     .maybeSingle();
 
@@ -255,6 +271,8 @@ export async function getTickets(
   // Admin/Manager: see all (no additional filter)
 
   // Order by last_customer_reply_at ascending (oldest customer-waiting first)
+  // Tickets that have been waiting longest (oldest last_customer_reply_at) are at the top
+  // When a customer replies, last_customer_reply_at updates to now, moving ticket down
   // Tickets with null last_customer_reply_at go to the end
   query = query.order('last_customer_reply_at', { ascending: true, nullsFirst: false });
 
