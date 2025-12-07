@@ -42,13 +42,33 @@ export async function PATCH(
       );
     }
 
-    // Check permissions - only Admin/Manager can update priority
+    // Check permissions - Admin/Manager can always update priority
+    // Agents can update priority when taking/assigning tickets to themselves
     const canEdit = await canReassignTickets(userId);
+    
     if (!canEdit) {
-      return NextResponse.json(
-        { error: 'Permission denied. Only Admin and Manager can update ticket priority.' },
-        { status: 403 }
-      );
+      // For Agents, allow setting priority when taking a ticket
+      // Check if ticket is unassigned (they're taking it) or already assigned to them
+      const { getTicketById } = await import('@/lib/tickets');
+      const ticket = await getTicketById(ticketId, userId, false, userEmail);
+      
+      if (!ticket) {
+        return NextResponse.json(
+          { error: 'Ticket not found' },
+          { status: 404 }
+        );
+      }
+      
+      // Allow if ticket is unassigned (they're taking it) or already assigned to them
+      const isUnassigned = !ticket.assigneeUserId;
+      const isAssignedToSelf = ticket.assigneeUserId === userId;
+      
+      if (!isUnassigned && !isAssignedToSelf) {
+        return NextResponse.json(
+          { error: 'Permission denied. You can only set priority for tickets assigned to you.' },
+          { status: 403 }
+        );
+      }
     }
 
     const body = await request.json();

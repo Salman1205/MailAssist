@@ -119,8 +119,15 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
   const fetchTypingIndicator = async () => {
     if (!selectedTicket) return
     try {
-      const response = await fetch(`/api/tickets/${selectedTicket.id}/typing`)
-      if (response.ok) {
+      const response = await fetch(`/api/tickets/${selectedTicket.id}/typing`, {
+        method: 'GET',
+        credentials: 'include',
+      }).catch((networkError) => {
+        // Network error - silently fail (typing indicator is not critical)
+        return null
+      })
+      
+      if (response && response.ok) {
         const data = await response.json()
         const typingUserIds = data.typingUsers || []
         // Always log to debug
@@ -137,7 +144,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
         })
       }
     } catch (err) {
-      console.error('[Typing Indicator] Error fetching:', err)
+      // Silently fail - typing indicator is not critical
     }
   }
 
@@ -234,10 +241,19 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
 
   const fetchUsers = async () => {
     try {
-      const response = await fetch("/api/users")
-      if (!response.ok) return
-      const data = await response.json()
-      setUsers(data.users || [])
+      const response = await fetch("/api/users", {
+        method: 'GET',
+        credentials: 'include',
+      }).catch((networkError) => {
+        // Network error - return null to indicate failure
+        console.warn("Network error fetching users:", networkError)
+        return null
+      })
+      
+      if (response && response.ok) {
+        const data = await response.json()
+        setUsers(data.users || [])
+      }
     } catch (err) {
       console.error("Error fetching users:", err)
     }
@@ -288,19 +304,25 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
   const handleAssign = async (ticketId: string, assigneeUserId: string | null, priority?: string) => {
     try {
       setAssigning(ticketId)
+      console.log('[Assign Ticket] Starting assignment:', { ticketId, assigneeUserId, priority })
       
       // If assigning and priority is provided, update priority first
       if (assigneeUserId && priority) {
+        console.log('[Assign Ticket] Setting priority:', priority)
         const priorityResponse = await fetch(`/api/tickets/${ticketId}/priority`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ priority }),
         })
         if (!priorityResponse.ok) {
-          throw new Error("Failed to set priority")
+          const errorData = await priorityResponse.json().catch(() => ({}))
+          console.error('[Assign Ticket] Priority update failed:', errorData)
+          throw new Error(errorData.error || "Failed to set priority")
         }
+        console.log('[Assign Ticket] Priority set successfully')
       }
       
+      console.log('[Assign Ticket] Assigning ticket to:', assigneeUserId)
       const response = await fetch(`/api/tickets/${ticketId}/assign`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -308,29 +330,57 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
       })
 
       if (!response.ok) {
-        const errorData = await response.json()
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+        console.error('[Assign Ticket] Assignment failed:', errorData)
         throw new Error(errorData.error || "Failed to assign ticket")
       }
+      
+      console.log('[Assign Ticket] Assignment successful')
 
       const data = await response.json()
+      
+      // Update tickets list
       setTickets((prev) => prev.map((t) => (t.id === ticketId ? data.ticket : t)))
+      
+      // Update selected ticket if it's the one being assigned
       if (selectedTicket?.id === ticketId) {
         setSelectedTicket(data.ticket)
       }
-      toast({ title: "Ticket assigned successfully" })
+      
+      // Close dialog and clear pending assignment BEFORE showing toast
       setShowAssignDialog(false)
       setPendingAssignment(null)
+      
+      toast({ title: "Ticket assigned successfully" })
+      
+      // Refresh tickets to ensure UI is up to date
+      await fetchTickets()
     } catch (err) {
+      console.error('[Assign Ticket] Error:', err)
       setError(err instanceof Error ? err.message : "Failed to assign ticket")
-      toast({ title: "Error", description: err instanceof Error ? err.message : "Failed to assign ticket", variant: "destructive" })
+      toast({ 
+        title: "Error", 
+        description: err instanceof Error ? err.message : "Failed to assign ticket", 
+        variant: "destructive" 
+      })
+      // Don't close dialog on error so user can retry
     } finally {
       setAssigning(null)
     }
   }
 
-  const handleConfirmAssign = () => {
+  const handleConfirmAssign = async () => {
     if (!pendingAssignment) return
-    handleAssign(pendingAssignment.ticketId, pendingAssignment.assigneeUserId, assignPriority)
+    console.log('[Assign Ticket] Starting assignment:', {
+      ticketId: pendingAssignment.ticketId,
+      assigneeUserId: pendingAssignment.assigneeUserId,
+      priority: assignPriority
+    })
+    try {
+      await handleAssign(pendingAssignment.ticketId, pendingAssignment.assigneeUserId, assignPriority)
+    } catch (err) {
+      console.error('[Assign Ticket] Error in handleConfirmAssign:', err)
+    }
   }
 
   const handleUpdateStatus = async (status: Ticket["status"]) => {
@@ -1353,7 +1403,15 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
               }}>
                 Cancel
               </Button>
-              <Button onClick={handleConfirmAssign} disabled={assigning !== null}>
+              <Button 
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  handleConfirmAssign()
+                }} 
+                disabled={assigning !== null}
+              >
                 {assigning ? <Loader2 className="w-4 h-4 animate-spin" /> : "Assign"}
               </Button>
             </div>
