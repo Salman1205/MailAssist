@@ -1,0 +1,104 @@
+/**
+ * PATCH /api/tickets/[id]/assign - Assign ticket to a user
+ * - Admin/Manager: Can assign to anyone or unassign
+ * - Agent: Can only assign tickets to themselves (take ticket)
+ */
+
+import { NextRequest, NextResponse } from 'next/server';
+import { assignTicket } from '@/lib/tickets';
+import { getCurrentUserIdFromRequest } from '@/lib/permissions';
+import { canReassignTickets } from '@/lib/permissions';
+import { getCurrentUserEmail } from '@/lib/storage';
+
+type RouteContext =
+  | { params: { id: string } }
+  | { params: Promise<{ id: string }> };
+
+export async function PATCH(
+  request: NextRequest,
+  context: RouteContext
+) {
+  try {
+    const paramsData = await Promise.resolve((context as any).params);
+    const ticketId = paramsData?.id;
+
+    if (!ticketId) {
+      return NextResponse.json(
+        { error: 'Missing ticket ID' },
+        { status: 400 }
+      );
+    }
+
+    // Get current user ID
+    const userId = getCurrentUserIdFromRequest(request);
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'Not authenticated' },
+        { status: 401 }
+      );
+    }
+
+    const userEmail = await getCurrentUserEmail();
+    if (!userEmail) {
+      return NextResponse.json(
+        { error: 'No Gmail account connected' },
+        { status: 400 }
+      );
+    }
+
+    // Parse request body
+    const body = await request.json();
+    const { assigneeUserId } = body; // null to unassign, or UUID to assign
+
+    // Check permissions
+    const canReassign = await canReassignTickets(userId);
+    const isAssigningToSelf = assigneeUserId === userId;
+    
+    // Agents can only assign tickets to themselves (not to others, not unassign)
+    if (!canReassign) {
+      if (!isAssigningToSelf) {
+        return NextResponse.json(
+          { error: 'Permission denied. Agents can only assign tickets to themselves.' },
+          { status: 403 }
+        );
+      }
+      // Agents cannot unassign tickets (only assign to themselves)
+      if (assigneeUserId === null) {
+        return NextResponse.json(
+          { error: 'Permission denied. Agents cannot unassign tickets.' },
+          { status: 403 }
+        );
+      }
+    }
+
+    // Validate assigneeUserId if provided
+    if (assigneeUserId !== null && assigneeUserId !== undefined) {
+      // Basic UUID validation
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!uuidRegex.test(assigneeUserId)) {
+        return NextResponse.json(
+          { error: 'Invalid assignee user ID format' },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Assign the ticket
+    const ticket = await assignTicket(ticketId, assigneeUserId || null, userEmail);
+
+    if (!ticket) {
+      return NextResponse.json(
+        { error: 'Ticket not found or assignment failed' },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({ ticket });
+  } catch (error) {
+    console.error('Error assigning ticket:', error);
+    return NextResponse.json(
+      { error: 'Failed to assign ticket', details: (error as Error).message },
+      { status: 500 }
+    );
+  }
+}

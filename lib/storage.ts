@@ -13,42 +13,21 @@ import { getSessionUserEmail } from './session';
 
 /**
  * Get current user's email address for data scoping
- * First tries to get it from session cookie, then from stored tokens, then falls back to Gmail API
+ * CRITICAL: Only uses session cookie to prevent cross-account data access
+ * If session cookie is missing, returns null (don't guess from database)
  */
 export async function getCurrentUserEmail(): Promise<string | null> {
   try {
-    // First, try to get email from session cookie (most reliable for multi-user scenarios)
+    // CRITICAL: Only use session cookie - this is device-specific and prevents cross-account issues
+    // DO NOT fall back to database tokens as that would allow cross-account access
     const sessionEmail = await getSessionUserEmail();
     if (sessionEmail) {
       return sessionEmail;
     }
     
-    // Fallback: try to get email from stored tokens (faster, no API call)
-    if (supabase) {
-      try {
-        const { data } = await supabase
-          .from('tokens')
-          .select('user_email')
-          .order('updated_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        
-        if (data?.user_email) {
-          return data.user_email;
-        }
-      } catch (err) {
-        // If user_email column doesn't exist yet, that's okay - continue to fallback
-        // This happens if SQL migration hasn't been run yet
-      }
-    }
-    
-    // Last resort: get from Gmail API (requires valid tokens)
-    const tokens = await getValidTokens();
-    if (!tokens || !tokens.access_token) {
-      return null;
-    }
-    const profile = await getUserProfile(tokens);
-    return profile?.emailAddress || null;
+    // If no session cookie, return null - don't try to guess from database
+    // This ensures each device only accesses its own account's data
+    return null;
   } catch (error) {
     // Don't log errors here - it's expected to fail if user isn't logged in
     return null;
@@ -508,6 +487,7 @@ export async function saveTokens(tokens: StoredTokens): Promise<string | null> {
 
   // CRITICAL SECURITY FIX: Only delete tokens for THIS user, not all users
   // This prevents one user's login from affecting another user's session
+  // Delete first, then insert to ensure only one token row per user
   try {
     await supabase.from('tokens').delete().eq('user_email', userEmail);
   } catch (deleteError) {
@@ -532,7 +512,7 @@ export async function saveTokens(tokens: StoredTokens): Promise<string | null> {
     user_email: userEmail, // Always include user_email for proper scoping
   };
 
-  // Try to insert tokens
+  // Try to insert tokens (after deleting old ones for this user)
   const { error } = await supabase.from('tokens').insert(insertPayload);
 
   if (error) {

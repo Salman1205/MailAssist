@@ -1,0 +1,85 @@
+/**
+ * PATCH /api/tickets/[id]/tags - Update ticket tags
+ */
+
+import { NextRequest, NextResponse } from 'next/server';
+import { updateTicketTags } from '@/lib/tickets';
+import { getCurrentUserEmail } from '@/lib/storage';
+import { getCurrentUserIdFromRequest } from '@/lib/permissions';
+
+type RouteContext =
+  | { params: { id: string } }
+  | { params: Promise<{ id: string }> };
+
+export async function PATCH(
+  request: NextRequest,
+  context: RouteContext
+) {
+  try {
+    const paramsData = await Promise.resolve((context as any).params);
+    const ticketId = paramsData?.id;
+
+    if (!ticketId) {
+      return NextResponse.json(
+        { error: 'Missing ticket ID' },
+        { status: 400 }
+      );
+    }
+
+    const userId = getCurrentUserIdFromRequest(request);
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'Not authenticated' },
+        { status: 401 }
+      );
+    }
+
+    const userEmail = await getCurrentUserEmail();
+    if (!userEmail) {
+      return NextResponse.json(
+        { error: 'No Gmail account connected' },
+        { status: 400 }
+      );
+    }
+
+    const body = await request.json();
+    const { tags } = body;
+
+    if (!Array.isArray(tags)) {
+      return NextResponse.json(
+        { error: 'Tags must be an array' },
+        { status: 400 }
+      );
+    }
+
+    // Validate tags are strings
+    if (!tags.every(tag => typeof tag === 'string')) {
+      return NextResponse.json(
+        { error: 'All tags must be strings' },
+        { status: 400 }
+      );
+    }
+
+    const ticket = await updateTicketTags(ticketId, tags, userEmail);
+
+    if (!ticket) {
+      return NextResponse.json(
+        { error: 'Ticket not found' },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({ ticket });
+  } catch (error) {
+    console.error('Error updating ticket tags:', error);
+    return NextResponse.json(
+      { error: 'Failed to update ticket tags', details: (error as Error).message },
+      { status: 500 }
+    );
+  }
+}
+
+
+
+
+

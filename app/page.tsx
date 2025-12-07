@@ -10,8 +10,9 @@ import DraftsView from "@/components/drafts-view"
 import SyncToast from "@/components/sync-toast"
 import UserSelector from "@/components/user-selector"
 import UserManagement from "@/components/user-management"
+import TicketsView from "@/components/tickets-view"
 
-type View = "inbox" | "sent" | "spam" | "trash" | "drafts" | "settings" | "users"
+type View = "inbox" | "sent" | "spam" | "trash" | "drafts" | "settings" | "users" | "tickets"
 
 interface UserProfile {
   name?: string
@@ -430,6 +431,13 @@ export default function Page() {
         )
       case "drafts":
         return <DraftsView refreshKey={draftsVersion} />
+      case "tickets":
+        return (
+          <TicketsView
+            currentUserId={currentUserId}
+            currentUserRole={currentUser?.role as "admin" | "manager" | "agent" | null}
+          />
+        )
       case "sent":
         return (
           <InboxView
@@ -475,6 +483,7 @@ export default function Page() {
     const tabs: { id: View; label: string }[] = [
       { id: "inbox", label: "Inbox" },
       { id: "sent", label: "Sent" },
+      { id: "tickets", label: "Tickets" },
       { id: "drafts", label: "Drafts" },
       { id: "settings", label: "Settings" },
     ]

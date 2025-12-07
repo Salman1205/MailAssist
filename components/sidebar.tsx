@@ -1,8 +1,8 @@
 "use client"
 
 interface SidebarProps {
-  activeView: "inbox" | "sent" | "spam" | "trash" | "drafts" | "settings" | "users"
-  setActiveView: (view: "inbox" | "sent" | "spam" | "trash" | "drafts" | "settings" | "users") => void
+  activeView: "inbox" | "sent" | "spam" | "trash" | "drafts" | "settings" | "users" | "tickets"
+  setActiveView: (view: "inbox" | "sent" | "spam" | "trash" | "drafts" | "settings" | "users" | "tickets") => void
   onLogout?: () => void
   currentUser?: { id: string; name: string; role: string } | null
 }
@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { id: "sent", label: "Sent", icon: SentIcon },
   { id: "spam", label: "Spam", icon: SpamIcon },
   { id: "trash", label: "Trash", icon: TrashIcon },
+  { id: "tickets", label: "Tickets", icon: TicketIcon },
   { id: "drafts", label: "Drafts", icon: DraftIcon },
   { id: "settings", label: "Settings", icon: SettingsIcon },
 ] as const
@@ -144,6 +145,16 @@ function UsersIcon(props: React.SVGProps<SVGSVGElement>) {
       <circle cx="9" cy="7" r="4" />
       <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
       <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  )
+}
+
+function TicketIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" {...props}>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M3 8h18" />
+      <path d="M8 12h8" />
     </svg>
   )
 }
