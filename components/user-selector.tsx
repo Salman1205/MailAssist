@@ -195,7 +195,7 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
               </div>
               <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
                 <DialogTrigger asChild>
-                  <Button size="lg" className="w-full">Create First User (Admin)</Button>
+                  <Button size="lg" className="w-full transition-all duration-200 hover:scale-105 hover:shadow-md">Create First User (Admin)</Button>
                 </DialogTrigger>
                 <DialogContent>
                   <DialogHeader>
@@ -257,11 +257,12 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
                     <Button
                       key={user.id}
                       variant="outline"
-                      className={`w-full justify-start h-auto py-4 px-4 transition-all relative ${
+                      className={`w-full justify-start h-auto py-4 px-4 transition-all duration-300 ease-out relative animate-in fade-in slide-in-from-bottom-4 ${
                         isSelected 
-                          ? "border-primary border-2 bg-primary/10 shadow-md ring-2 ring-primary/20" 
-                          : "hover:bg-accent hover:border-primary/50 hover:border-2"
+                          ? "border-primary border-2 bg-primary/10 shadow-md ring-2 ring-primary/20 scale-[1.02]" 
+                          : "hover:bg-accent hover:border-primary/50 hover:border-2 hover:shadow-sm hover:scale-[1.01]"
                       }`}
+                      style={{ animationDelay: `${users.indexOf(user) * 100}ms` }}
                       onClick={() => handleSelectUser(user.id)}
                     >
                       <div className="flex items-center gap-3 w-full">

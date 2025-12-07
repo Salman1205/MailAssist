@@ -11,6 +11,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Loader2, User, Mail, Clock, Tag, MessageSquare, Sparkles, X, Plus, ChevronDown, ChevronUp, Edit2, Check, XCircle } from "lucide-react"
+import { Skeleton } from "@/components/ui/skeleton"
 import { useToast } from "@/components/ui/use-toast"
 
 interface Ticket {
@@ -799,7 +800,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
           
           {/* Tabs */}
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
-            <TabsList className="grid w-full grid-cols-3">
+            <TabsList className="grid w-full grid-cols-3 transition-all duration-200">
               <TabsTrigger value="assigned">Assigned to Me</TabsTrigger>
               <TabsTrigger value="unassigned">Unassigned</TabsTrigger>
               <TabsTrigger value="all">All Tickets</TabsTrigger>
@@ -807,15 +808,16 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
           </Tabs>
 
           {/* Search and Filters */}
-          <div className="space-y-2.5">
+          <div className="space-y-2.5 animate-in fade-in duration-300">
             <Input
               placeholder="Search by subject or email..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              className="transition-all duration-200 focus:scale-[1.01] focus:shadow-md"
             />
             
             {/* Filters - Compact Horizontal Layout */}
-            <div className="flex flex-wrap gap-3">
+            <div className="flex flex-wrap gap-3 animate-in fade-in slide-in-from-top-2 duration-300">
               <div className="flex flex-col gap-1.5 min-w-[140px]">
                 <Label className="text-xs font-medium text-muted-foreground">Status</Label>
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -927,7 +929,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
 
         <div className="flex-1 overflow-y-auto">
           {filteredTickets.length === 0 ? (
-            <div className="p-4 text-center text-muted-foreground space-y-2">
+            <div className="p-4 text-center text-muted-foreground space-y-2 animate-in fade-in duration-300">
               <p>No tickets found</p>
               {tickets.length > 0 && (
                 <p className="text-xs">Total tickets: {tickets.length} (filtered out by current filters)</p>
@@ -939,12 +941,15 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
               No tickets found
             </div>
           ) : (
-            filteredTickets.map((ticket) => (
+            filteredTickets.map((ticket, index) => (
               <Card
                 key={ticket.id}
-                className={`m-2 cursor-pointer hover:bg-muted/50 transition-all ${
-                  selectedTicket?.id === ticket.id ? "border-primary border-2 bg-muted/30" : "border-border"
+                className={`m-2 cursor-pointer transition-all duration-300 ease-out animate-in fade-in slide-in-from-left-4 ${
+                  selectedTicket?.id === ticket.id 
+                    ? "border-primary border-2 bg-muted/30 shadow-md scale-[1.01]" 
+                    : "border-border hover:bg-muted/50 hover:shadow-sm hover:scale-[1.005]"
                 }`}
+                style={{ animationDelay: `${index * 30}ms` }}
                 onClick={() => setSelectedTicket(ticket)}
               >
                 <CardContent className="p-4 space-y-2">
@@ -953,12 +958,12 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                       {ticket.subject}
                     </h3>
                     <div className="flex gap-1 flex-shrink-0">
-                      <Badge className={`${getStatusColor(ticket.status)} text-white text-xs`}>
+                      <Badge className={`${getStatusColor(ticket.status)} text-white text-xs transition-all duration-200 hover:scale-105`}>
                         {ticket.status}
                       </Badge>
                       {/* Only show priority if ticket is assigned */}
                       {ticket.assigneeUserId && (
-                        <Badge className={`${getPriorityColor(ticket.priority)} text-white text-xs`}>
+                        <Badge className={`${getPriorityColor(ticket.priority)} text-white text-xs transition-all duration-200 hover:scale-105`}>
                           {ticket.priority}
                         </Badge>
                       )}
@@ -991,29 +996,33 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
       </div>
 
       {/* Ticket Detail */}
-      <div className={`flex-1 overflow-y-auto ${selectedTicket ? "flex flex-col" : "hidden md:flex"}`}>
+      <div className={`flex-1 overflow-y-auto transition-all duration-300 ${selectedTicket ? "flex flex-col" : "hidden md:flex"}`}>
         {selectedTicket ? (
-          <div className="flex flex-col h-full">
+          <div className="flex flex-col h-full animate-in fade-in slide-in-from-right-4 duration-300">
             <div className="p-6 border-b border-border space-y-4 flex-shrink-0">
               <div className="flex items-start justify-between">
                 <div className="space-y-2 flex-1">
                   <h1 className="text-2xl font-bold">{selectedTicket.subject}</h1>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <Badge className={getStatusColor(selectedTicket.status)}>
+                    <Badge className={`${getStatusColor(selectedTicket.status)} transition-all duration-200 hover:scale-105`}>
                       {selectedTicket.status}
                     </Badge>
                     {/* Only show priority badge if ticket is assigned and has priority */}
                     {selectedTicket.assigneeUserId && selectedTicket.priority && (
-                      <Badge className={getPriorityColor(selectedTicket.priority)}>
+                      <Badge className={`${getPriorityColor(selectedTicket.priority)} transition-all duration-200 hover:scale-105`}>
                         {selectedTicket.priority}
                       </Badge>
                     )}
                     {selectedTicket.tags.map((tag, idx) => (
-                      <Badge key={idx} variant="outline">{tag}</Badge>
+                      <Badge key={idx} variant="outline" className="transition-all duration-200 hover:scale-105 hover:bg-muted">{tag}</Badge>
                     ))}
                   </div>
                 </div>
-                <Button variant="outline" onClick={() => setSelectedTicket(null)}>
+                <Button 
+                  variant="outline" 
+                  onClick={() => setSelectedTicket(null)}
+                  className="transition-all duration-200 hover:scale-105"
+                >
                   Close
                 </Button>
               </div>
@@ -1021,7 +1030,12 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
               {/* Quick Actions */}
               <div className="flex items-center gap-2 flex-wrap">
                 {!canAssign && !selectedTicket.assigneeUserId && (
-                  <Button size="sm" onClick={handleTakeTicket} disabled={assigning === selectedTicket.id}>
+                  <Button 
+                    size="sm" 
+                    onClick={handleTakeTicket} 
+                    disabled={assigning === selectedTicket.id}
+                    className="transition-all duration-200 hover:scale-105 disabled:hover:scale-100"
+                  >
                     {assigning === selectedTicket.id ? <Loader2 className="w-4 h-4 animate-spin" /> : "Take Ticket"}
                   </Button>
                 )}
@@ -1102,9 +1116,9 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-sm font-medium">Tags:</span>
                 {selectedTicket.tags.map((tag, idx) => (
-                  <Badge key={idx} variant="outline" className="gap-1">
+                  <Badge key={idx} variant="outline" className="gap-1 transition-all duration-200 hover:scale-105 hover:bg-muted">
                     {tag}
-                    <X className="w-3 h-3 cursor-pointer" onClick={() => handleRemoveTag(tag)} />
+                    <X className="w-3 h-3 cursor-pointer transition-all duration-200 hover:scale-110 hover:text-destructive" onClick={() => handleRemoveTag(tag)} />
                   </Badge>
                 ))}
                 <div className="flex items-center gap-1">
@@ -1113,9 +1127,14 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                     value={newTag}
                     onChange={(e) => setNewTag(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && handleAddTag()}
-                    className="h-7 w-32"
+                    className="h-7 w-32 transition-all duration-200 focus:scale-[1.02] focus:shadow-sm"
                   />
-                  <Button size="sm" onClick={handleAddTag} disabled={!newTag.trim() || updatingTags}>
+                  <Button 
+                    size="sm" 
+                    onClick={handleAddTag} 
+                    disabled={!newTag.trim() || updatingTags}
+                    className="transition-all duration-200 hover:scale-110 disabled:hover:scale-100"
+                  >
                     <Plus className="w-4 h-4" />
                   </Button>
                 </div>
@@ -1125,7 +1144,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
             {/* Main Content Area */}
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
               {/* Customer Info */}
-              <Card>
+              <Card className="animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <CardContent className="p-4 space-y-2">
                   <div className="flex items-center gap-2">
                     <Mail className="w-4 h-4 text-muted-foreground" />
@@ -1143,7 +1162,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
               </Card>
 
               {/* Conversation Thread */}
-              <Card>
+              <Card className="animate-in fade-in slide-in-from-bottom-2 duration-300" style={{ animationDelay: '100ms' }}>
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="font-semibold flex items-center gap-2">
@@ -1154,29 +1173,33 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                       variant="ghost"
                       size="sm"
                       onClick={() => setConversationMinimized(!conversationMinimized)}
-                      className="h-8 w-8 p-0"
+                      className="h-8 w-8 p-0 transition-all duration-200 hover:scale-110 hover:bg-muted"
                     >
                       {conversationMinimized ? (
-                        <ChevronDown className="w-4 h-4" />
+                        <ChevronDown className="w-4 h-4 transition-transform duration-200" />
                       ) : (
-                        <ChevronUp className="w-4 h-4" />
+                        <ChevronUp className="w-4 h-4 transition-transform duration-200" />
                       )}
                     </Button>
                   </div>
                   {!conversationMinimized && (
-                    <div className="space-y-4">
+                    <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
                       {loadingThread ? (
                         <div className="flex items-center justify-center py-8">
-                          <div className="flex flex-col items-center gap-2">
+                          <div className="flex flex-col items-center gap-2 animate-in fade-in duration-300">
                             <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
                             <p className="text-sm text-muted-foreground">Loading conversation...</p>
                           </div>
                         </div>
                       ) : threadMessages.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">No messages yet</p>
+                        <p className="text-sm text-muted-foreground animate-in fade-in duration-300">No messages yet</p>
                       ) : (
                         threadMessages.map((msg, idx) => (
-                          <div key={idx} className="border-l-2 border-border pl-4 py-2">
+                          <div 
+                            key={idx} 
+                            className="border-l-2 border-border pl-4 py-2 transition-all duration-200 hover:bg-muted/30 rounded-r-md animate-in fade-in slide-in-from-left-2"
+                            style={{ animationDelay: `${idx * 50}ms` }}
+                          >
                             <div className="flex items-center justify-between mb-1">
                               <span className="text-sm font-medium">{msg.from}</span>
                               <span className="text-xs text-muted-foreground">{formatDate(msg.date)}</span>
@@ -1191,12 +1214,16 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
               </Card>
 
               {/* Internal Notes */}
-              <Card>
+              <Card className="animate-in fade-in slide-in-from-bottom-2 duration-300" style={{ animationDelay: '200ms' }}>
                 <CardContent className="p-4">
                   <h3 className="font-semibold mb-4">Internal Notes</h3>
                   <div className="space-y-3 mb-4">
-                    {notes.map((note) => (
-                      <div key={note.id} className="border-l-2 border-primary pl-4 py-2 bg-muted/50 rounded">
+                    {notes.map((note, idx) => (
+                      <div 
+                        key={note.id} 
+                        className="border-l-2 border-primary pl-4 py-2 bg-muted/50 rounded transition-all duration-200 hover:bg-muted/70 animate-in fade-in slide-in-from-left-2"
+                        style={{ animationDelay: `${idx * 50}ms` }}
+                      >
                         <div className="flex items-center justify-between mb-1">
                           <span className="text-sm font-medium">{note.userName}</span>
                           <div className="flex items-center gap-2">
@@ -1229,14 +1256,14 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                                   </Button>
                                 </div>
                               ) : (
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  className="h-6 w-6 p-0"
-                                  onClick={() => handleStartEditNote(note)}
-                                >
-                                  <Edit2 className="w-3 h-3" />
-                                </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-6 w-6 p-0 transition-all duration-200 hover:scale-110 hover:bg-muted"
+                                    onClick={() => handleStartEditNote(note)}
+                                  >
+                                    <Edit2 className="w-3 h-3" />
+                                  </Button>
                               )
                             )}
                           </div>
@@ -1269,7 +1296,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
               </Card>
 
               {/* Reply Box */}
-              <Card>
+              <Card className="animate-in fade-in slide-in-from-bottom-2 duration-300" style={{ animationDelay: '300ms' }}>
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="font-semibold">Reply</h3>
@@ -1278,6 +1305,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                       variant="outline"
                       onClick={handleGenerateDraft}
                       disabled={generatingDraft || !threadMessages.length}
+                      className="transition-all duration-200 hover:scale-105 disabled:hover:scale-100"
                     >
                       {generatingDraft ? (
                         <>
@@ -1293,7 +1321,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                     </Button>
                   </div>
                   {showDraft && draftText && (
-                    <div className="mb-4 p-3 bg-muted rounded border border-primary/20">
+                    <div className="mb-4 p-3 bg-muted rounded border border-primary/20 animate-in fade-in slide-in-from-bottom-2 duration-300">
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-sm font-medium">AI Draft</span>
                         <Button
@@ -1303,6 +1331,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                             setShowDraft(false)
                             setDraftText("")
                           }}
+                          className="transition-all duration-200 hover:scale-110"
                         >
                           <X className="w-4 h-4" />
                         </Button>
@@ -1310,7 +1339,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                       <p className="text-sm whitespace-pre-wrap">{draftText}</p>
                       <Button
                         size="sm"
-                        className="mt-2"
+                        className="mt-2 transition-all duration-200 hover:scale-105"
                         onClick={() => {
                           setReplyText(draftText)
                           setShowDraft(false)
@@ -1322,9 +1351,9 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                   )}
                   {/* Typing Indicator */}
                   {typingUsers.length > 0 && (
-                    <div className="mb-2 px-2 py-1 bg-primary/10 border border-primary/20 rounded text-xs text-primary italic flex items-center gap-1 animate-in fade-in">
+                    <div className="mb-2 px-2 py-1 bg-primary/10 border border-primary/20 rounded text-xs text-primary italic flex items-center gap-1 animate-in fade-in slide-in-from-bottom-2 duration-300">
                       <Loader2 className="w-3 h-3 animate-spin" />
-                      <span>
+                      <span className="transition-all duration-200">
                         {typingUsers.map((userId) => {
                           const user = users.find(u => u.id === userId)
                           return user ? user.name : "Someone"
@@ -1339,7 +1368,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                       setReplyText(e.target.value)
                       handleTyping()
                     }}
-                    className="min-h-32 mb-4"
+                    className="min-h-32 mb-4 transition-all duration-200 focus:scale-[1.01] focus:shadow-md"
                   />
                   <Button onClick={handleSendReply} disabled={!replyText.trim() || sendingReply}>
                     {sendingReply ? (
