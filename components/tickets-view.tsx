@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Label } from "@/components/ui/label"
 import { Loader2, User, Mail, Clock, Tag, MessageSquare, Sparkles, X, Plus, ChevronDown, ChevronUp, Edit2, Check, XCircle } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Switch } from "@/components/ui/switch"
 import { useToast } from "@/components/ui/use-toast"
 
 interface Ticket {
@@ -101,6 +102,12 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
   const [showAssignDialog, setShowAssignDialog] = useState(false)
   const [pendingAssignment, setPendingAssignment] = useState<{ticketId: string, assigneeUserId: string | null} | null>(null)
   const [conversationMinimized, setConversationMinimized] = useState(false)
+  // Track last time each ticket was viewed (from Supabase) so we can show "new" badges
+  const [lastViewedMap, setLastViewedMap] = useState<Record<string, string>>({})
+  // Track previous selected ticket metadata for polling comparison
+  const prevSelectedIdRef = useRef<string | null>(null)
+  const prevSelectedCustomerReplyRef = useRef<string | null>(null)
+  const [showUnreadOnly, setShowUnreadOnly] = useState(false)
   
   // Updating states
   const [updatingStatus, setUpdatingStatus] = useState(false)
@@ -115,7 +122,80 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
   useEffect(() => {
     fetchTickets()
     fetchUsers()
+    fetchTicketViews()
   }, [])
+
+  const fetchTicketViews = async () => {
+    try {
+      const response = await fetch("/api/tickets/viewed")
+      if (!response.ok) return
+      const data = await response.json()
+      setLastViewedMap(data.views || {})
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  const markTicketViewed = async (ticket: Ticket, explicitStamp?: string) => {
+    const stamp = explicitStamp || ticket.lastCustomerReplyAt || new Date().toISOString()
+    setLastViewedMap((prev) => ({ ...prev, [ticket.id]: stamp }))
+    try {
+      await fetch(`/api/tickets/${ticket.id}/viewed`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lastViewedAt: stamp }),
+      })
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  const hasNewCustomerReply = (ticket: Ticket) => {
+    if (!ticket.lastCustomerReplyAt) return false
+    const lastSeen = lastViewedMap[ticket.id]
+    if (!lastSeen) return true
+    return new Date(ticket.lastCustomerReplyAt) > new Date(lastSeen)
+  }
+
+  // Poll for updates to tickets and currently open thread
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      // Refresh tickets silently
+      const list = await fetchTickets({ silent: true, returnData: true })
+      if (!list) return
+
+      // If a ticket is open, check for updates
+      if (selectedTicket) {
+        const updated = list.find(t => t.id === selectedTicket.id)
+        if (updated) {
+          const prevReply = prevSelectedCustomerReplyRef.current
+          const currentReply = updated.lastCustomerReplyAt || null
+          // Detect new customer reply
+          if (prevReply && currentReply && new Date(currentReply) > new Date(prevReply)) {
+            toast({
+              title: "New customer reply",
+              description: updated.subject,
+            })
+          }
+          setSelectedTicket(updated)
+          // Refresh thread messages silently
+          await fetchThread({ silent: true })
+          // Update refs
+          prevSelectedCustomerReplyRef.current = currentReply
+        }
+      }
+    }, 15000) // 15s poll
+
+    return () => clearInterval(interval)
+  }, [selectedTicket])
+
+  // Track selected ticket changes for comparison
+  useEffect(() => {
+    if (selectedTicket) {
+      prevSelectedIdRef.current = selectedTicket.id
+      prevSelectedCustomerReplyRef.current = selectedTicket.lastCustomerReplyAt || null
+    }
+  }, [selectedTicket])
 
   const fetchTypingIndicator = async () => {
     if (!selectedTicket) return
@@ -211,9 +291,10 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
     }
   }, [selectedTicket, currentUserId])
 
-  const fetchTickets = async () => {
+  const fetchTickets = async (options?: { silent?: boolean, returnData?: boolean }) => {
+    const { silent = false, returnData = false } = options || {}
     try {
-      setLoading(true)
+      if (!silent) setLoading(true)
       setError(null)
       console.log('[Tickets] Fetching tickets...')
       const response = await fetch("/api/tickets")
@@ -231,12 +312,14 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
           date: t.lastCustomerReplyAt || t.createdAt
         })))
       }
-      setTickets(data.tickets || [])
+      const list = data.tickets || []
+      setTickets(list)
+      if (returnData) return list
     } catch (err) {
       console.error('[Tickets] Error fetching tickets:', err)
       setError(err instanceof Error ? err.message : "Failed to load tickets")
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
@@ -260,10 +343,11 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
     }
   }
 
-  const fetchThread = async () => {
+  const fetchThread = async (options?: { silent?: boolean }) => {
+    const { silent = false } = options || {}
     if (!selectedTicket) return
     try {
-      setLoadingThread(true)
+      if (!silent) setLoadingThread(true)
       const response = await fetch(`/api/tickets/${selectedTicket.id}/thread`)
       if (response.ok) {
         const data = await response.json()
@@ -272,7 +356,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
     } catch (err) {
       console.error("Error fetching thread:", err)
     } finally {
-      setLoadingThread(false)
+      if (!silent) setLoadingThread(false)
     }
   }
 
@@ -756,6 +840,11 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
       console.log('[Filter] After date filter:', filtered.length)
     }
 
+    // Unread filter
+    if (showUnreadOnly) {
+      filtered = filtered.filter(t => hasNewCustomerReply(t))
+    }
+
     // Sort by last_customer_reply_at (oldest first, nulls last)
     // Tickets that have been waiting longest (oldest last_customer_reply_at) are at the top
     // When a customer replies, last_customer_reply_at updates to now, moving ticket down
@@ -905,6 +994,11 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                     </SelectContent>
                   </Select>
               </div>
+
+              <div className="flex items-center gap-2 px-2">
+                <Switch checked={showUnreadOnly} onCheckedChange={setShowUnreadOnly} />
+                <span className="text-xs text-muted-foreground">Show only unread updates</span>
+              </div>
             </div>
             
             {/* Custom Date Range Inputs */}
@@ -941,23 +1035,39 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
               No tickets found
             </div>
           ) : (
-            filteredTickets.map((ticket, index) => (
+            filteredTickets.map((ticket, index) => {
+              const isSelected = selectedTicket?.id === ticket.id
+              const isUnread = hasNewCustomerReply(ticket)
+              return (
               <Card
                 key={ticket.id}
-                className={`m-2 cursor-pointer transition-all duration-300 ease-out animate-in fade-in slide-in-from-left-4 ${
-                  selectedTicket?.id === ticket.id 
+                className={`m-2 cursor-pointer relative transition-all duration-300 ease-out animate-in fade-in slide-in-from-left-4 ${
+                  isSelected 
                     ? "border-primary border-2 bg-muted/30 shadow-md scale-[1.01]" 
-                    : "border-border hover:bg-muted/50 hover:shadow-sm hover:scale-[1.005]"
+                    : isUnread 
+                      ? "border-primary/60 bg-primary/5 hover:bg-primary/10 hover:shadow-sm hover:scale-[1.005]" 
+                      : "border-border hover:bg-muted/50 hover:shadow-sm hover:scale-[1.005]"
                 }`}
                 style={{ animationDelay: `${index * 30}ms` }}
-                onClick={() => setSelectedTicket(ticket)}
+                onClick={() => {
+                  markTicketViewed(ticket)
+                  setSelectedTicket(ticket)
+                }}
               >
+                {isUnread && (
+                  <div className="absolute top-3 right-3 w-2.5 h-2.5 rounded-full bg-destructive shadow-sm" aria-label="New reply" />
+                )}
                 <CardContent className="p-4 space-y-2">
                   <div className="flex items-start justify-between gap-2">
-                    <h3 className="font-medium text-sm line-clamp-2 flex-1">
+                    <h3 className={`font-medium text-sm line-clamp-2 flex-1 ${isUnread ? "font-semibold text-foreground" : ""}`}>
                       {ticket.subject}
                     </h3>
-                    <div className="flex gap-1 flex-shrink-0">
+                    <div className="flex gap-1 flex-shrink-0 items-center">
+                      {isUnread && (
+                        <Badge variant="secondary" className="text-[11px] bg-primary/10 text-primary border border-primary/30">
+                          New
+                        </Badge>
+                      )}
                       <Badge className={`${getStatusColor(ticket.status)} text-white text-xs transition-all duration-200 hover:scale-105`}>
                         {ticket.status}
                       </Badge>
@@ -990,7 +1100,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                   </div>
                 </CardContent>
               </Card>
-            ))
+            )})
           )}
         </div>
       </div>
@@ -1026,6 +1136,13 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                   Close
                 </Button>
               </div>
+
+              {hasNewCustomerReply(selectedTicket) && (
+                <div className="flex items-center gap-2 p-3 bg-primary/10 border border-primary/20 rounded-md text-sm text-primary animate-in fade-in">
+                  <div className="w-2 h-2 rounded-full bg-primary" />
+                  <span>New customer reply received.</span>
+                </div>
+              )}
 
               {/* Quick Actions */}
               <div className="flex items-center gap-2 flex-wrap">
