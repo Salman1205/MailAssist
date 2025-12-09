@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react"
 import TopNav from "@/components/top-nav"
-import Sidebar from "@/components/sidebar"
+import Sidebar, { type SidebarView } from "@/components/sidebar"
 import GmailConnect from "@/components/gmail-connect"
 import InboxView from "@/components/inbox-view"
 import SettingsView from "@/components/settings-view"
@@ -11,8 +11,9 @@ import SyncToast from "@/components/sync-toast"
 import UserSelector from "@/components/user-selector"
 import UserManagement from "@/components/user-management"
 import TicketsView from "@/components/tickets-view"
+import AISettings from "@/components/ai-settings"
 
-type View = "inbox" | "sent" | "spam" | "trash" | "drafts" | "settings" | "users" | "tickets"
+type View = SidebarView
 
 interface UserProfile {
   name?: string
@@ -438,6 +439,8 @@ export default function Page() {
             currentUserRole={currentUser?.role as "admin" | "manager" | "agent" | null}
           />
         )
+      case "ai-settings":
+        return <AISettings />
       case "sent":
         return (
           <InboxView
@@ -491,6 +494,11 @@ export default function Page() {
     // Add Team tab for admins
     if (currentUser?.role === "admin") {
       tabs.push({ id: "users", label: "Team" })
+    }
+
+    // Add AI tab for admin/manager
+    if (currentUser?.role === "admin" || currentUser?.role === "manager") {
+      tabs.push({ id: "ai-settings", label: "AI" })
     }
 
     return (
@@ -569,7 +577,7 @@ export default function Page() {
           />
           {renderMobileTabs()}
 
-          <main className="flex-1 overflow-hidden">
+          <main className="flex-1 overflow-auto">
             {checkingAuth || checkingUser ? (
               <div className="flex items-center justify-center h-full">
                 <div className="text-sm text-muted-foreground">

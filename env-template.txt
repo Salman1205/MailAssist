@@ -29,4 +29,14 @@ EMBEDDING_API_KEY=
 # ============================================
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 
+# ============================================
+# Supabase (for realtime + knowledge base)
+# ============================================
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key_here
+
+# Guardrails table (single row) and knowledge_items must exist in Supabase.
+# guardrails columns: id int primary key default 1, tone_style text, rules text, banned_words text[], topic_rules jsonb, updated_at timestamptz
+# Enable RLS/policies as needed; admin/manager should have write access.
+
 

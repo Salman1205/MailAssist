@@ -7,6 +7,8 @@ import { getValidTokens } from '@/lib/token-refresh';
 import { getEmailById, getThreadById } from '@/lib/gmail';
 import { getSentEmails, storeDraft, loadStoredEmails } from '@/lib/storage';
 import { generateDraftReply } from '@/lib/ai-draft';
+import { listKnowledge } from '@/lib/knowledge';
+import { getGuardrails } from '@/lib/guardrails';
 
 type RouteContext =
   | { params: { id: string } }
@@ -113,10 +115,20 @@ export async function POST(
       console.warn('[Draft] Could not load conversation thread for context:', threadError);
     }
 
+    // Load knowledge base and guardrails
+    const [knowledgeItems, guardrails] = await Promise.all([listKnowledge(), getGuardrails()])
+
     // Generate draft reply
     let draft: string;
     try {
-      draft = await generateDraftReply(incomingEmail, pastEmails, groqApiKey, conversationMessages);
+      draft = await generateDraftReply(
+        incomingEmail,
+        pastEmails,
+        groqApiKey,
+        conversationMessages,
+        knowledgeItems || [],
+        guardrails
+      );
     } catch (draftError) {
       console.error('[Draft] Error in generateDraftReply:', draftError);
       const errorMessage = draftError instanceof Error ? draftError.message : String(draftError);

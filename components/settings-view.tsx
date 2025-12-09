@@ -1,10 +1,8 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import UserManagement from "@/components/user-management"
-import PromoteAdminDialog from "@/components/promote-admin-dialog"
+import { Card, CardDescription, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 
 interface SyncStats {
   totalStored: number
@@ -26,34 +24,7 @@ interface SettingsViewProps {
   currentUserId?: string | null
 }
 
-export default function SettingsView({ status, syncing, onSync, error, currentUserId }: SettingsViewProps) {
-  const [currentUser, setCurrentUser] = useState<{ id: string; role: string } | null>(null)
-  const [isAdmin, setIsAdmin] = useState(false)
-  const [hasAdmin, setHasAdmin] = useState(false)
-  const [showPromoteDialog, setShowPromoteDialog] = useState(false)
-
-  useEffect(() => {
-    if (currentUserId) {
-      fetch(`/api/users/${currentUserId}`)
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.user) {
-            setCurrentUser(data.user)
-            setIsAdmin(data.user.role === "admin")
-          }
-        })
-        .catch(() => {})
-      
-      // Check if any admin exists
-      fetch("/api/users")
-        .then((res) => res.json())
-        .then((data) => {
-          const adminExists = (data.users || []).some((u: any) => u.role === "admin" && u.isActive)
-          setHasAdmin(adminExists)
-        })
-        .catch(() => {})
-    }
-  }, [currentUserId])
+export default function SettingsView({ status, syncing, onSync, error }: SettingsViewProps) {
   const [message, setMessage] = useState<string | null>(null)
   const [localError, setLocalError] = useState<string | null>(null)
 
@@ -136,42 +107,6 @@ export default function SettingsView({ status, syncing, onSync, error, currentUs
           <li>You can re-run the sync anytime to capture new sent emails.</li>
         </ul>
       </Card>
-
-      {isAdmin ? (
-        <UserManagement currentUserId={currentUserId || null} />
-      ) : !hasAdmin ? (
-        <Card className="border border-border">
-          <CardHeader>
-            <CardTitle>Need Admin Access?</CardTitle>
-            <CardDescription>
-              No admin user exists. Promote the first user to admin to manage team members and settings.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button onClick={() => setShowPromoteDialog(true)}>
-              Promote First User to Admin
-            </Button>
-          </CardContent>
-        </Card>
-      ) : (
-        <Card className="border border-border">
-          <CardHeader>
-            <CardTitle>User Management</CardTitle>
-            <CardDescription>
-              You need admin access to manage users. Contact an admin to change your role.
-            </CardDescription>
-          </CardHeader>
-        </Card>
-      )}
-
-      <PromoteAdminDialog
-        open={showPromoteDialog}
-        onOpenChange={setShowPromoteDialog}
-        onPromoted={() => {
-          // Reload page to refresh user role
-          window.location.reload()
-        }}
-      />
     </div>
   )
 }

@@ -6,6 +6,8 @@
 import { findSimilarEmails } from './similarity';
 import { generateEmbedding } from './embeddings';
 import { createEmailContext } from './similarity';
+import type { KnowledgeItem } from './knowledge';
+import type { Guardrails } from './guardrails';
 
 interface Email {
   id: string;
@@ -27,7 +29,9 @@ export async function generateDraftReply(
   incomingEmail: Email,
   pastEmails: StoredEmail[],
   groqApiKey: string,
-  conversationMessages?: Email[]
+  conversationMessages?: Email[],
+  knowledgeItems: KnowledgeItem[] = [],
+  guardrails?: Guardrails | null
 ): Promise<string> {
   // Generate embedding for the incoming email
   let queryEmbedding: number[];
@@ -78,10 +82,12 @@ export async function generateDraftReply(
     .join('\n\n---\n\n');
 
   // Create prompt for Groq, including optional conversation history
-  const prompt = createDraftPrompt(incomingEmail, styleExamples, conversationMessages);
+  const relevantKnowledge = selectKnowledge(incomingEmail, knowledgeItems);
+  const prompt = createDraftPrompt(incomingEmail, styleExamples, conversationMessages, relevantKnowledge, guardrails);
 
   // Call Groq API
-  const draft = await callGroqAPI(prompt, groqApiKey);
+  let draft = await callGroqAPI(prompt, groqApiKey);
+  draft = enforceGuardrailsOutput(draft, guardrails);
 
   return draft;
 }
@@ -92,7 +98,9 @@ export async function generateDraftReply(
 function createDraftPrompt(
   incomingEmail: Email,
   styleExamples: string,
-  conversationMessages?: Email[]
+  conversationMessages: Email[] = [],
+  knowledgeItems: KnowledgeItem[] = [],
+  guardrails?: Guardrails | null
 ): string {
   const history = (conversationMessages || [])
     // Exclude the incoming email itself if it's in the list
@@ -109,7 +117,35 @@ function createDraftPrompt(
     ? `\n\nCONVERSATION HISTORY (most recent messages first):\n${history}\n`
     : '';
 
-  return `You are an AI assistant helping to draft email replies. Your task is to generate a professional, contextually appropriate email draft that matches the user's writing style.
+  const guardrailTone = guardrails?.toneStyle?.trim() || "Friendly, concise, professional."
+  const guardrailRules = guardrails?.rules?.trim()
+  const banned = guardrails?.bannedWords?.filter(Boolean) || []
+  const topicRules = guardrails?.topicRules || []
+
+  const knowledgeSection = knowledgeItems.length
+    ? `\n\nRELEVANT KNOWLEDGE SNIPPETS:\n${knowledgeItems
+        .map((k, idx) => `[${idx + 1}] ${k.title}: ${k.body}`)
+        .join("\n")}\n`
+    : ""
+
+  const topicRulesSection = topicRules.length
+    ? `\nTopic-specific rules:\n${topicRules
+        .map((r) => `- If tags/intent match "${r.tag}", then: ${r.instruction}`)
+        .join("\n")}`
+    : ""
+
+  const bannedSection = banned.length
+    ? `\nBanned words/phrases: ${banned.join(", ")}`
+    : ""
+
+  return `You are an AI assistant helping to draft email replies. Follow the guardrails and knowledge below.
+
+TONE & STYLE:
+${guardrailTone}
+
+GENERAL RULES:
+${guardrailRules || "Keep responses accurate, polite, and helpful."}
+${topicRulesSection}${bannedSection}
 
 INCOMING EMAIL TO REPLY TO:
 Subject: ${incomingEmail.subject}
@@ -121,6 +157,8 @@ ${historySection}
 
 USER'S PAST EMAIL STYLE EXAMPLES (use these to match tone and style):
 ${styleExamples || 'No past examples available. Use a professional, friendly tone.'}
+
+${knowledgeSection}
 
 INSTRUCTIONS:
 1. Analyze the incoming email and understand what it's asking or discussing.
@@ -134,8 +172,40 @@ INSTRUCTIONS:
 4. Output ONLY the draft email body text (no subject line, no metadata, just the reply text).
 5. Do not include placeholders like [Your Name] - write as if the user is writing directly.
 6. If the incoming email requires action or has questions, address them directly.
+7. Respect all guardrails and avoid banned words/phrases.
+8. Apply topic-specific rules when relevant to the email content or tags.
 
 Generate the draft reply now:`;
+}
+
+function selectKnowledge(incomingEmail: Email, items: KnowledgeItem[]): KnowledgeItem[] {
+  if (!items?.length) return []
+  const text = `${incomingEmail.subject} ${incomingEmail.body}`.toLowerCase()
+  const scored = items.map((item) => {
+    const tags = item.tags || []
+    const tagScore = tags.reduce((acc, tag) => (text.includes(tag.toLowerCase()) ? acc + 2 : acc), 0)
+    const keywordScore =
+      (item.title?.toLowerCase().includes(text) ? 1 : 0) +
+      (item.body?.toLowerCase().includes(incomingEmail.subject.toLowerCase()) ? 1 : 0)
+    const score = tagScore + keywordScore
+    return { item, score }
+  })
+  return scored
+    .filter((s) => s.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5)
+    .map((s) => s.item)
+}
+
+function enforceGuardrailsOutput(draft: string, guardrails?: Guardrails | null): string {
+  if (!guardrails) return draft
+  let result = draft
+  const banned = guardrails.bannedWords?.filter(Boolean) || []
+  banned.forEach((word) => {
+    const re = new RegExp(word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi")
+    result = result.replace(re, "[removed]")
+  })
+  return result
 }
 
 /**

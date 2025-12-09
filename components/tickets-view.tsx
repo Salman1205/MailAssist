@@ -14,6 +14,7 @@ import { Loader2, User, Mail, Clock, Tag, MessageSquare, Sparkles, X, Plus, Chev
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { useToast } from "@/components/ui/use-toast"
+import { supabaseBrowser } from "@/lib/supabase-client"
 
 interface Ticket {
   id: string
@@ -125,6 +126,44 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
     fetchUsers()
     fetchTicketViews()
   }, [])
+
+  // Supabase realtime for ticket_updates
+  useEffect(() => {
+    if (!supabaseBrowser) return
+    const channel = supabaseBrowser
+      .channel("ticket-updates")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "ticket_updates" },
+        async (payload) => {
+          const ticketId = (payload.new as any)?.ticket_id as string | undefined
+          if (!ticketId) return
+          await fetchTickets({ silent: true })
+
+          if (selectedTicket?.id === ticketId) {
+            try {
+              const res = await fetch(`/api/tickets/${ticketId}`)
+              if (res.ok) {
+                const data = await res.json().catch(() => null)
+                if (data?.ticket) {
+                  setSelectedTicket(data.ticket)
+                  prevSelectedCustomerReplyRef.current = data.ticket.lastCustomerReplyAt || null
+                  await markTicketViewed(data.ticket, data.ticket.lastCustomerReplyAt || undefined)
+                }
+              }
+              await fetchThread({ silent: true })
+            } catch {
+              // ignore
+            }
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabaseBrowser.removeChannel(channel)
+    }
+  }, [selectedTicket])
 
   const fetchTicketViews = async () => {
     try {

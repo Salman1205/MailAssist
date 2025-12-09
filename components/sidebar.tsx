@@ -1,8 +1,19 @@
 "use client"
 
+export type SidebarView =
+  | "inbox"
+  | "sent"
+  | "spam"
+  | "trash"
+  | "drafts"
+  | "settings"
+  | "users"
+  | "tickets"
+  | "ai-settings"
+
 interface SidebarProps {
-  activeView: "inbox" | "sent" | "spam" | "trash" | "drafts" | "settings" | "users" | "tickets"
-  setActiveView: (view: "inbox" | "sent" | "spam" | "trash" | "drafts" | "settings" | "users" | "tickets") => void
+  activeView: SidebarView
+  setActiveView: (view: SidebarView) => void
   onLogout?: () => void
   currentUser?: { id: string; name: string; role: string } | null
 }
@@ -21,8 +32,13 @@ const ADMIN_NAV_ITEMS = [
   { id: "users", label: "Team", icon: UsersIcon },
 ] as const
 
+const AI_NAV_ITEMS = [
+  { id: "ai-settings", label: "AI Customization", icon: SettingsIcon },
+] as const
+
 export default function Sidebar({ activeView, setActiveView, onLogout, currentUser }: SidebarProps) {
   const isAdmin = currentUser?.role === "admin"
+  const isManager = currentUser?.role === "manager"
   return (
     <aside className="hidden md:flex w-60 bg-card border-r border-border flex-col">
       <nav className="flex-1 px-3 py-6 space-y-1">
@@ -48,6 +64,29 @@ export default function Sidebar({ activeView, setActiveView, onLogout, currentUs
           <>
             <div className="h-px bg-border my-2" />
             {ADMIN_NAV_ITEMS.map((item) => {
+              const isActive = activeView === item.id
+              const Icon = item.icon
+
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setActiveView(item.id)}
+                  className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-left font-medium transition-all ${
+                    isActive ? "bg-primary text-primary-foreground shadow-sm" : "text-foreground hover:bg-secondary"
+                  }`}
+                >
+                  <Icon className="w-5 h-5 flex-shrink-0" />
+                  <span className="text-sm">{item.label}</span>
+                </button>
+              )
+            })}
+          </>
+        )}
+
+        {(isAdmin || isManager) && (
+          <>
+            <div className="h-px bg-border my-2" />
+            {AI_NAV_ITEMS.map((item) => {
               const isActive = activeView === item.id
               const Icon = item.icon
 
