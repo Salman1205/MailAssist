@@ -237,7 +237,22 @@ export async function ensureTicketForEmail(
 
   if (!data) return ticket;
 
-  return mapRowToTicket(data);
+  const updatedTicket = mapRowToTicket(data);
+
+  // Emit realtime signal (best-effort; non-blocking)
+  try {
+    await supabase
+      .from('ticket_updates')
+      .insert({
+        ticket_id: updatedTicket.id,
+        user_email: userEmail || null,
+        last_customer_reply_at: updatedTicket.lastCustomerReplyAt,
+      });
+  } catch (signalError) {
+    console.warn('ticket_updates insert failed (non-blocking):', signalError);
+  }
+
+  return updatedTicket;
 }
 
 /**

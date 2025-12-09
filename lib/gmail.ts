@@ -290,26 +290,60 @@ export async function stopHistoryWatch(
  */
 function parseEmailMessage(message: any) {
   const headers = message.payload?.headers || [];
-  const getHeader = (name: string) => 
+  const getHeader = (name: string) =>
     headers.find((h: any) => h.name.toLowerCase() === name.toLowerCase())?.value || '';
 
-  // Extract body text
-  let bodyText = '';
-  if (message.payload?.body?.data) {
-    bodyText = Buffer.from(message.payload.body.data, 'base64').toString('utf-8');
-  } else if (message.payload?.parts) {
-    // Handle multipart messages
-    for (const part of message.payload.parts) {
-      if (part.mimeType === 'text/plain' && part.body?.data) {
-        bodyText = Buffer.from(part.body.data, 'base64').toString('utf-8');
-        break;
-      } else if (part.mimeType === 'text/html' && part.body?.data && !bodyText) {
-        // Fallback to HTML if plain text not available
-        const html = Buffer.from(part.body.data, 'base64').toString('utf-8');
-        // Simple HTML to text conversion (remove tags)
-        bodyText = html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ');
-      }
+  const decodeData = (data?: string) => {
+    if (!data) return '';
+    // Gmail uses URL-safe base64
+    const normalized = data.replace(/-/g, '+').replace(/_/g, '/');
+    return Buffer.from(normalized, 'base64').toString('utf-8');
+  };
+
+  // Recursively walk MIME parts to find the best body candidate
+  const extractBody = (part: any): { text: string; htmlFallback?: string } => {
+    if (!part) return { text: '' };
+
+    const mime = part.mimeType || '';
+    const data = part.body?.data ? decodeData(part.body.data) : '';
+
+    // Direct text/plain
+    if (mime === 'text/plain' && data) {
+      return { text: data };
     }
+
+    // HTML (fallback if no plain text exists)
+    if (mime === 'text/html' && data) {
+      return { text: '', htmlFallback: data };
+    }
+
+    // Multipart: search children
+    if (part.parts && Array.isArray(part.parts)) {
+      let htmlCandidate: string | undefined;
+      for (const child of part.parts) {
+        const result = extractBody(child);
+        if (result.text) return result; // prefer plain text
+        if (result.htmlFallback && !htmlCandidate) {
+          htmlCandidate = result.htmlFallback;
+        }
+      }
+      return { text: '', htmlFallback: htmlCandidate };
+    }
+
+    return { text: '' };
+  };
+
+  const bodyResult = extractBody(message.payload);
+  let bodyText = bodyResult.text;
+
+  if (!bodyText && bodyResult.htmlFallback) {
+    // Strip HTML tags as a fallback; keep simple breaks
+    bodyText = bodyResult.htmlFallback
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/p>/gi, '\n\n')
+      .replace(/<[^>]*>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .trim();
   }
 
   // Determine if this is a reply by checking for inReplyTo or References headers

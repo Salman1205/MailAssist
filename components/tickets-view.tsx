@@ -102,6 +102,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
   const [showAssignDialog, setShowAssignDialog] = useState(false)
   const [pendingAssignment, setPendingAssignment] = useState<{ticketId: string, assigneeUserId: string | null} | null>(null)
   const [conversationMinimized, setConversationMinimized] = useState(false)
+  const [showQuotedMap, setShowQuotedMap] = useState<Record<string, boolean>>({})
   // Track last time each ticket was viewed (from Supabase) so we can show "new" badges
   const [lastViewedMap, setLastViewedMap] = useState<Record<string, string>>({})
   // Track previous selected ticket metadata for polling comparison
@@ -157,34 +158,37 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
     return new Date(ticket.lastCustomerReplyAt) > new Date(lastSeen)
   }
 
-  // Poll for updates to tickets and currently open thread
+  // Light polling only for the currently selected ticket (once per minute) to react
+  // when a new customer email arrives. No global refresh spam.
   useEffect(() => {
-    const interval = setInterval(async () => {
-      // Refresh tickets silently
-      const list = await fetchTickets({ silent: true, returnData: true })
-      if (!list) return
+    if (!selectedTicket) return
 
-      // If a ticket is open, check for updates
-      if (selectedTicket) {
-        const updated = list.find(t => t.id === selectedTicket.id)
-        if (updated) {
-          const prevReply = prevSelectedCustomerReplyRef.current
-          const currentReply = updated.lastCustomerReplyAt || null
-          // Detect new customer reply
-          if (prevReply && currentReply && new Date(currentReply) > new Date(prevReply)) {
-            toast({
-              title: "New customer reply",
-              description: updated.subject,
-            })
-          }
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/tickets/${selectedTicket.id}`)
+        if (!res.ok) return
+        const data = await res.json().catch(() => null)
+        const updated: Ticket | undefined = data?.ticket
+        if (!updated) return
+
+        const prevReply = prevSelectedCustomerReplyRef.current
+        const currentReply = updated.lastCustomerReplyAt || null
+
+        if (currentReply && (!prevReply || new Date(currentReply) > new Date(prevReply))) {
+          toast({
+            title: "New customer reply",
+            description: updated.subject,
+          })
           setSelectedTicket(updated)
-          // Refresh thread messages silently
-          await fetchThread({ silent: true })
-          // Update refs
           prevSelectedCustomerReplyRef.current = currentReply
+          await fetchThread({ silent: true })
+          await markTicketViewed(updated, currentReply)
+          await fetchTickets({ silent: true })
         }
+      } catch {
+        // ignore transient errors
       }
-    }, 15000) // 15s poll
+    }, 60000) // 1 minute
 
     return () => clearInterval(interval)
   }, [selectedTicket])
@@ -723,6 +727,31 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
     if (!dateString) return "N/A"
     const date = new Date(dateString)
     return date.toLocaleDateString() + " " + date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+  }
+
+  const getMessageKey = (msg: any, idx: number) =>
+    msg.id || `${msg.from}-${msg.date}-${idx}`
+
+  const splitBody = (body?: string) => {
+    const lines = (body || "").split("\n")
+    const main: string[] = []
+    const quoted: string[] = []
+    let inQuote = false
+    lines.forEach(line => {
+      const isQuote = line.trim().startsWith(">")
+      if (isQuote) inQuote = true
+      if (inQuote) quoted.push(line)
+      else main.push(line)
+    })
+    return { main, quoted }
+  }
+
+  const getInitials = (from: string) => {
+    const namePart = from?.split("<")[0].trim() || from
+    const pieces = namePart.split(/\s+/).filter(Boolean)
+    if (pieces.length === 0) return "?"
+    const initials = pieces.slice(0, 2).map(p => p[0]).join("")
+    return initials.toUpperCase()
   }
 
   // Filter and sort tickets based on active tab and filters
@@ -1311,19 +1340,56 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                       ) : threadMessages.length === 0 ? (
                         <p className="text-sm text-muted-foreground animate-in fade-in duration-300">No messages yet</p>
                       ) : (
-                        threadMessages.map((msg, idx) => (
+                        threadMessages.map((msg, idx) => {
+                          const key = getMessageKey(msg, idx)
+                          const { main, quoted } = splitBody(msg.body || msg.subject || "")
+                          const hasQuoted = quoted.some(l => l.trim().length > 0)
+                          const showQuoted = !!showQuotedMap[key]
+                          return (
                           <div 
-                            key={idx} 
-                            className="border-l-2 border-border pl-4 py-2 transition-all duration-200 hover:bg-muted/30 rounded-r-md animate-in fade-in slide-in-from-left-2"
+                            key={key} 
+                            className="rounded-lg border border-border/60 bg-background/60 shadow-sm p-4 transition-all duration-200 hover:bg-muted/40 animate-in fade-in slide-in-from-left-2"
                             style={{ animationDelay: `${idx * 50}ms` }}
                           >
-                            <div className="flex items-center justify-between mb-1">
-                              <span className="text-sm font-medium">{msg.from}</span>
-                              <span className="text-xs text-muted-foreground">{formatDate(msg.date)}</span>
+                            <div className="flex items-start gap-3">
+                              <div className="h-9 w-9 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-semibold">
+                                {getInitials(msg.from || "User")}
+                              </div>
+                              <div className="flex-1 space-y-2">
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="text-sm font-semibold text-foreground leading-tight">
+                                    {msg.from}
+                                  </div>
+                                  <span className="text-xs text-muted-foreground">{formatDate(msg.date)}</span>
+                                </div>
+
+                                <div className="text-sm leading-6 whitespace-pre-wrap">
+                                  {main.join("\n") || msg.subject || "No content"}
+                                </div>
+
+                                {hasQuoted && (
+                                  <div className="space-y-2">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-7 px-2 text-xs text-muted-foreground"
+                                      onClick={() =>
+                                        setShowQuotedMap(prev => ({ ...prev, [key]: !prev[key] }))
+                                      }
+                                    >
+                                      {showQuoted ? "Hide quoted history" : "Show quoted history"}
+                                    </Button>
+                                    {showQuoted && (
+                                      <div className="text-xs text-muted-foreground whitespace-pre-wrap bg-muted/60 border border-border/60 rounded-md p-3 leading-5">
+                                        {quoted.join("\n")}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
                             </div>
-                            <div className="text-sm whitespace-pre-wrap">{msg.body || msg.subject}</div>
                           </div>
-                        ))
+                        )})
                       )}
                     </div>
                   )}
@@ -1419,10 +1485,10 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                     <h3 className="font-semibold">Reply</h3>
                     <Button
                       size="sm"
-                      variant="outline"
+                      variant="secondary"
                       onClick={handleGenerateDraft}
                       disabled={generatingDraft || !threadMessages.length}
-                      className="transition-all duration-200 hover:scale-105 disabled:hover:scale-100"
+                      className="transition-all duration-200 hover:scale-105 disabled:hover:scale-100 text-foreground hover:text-foreground"
                     >
                       {generatingDraft ? (
                         <>
