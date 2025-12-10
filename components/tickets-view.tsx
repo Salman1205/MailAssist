@@ -137,6 +137,10 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
   const [showQuickReplies, setShowQuickReplies] = useState(false)
   const [showQuickRepliesSidebar, setShowQuickRepliesSidebar] = useState(false)
   
+  // Ref for conversation scroll container to preserve scroll position
+  const conversationScrollRef = useRef<HTMLDivElement>(null)
+  const savedScrollPositionRef = useRef<number>(0)
+  
   // Panel width preferences - load from localStorage with proper state management
   const getInitialPanelSizes = (): number[] => {
     if (typeof window !== 'undefined') {
@@ -183,6 +187,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
   }, [])
   
   // Prevent layout shifts when conversation loads - stabilize panel sizes
+  // Also restore scroll position after messages load
   const prevThreadLengthRef = useRef(0)
   useEffect(() => {
     if (threadMessages.length > 0 && threadMessages.length !== prevThreadLengthRef.current && !isResizingRef.current) {
@@ -192,9 +197,28 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
       requestAnimationFrame(() => {
         // Panel should maintain its size - no action needed
         // The CSS containment should prevent layout shifts
+        
+        // Restore scroll position after content loads
+        if (conversationScrollRef.current && savedScrollPositionRef.current > 0) {
+          conversationScrollRef.current.scrollTop = savedScrollPositionRef.current
+          savedScrollPositionRef.current = 0 // Reset after restoring
+        }
       })
     }
   }, [threadMessages.length])
+  
+  // Also restore scroll position when loading completes
+  useEffect(() => {
+    if (!loadingThread && threadMessages.length > 0 && conversationScrollRef.current && savedScrollPositionRef.current > 0) {
+      // Use setTimeout to ensure DOM has fully rendered
+      setTimeout(() => {
+        if (conversationScrollRef.current) {
+          conversationScrollRef.current.scrollTop = savedScrollPositionRef.current
+          savedScrollPositionRef.current = 0 // Reset after restoring
+        }
+      }, 100)
+    }
+  }, [loadingThread, threadMessages.length])
   
   // Auto-filter closed tickets
   const [autoFilterClosed, setAutoFilterClosed] = useState(() => {
@@ -275,13 +299,18 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
     fetchTickets()
     fetchUsers()
     fetchTicketViews()
-    fetchQuickReplies()
-  }, [])
-  
-  // Close quick replies sidebar and refetch when user changes
-  useEffect(() => {
     if (currentUserId) {
-      setShowQuickRepliesSidebar(false)
+      fetchQuickReplies()
+    }
+  }, [currentUserId])
+  
+  // Close quick replies sidebar and refetch when user changes or logs out
+  useEffect(() => {
+    // Always close sidebar when currentUserId changes (including when it becomes null on logout)
+    setShowQuickRepliesSidebar(false)
+    
+    // Only refetch if we have a valid user
+    if (currentUserId) {
       fetchQuickReplies()
     }
   }, [currentUserId])
@@ -591,6 +620,11 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
     const { silent = false } = options || {}
     if (!selectedTicket) return
     try {
+      // Save current scroll position before loading
+      if (conversationScrollRef.current) {
+        savedScrollPositionRef.current = conversationScrollRef.current.scrollTop
+      }
+      
       if (!silent) setLoadingThread(true)
       const response = await fetch(`/api/tickets/${selectedTicket.id}/thread`)
       if (response.ok) {
@@ -1741,7 +1775,11 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
         className="flex flex-col bg-background overflow-hidden"
         style={{ minWidth: 0, contain: 'layout size' }}
       >
-        <div className={`flex-1 overflow-y-auto overflow-x-hidden transition-all duration-300 ${selectedTicket ? "flex flex-col h-full w-full" : "hidden md:flex"}`} style={{ contain: 'layout' }}>
+        <div 
+          ref={conversationScrollRef}
+          className={`flex-1 overflow-y-auto overflow-x-hidden transition-all duration-300 ${selectedTicket ? "flex flex-col h-full w-full" : "hidden md:flex"}`} 
+          style={{ contain: 'layout' }}
+        >
         {selectedTicket ? (
           <div className="flex flex-col h-full w-full animate-in fade-in slide-in-from-right-4 duration-500 ease-out max-w-full" style={{ contain: 'layout' }}>
             <div className="p-4 md:p-6 border-b border-border/50 space-y-4 flex-shrink-0 w-full max-w-full animate-in fade-in slide-in-from-top-2 duration-300">

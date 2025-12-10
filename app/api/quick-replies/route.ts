@@ -90,15 +90,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get user_email from session for RLS scoping
-    const userEmail = getSessionUserEmailFromRequest(request) || await getCurrentUserEmail();
-    if (!userEmail) {
-      return NextResponse.json(
-        { error: 'Unable to determine user email' },
-        { status: 401 }
-      );
-    }
-
     const { data, error } = await supabase
       .from('quick_replies')
       .insert({

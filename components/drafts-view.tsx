@@ -17,16 +17,17 @@ interface Draft {
 
 interface DraftsViewProps {
   refreshKey: number
+  currentUserId: string | null
 }
 
-export default function DraftsView({ refreshKey }: DraftsViewProps) {
+export default function DraftsView({ refreshKey, currentUserId }: DraftsViewProps) {
   const [drafts, setDrafts] = useState<Draft[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     loadDrafts()
-  }, [refreshKey])
+  }, [refreshKey, currentUserId])
 
   const loadDrafts = async () => {
     try {
@@ -82,49 +83,69 @@ export default function DraftsView({ refreshKey }: DraftsViewProps) {
   }
 
   return (
-    <div className="p-4 md:p-6 space-y-4 overflow-y-auto h-full">
-      {drafts.map((draft) => (
-        <Card key={draft.id} className="p-4 space-y-3 border border-border">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-            <div>
-              <p className="text-sm font-semibold text-foreground">{draft.subject || "(No subject)"}</p>
-              <p className="text-xs text-muted-foreground">To: {draft.to || "Unknown recipient"}</p>
+    <div className="h-full w-full overflow-y-auto overflow-x-hidden" style={{ maxWidth: '100%', width: '100%' }}>
+      <div className="p-4 md:p-6 space-y-4 max-w-full min-w-0" style={{ maxWidth: '100%', width: '100%' }}>
+        {drafts.map((draft) => (
+          <Card key={draft.id} className="p-4 space-y-3 border border-border w-full max-w-full min-w-0" style={{ maxWidth: '100%', width: '100%', boxSizing: 'border-box' }}>
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 min-w-0 max-w-full">
+              <div className="min-w-0 max-w-full flex-1">
+                <p className="text-sm font-semibold text-foreground break-words overflow-wrap-anywhere">{draft.subject || "(No subject)"}</p>
+                <p className="text-xs text-muted-foreground break-all overflow-wrap-anywhere">To: {draft.to || "Unknown recipient"}</p>
+              </div>
+              <p className="text-xs text-muted-foreground flex-shrink-0 whitespace-nowrap">
+                {new Date(draft.createdAt).toLocaleString()}
+              </p>
             </div>
-            <p className="text-xs text-muted-foreground">
-              {new Date(draft.createdAt).toLocaleString()}
-            </p>
-          </div>
 
-          <div className="bg-muted/40 rounded-md p-3 text-xs text-muted-foreground whitespace-pre-wrap">
-            {draft.originalBody || "No original message available."}
-          </div>
-
-          <div className="space-y-2">
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Suggested Reply</p>
-            <textarea
-              className="w-full h-40 p-3 border border-border rounded-md bg-input text-sm text-foreground resize-none"
-              value={draft.draftText}
-              readOnly
-            />
-          </div>
-
-          <div className="flex flex-col sm:flex-row gap-2">
-            <Button
-              className="flex-1"
-              onClick={() => handleCopy(draft.draftText)}
+            <div 
+              className="bg-muted/40 rounded-md p-3 text-xs text-muted-foreground whitespace-pre-wrap break-all w-full max-w-full min-w-0 overflow-x-hidden" 
+              style={{ 
+                wordBreak: 'break-all', 
+                overflowWrap: 'anywhere',
+                wordWrap: 'break-word',
+                maxWidth: '100%',
+                boxSizing: 'border-box',
+                overflowX: 'hidden'
+              }}
             >
-              Copy Draft
-            </Button>
-            <Button
-              variant="outline"
-              className="flex-1"
-              onClick={() => window.open(`https://mail.google.com/mail/u/0/#inbox/${draft.emailId}`, "_blank")}
-            >
-              View Thread
-            </Button>
-          </div>
-        </Card>
-      ))}
+              {draft.originalBody || "No original message available."}
+            </div>
+
+            <div className="space-y-2 w-full max-w-full min-w-0">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Suggested Reply</p>
+              <textarea
+                className="w-full h-40 p-3 border border-border rounded-md bg-input text-sm text-foreground resize-none break-all min-w-0 max-w-full overflow-x-hidden"
+                style={{ 
+                  wordBreak: 'break-all', 
+                  overflowWrap: 'anywhere',
+                  wordWrap: 'break-word',
+                  maxWidth: '100%',
+                  boxSizing: 'border-box',
+                  overflowX: 'hidden'
+                }}
+                value={draft.draftText}
+                readOnly
+              />
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2 w-full max-w-full min-w-0">
+              <Button
+                className="flex-1 min-w-0"
+                onClick={() => handleCopy(draft.draftText)}
+              >
+                Copy Draft
+              </Button>
+              <Button
+                variant="outline"
+                className="flex-1 min-w-0"
+                onClick={() => window.open(`https://mail.google.com/mail/u/0/#inbox/${draft.emailId}`, "_blank")}
+              >
+                View Thread
+              </Button>
+            </div>
+          </Card>
+        ))}
+      </div>
     </div>
   )
 }

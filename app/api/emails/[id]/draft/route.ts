@@ -9,6 +9,7 @@ import { getSentEmails, storeDraft, loadStoredEmails } from '@/lib/storage';
 import { generateDraftReply } from '@/lib/ai-draft';
 import { listKnowledge } from '@/lib/knowledge';
 import { getGuardrails } from '@/lib/guardrails';
+import { getCurrentUserIdFromRequest } from '@/lib/session';
 
 type RouteContext =
   | { params: { id: string } }
@@ -148,6 +149,9 @@ export async function POST(
       throw draftError; // Re-throw to be caught by outer catch
     }
 
+    // Get current user ID for draft ownership
+    const userId = getCurrentUserIdFromRequest(request);
+    
     // Save draft
     let savedDraft;
     try {
@@ -158,7 +162,7 @@ export async function POST(
         to: incomingEmail.to || '',
         originalBody: incomingEmail.body || incomingEmail.snippet || '',
         draftText: draft,
-      });
+      }, userId || null);
     } catch (storeError) {
       console.error('[Draft] Error storing draft:', storeError);
       // Still return the draft even if storing fails

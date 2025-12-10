@@ -170,7 +170,7 @@ export async function saveStoredEmails(emails: StoredEmail[], retries = 1) {
   }
 }
 
-export async function loadDrafts(): Promise<StoredDraft[]> {
+export async function loadDrafts(userId?: string | null): Promise<StoredDraft[]> {
   if (!supabase) {
     return [];
   }
@@ -178,7 +178,11 @@ export async function loadDrafts(): Promise<StoredDraft[]> {
   const userEmail = await getCurrentUserEmail();
   
   let query = supabase.from('drafts').select('*');
-  if (userEmail) {
+  
+  // Filter by created_by (user ID) if provided, otherwise fall back to user_email
+  if (userId) {
+    query = query.eq('created_by', userId);
+  } else if (userEmail) {
     query = query.eq('user_email', userEmail);
   }
   
@@ -201,7 +205,7 @@ export async function loadDrafts(): Promise<StoredDraft[]> {
   }));
 }
 
-export async function saveDrafts(drafts: StoredDraft[]) {
+export async function saveDrafts(drafts: StoredDraft[], userId?: string | null) {
   if (!supabase) {
     return;
   }
@@ -215,6 +219,7 @@ export async function saveDrafts(drafts: StoredDraft[]) {
   const payload = drafts.map((draft) => ({
     id: draft.id,
     user_email: userEmail,
+    created_by: userId || null, // Add created_by field for user-specific filtering
     email_id: draft.emailId,
     subject: draft.subject,
     from: draft.from,
@@ -378,8 +383,8 @@ export async function storeDraft(entry: {
   to: string;
   originalBody: string;
   draftText: string;
-}) {
-  const drafts = await loadDrafts();
+}, userId?: string | null) {
+  const drafts = await loadDrafts(userId);
   const newDraft: StoredDraft = {
     id: crypto.randomUUID(),
     createdAt: new Date().toISOString(),
@@ -387,7 +392,7 @@ export async function storeDraft(entry: {
   };
 
   drafts.unshift(newDraft);
-  await saveDrafts(drafts);
+  await saveDrafts(drafts, userId);
   return newDraft;
 }
 

@@ -2,12 +2,21 @@
  * Manage stored drafts
  */
 
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { loadDrafts } from '@/lib/storage';
+import { getCurrentUserIdFromRequest } from '@/lib/session';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const drafts = await loadDrafts();
+    const userId = getCurrentUserIdFromRequest(request);
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'Not authenticated' },
+        { status: 401 }
+      );
+    }
+    
+    const drafts = await loadDrafts(userId);
     return NextResponse.json({ drafts });
   } catch (error) {
     console.error('Error loading drafts:', error);

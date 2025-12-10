@@ -455,7 +455,7 @@ export default function Page() {
           </div>
         )
       case "drafts":
-        return <DraftsView refreshKey={draftsVersion} />
+        return <DraftsView key={currentUserId || "no-user"} refreshKey={draftsVersion} currentUserId={currentUserId} />
       case "quick-replies":
         return <QuickRepliesView key={currentUserId || "no-user"} currentUserId={currentUserId} />
       case "tickets":
@@ -607,8 +607,15 @@ export default function Page() {
           <main className="flex-1 overflow-auto">
             {checkingAuth || checkingUser ? (
               <div className="flex items-center justify-center h-full">
-                <div className="text-sm text-muted-foreground">
-                  {checkingAuth ? "Checking authentication..." : "Loading..."}
+                <div className="flex flex-col items-center gap-3 animate-in fade-in duration-500">
+                  <div className="flex gap-1.5">
+                    <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {checkingAuth ? "Checking authentication..." : "Loading..."}
+                  </p>
                 </div>
               </div>
             ) : !isConnected ? (
