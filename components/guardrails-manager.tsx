@@ -182,7 +182,7 @@ export default function GuardrailsManager() {
               </div>
             </div>
           ))}
-          <Button variant="outline" size="sm" onClick={addTopicRule}>
+          <Button variant="outline" size="sm" onClick={addTopicRule} className="hover:bg-accent hover:text-foreground">
             Add topic rule
           </Button>
         </div>
@@ -191,7 +191,7 @@ export default function GuardrailsManager() {
           <Button onClick={() => handleSave(false)} disabled={saving}>
             {saving ? "Saving..." : "Save (submit)"}
           </Button>
-          <Button variant="outline" onClick={() => handleSave(true)} disabled={saving}>
+          <Button variant="outline" onClick={() => handleSave(true)} disabled={saving} className="hover:bg-accent hover:text-foreground">
             {saving ? "..." : "Publish (admin)"}
           </Button>
           {loading && <div className="text-sm text-muted-foreground">Loading...</div>}

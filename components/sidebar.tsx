@@ -1,5 +1,7 @@
 "use client"
 
+import { Sparkles } from 'lucide-react'
+
 export type SidebarView =
   | "inbox"
   | "sent"
@@ -33,7 +35,7 @@ const ADMIN_NAV_ITEMS = [
 ] as const
 
 const AI_NAV_ITEMS = [
-  { id: "ai-settings", label: "AI Customization", icon: SettingsIcon },
+  { id: "ai-settings", label: "AI Customization", icon: SparklesIcon },
 ] as const
 
 export default function Sidebar({ activeView, setActiveView, onLogout, currentUser }: SidebarProps) {
@@ -196,6 +198,10 @@ function TicketIcon(props: React.SVGProps<SVGSVGElement>) {
       <path d="M8 12h8" />
     </svg>
   )
+}
+
+function SparklesIcon(props: React.SVGProps<SVGSVGElement>) {
+  return <Sparkles className="w-5 h-5" {...props} />
 }
 
 function LogoutIcon(props: React.SVGProps<SVGSVGElement>) {

@@ -10,11 +10,15 @@ import { Input } from "@/components/ui/input"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { Loader2, User, Mail, Clock, Tag, MessageSquare, Sparkles, X, Plus, ChevronDown, ChevronUp, Edit2, Check, XCircle } from "lucide-react"
+import { Loader2, User, Mail, Clock, Tag, MessageSquare, Sparkles, X, Plus, ChevronDown, ChevronUp, Edit2, Check, XCircle, MoreVertical, Filter, ChevronRight } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable"
 import { useToast } from "@/components/ui/use-toast"
 import { supabaseBrowser } from "@/lib/supabase-client"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
 interface Ticket {
   id: string
@@ -56,6 +60,14 @@ interface ThreadMessage {
   to: string
   body: string
   date?: string
+}
+
+interface QuickReply {
+  id: string
+  title: string
+  content: string
+  category: string
+  tags: string[]
 }
 
 interface TicketsViewProps {
@@ -111,6 +123,49 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
   const prevSelectedCustomerReplyRef = useRef<string | null>(null)
   const [showUnreadOnly, setShowUnreadOnly] = useState(false)
   
+  // Multi-select state
+  const [selectedTicketIds, setSelectedTicketIds] = useState<Set<string>>(new Set())
+  const [isSelectMode, setIsSelectMode] = useState(false)
+  const [bulkUpdating, setBulkUpdating] = useState(false)
+  
+  // Filters collapse state - collapsed by default
+  const [filtersExpanded, setFiltersExpanded] = useState(false)
+  
+  // Quick replies state
+  const [quickReplies, setQuickReplies] = useState<QuickReply[]>([])
+  const [showQuickReplies, setShowQuickReplies] = useState(false)
+  
+  // Panel width preferences - load from localStorage
+  const getInitialPanelSizes = (): number[] => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('ticket-panel-widths')
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved)
+          // Convert from {list, detail} format to array format [list, detail]
+          if (parsed.list && parsed.detail) {
+            return [parsed.list, parsed.detail]
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+    return [40, 60] // Default: 40% list, 60% detail
+  }
+  
+  const [panelSizes, setPanelSizes] = useState<number[]>(getInitialPanelSizes)
+  const panelInitializedRef = useRef(false)
+  
+  // Auto-filter closed tickets
+  const [autoFilterClosed, setAutoFilterClosed] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('auto-filter-closed')
+      return saved === 'true'
+    }
+    return false
+  })
+  
   // Updating states
   const [updatingStatus, setUpdatingStatus] = useState(false)
   const [updatingPriority, setUpdatingPriority] = useState(false)
@@ -120,17 +175,100 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
   
   const { toast } = useToast()
   const canAssign = currentUserRole === "admin" || currentUserRole === "manager"
+  
+  // Save panel sizes to localStorage when they change (debounced)
+  const resizeTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const handlePanelResize = (sizes: number[]) => {
+    // Only update if sizes actually changed (avoid unnecessary re-renders)
+    if (sizes.length === 2 && (sizes[0] !== panelSizes[0] || sizes[1] !== panelSizes[1])) {
+      setPanelSizes(sizes)
+      panelInitializedRef.current = true
+      
+      // Debounce localStorage writes to avoid excessive writes
+      if (resizeTimeoutRef.current) {
+        clearTimeout(resizeTimeoutRef.current)
+      }
+      resizeTimeoutRef.current = setTimeout(() => {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('ticket-panel-widths', JSON.stringify({ list: sizes[0], detail: sizes[1] }))
+        }
+      }, 300)
+    }
+  }
+  
+  // Handle individual panel resize
+  const handleListPanelResize = (size: number) => {
+    const newSizes = [size, 100 - size]
+    handlePanelResize(newSizes)
+  }
+  
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (resizeTimeoutRef.current) {
+        clearTimeout(resizeTimeoutRef.current)
+      }
+    }
+  }, [])
+  
+  // Save auto-filter preference
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('auto-filter-closed', String(autoFilterClosed))
+    }
+  }, [autoFilterClosed])
 
   useEffect(() => {
     fetchTickets()
     fetchUsers()
     fetchTicketViews()
+    fetchQuickReplies()
   }, [])
+  
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+K or Cmd+K to toggle select mode
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault()
+        setIsSelectMode(!isSelectMode)
+        if (isSelectMode) {
+          setSelectedTicketIds(new Set())
+        }
+      }
+      // Ctrl+A to select all when in select mode
+      if ((e.ctrlKey || e.metaKey) && e.key === 'a' && isSelectMode) {
+        e.preventDefault()
+        const allIds = new Set(filteredTickets.map(t => t.id))
+        setSelectedTicketIds(allIds)
+      }
+      // Escape to exit select mode
+      if (e.key === 'Escape' && isSelectMode) {
+        setIsSelectMode(false)
+        setSelectedTicketIds(new Set())
+      }
+    }
+    
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isSelectMode, tickets, activeTab, statusFilter, priorityFilter, assigneeFilter, tagsFilter, dateFilter, searchQuery, showUnreadOnly])
+  
+  const fetchQuickReplies = async () => {
+    try {
+      const response = await fetch("/api/quick-replies")
+      if (response.ok) {
+        const data = await response.json()
+        setQuickReplies(data.quickReplies || [])
+      }
+    } catch (err) {
+      console.error("Error fetching quick replies:", err)
+    }
+  }
 
   // Supabase realtime for ticket_updates
   useEffect(() => {
     if (!supabaseBrowser) return
-    const channel = supabaseBrowser
+    const channel = supabaseBrowser!
       .channel("ticket-updates")
       .on(
         "postgres_changes",
@@ -161,7 +299,9 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
       .subscribe()
 
     return () => {
-      supabaseBrowser.removeChannel(channel)
+      if (supabaseBrowser) {
+        supabaseBrowser.removeChannel(channel)
+      }
     }
   }, [selectedTicket])
 
@@ -511,11 +651,13 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
     }
   }
 
-  const handleUpdateStatus = async (status: Ticket["status"]) => {
-    if (!selectedTicket) return
+  const handleUpdateStatus = async (status: Ticket["status"], ticketId?: string) => {
+    const targetTicketId = ticketId || selectedTicket?.id
+    if (!targetTicketId) return
+    
     try {
       setUpdatingStatus(true)
-      const response = await fetch(`/api/tickets/${selectedTicket.id}/status`, {
+      const response = await fetch(`/api/tickets/${targetTicketId}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
@@ -523,14 +665,112 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
 
       if (!response.ok) throw new Error("Failed to update status")
       const data = await response.json()
-      setSelectedTicket(data.ticket)
-      setTickets((prev) => prev.map((t) => (t.id === selectedTicket.id ? data.ticket : t)))
+      
+      // Update selected ticket if it's the one being updated
+      if (selectedTicket?.id === targetTicketId) {
+        setSelectedTicket(data.ticket)
+        
+        // Auto-navigate to next ticket if closing
+        if (status === "closed") {
+          // Wait for tickets to refresh before finding next ticket
+          await fetchTickets({ silent: true })
+          const refreshedFiltered = getFilteredTickets()
+          const currentIndex = refreshedFiltered.findIndex(t => t.id === targetTicketId)
+          const nextTicket = refreshedFiltered[currentIndex + 1] || refreshedFiltered[0]
+          
+          if (nextTicket && nextTicket.id !== targetTicketId) {
+            setSelectedTicket(nextTicket)
+            markTicketViewed(nextTicket)
+          } else {
+            // No more tickets, clear selection
+            setSelectedTicket(null)
+            toast({ title: "No more tickets", description: "All tickets in this view have been processed." })
+          }
+        }
+      }
+      
+      setTickets((prev) => prev.map((t) => (t.id === targetTicketId ? data.ticket : t)))
       toast({ title: "Status updated" })
+      
+      // Refresh tickets to update counts
+      await fetchTickets({ silent: true })
     } catch (err) {
       toast({ title: "Error", description: "Failed to update status", variant: "destructive" })
     } finally {
       setUpdatingStatus(false)
     }
+  }
+  
+  const handleBulkUpdate = async (updates: { status?: Ticket["status"], assigneeUserId?: string | null, tags?: string[] }) => {
+    if (selectedTicketIds.size === 0) return
+    
+    try {
+      setBulkUpdating(true)
+      const response = await fetch("/api/tickets/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ticketIds: Array.from(selectedTicketIds),
+          ...updates,
+        }),
+      })
+      
+      if (!response.ok) throw new Error("Failed to update tickets")
+      const data = await response.json()
+      
+      // Update tickets in state
+      const updatedMap = new Map(data.results.map((r: any) => [r.ticketId, r.ticket as Ticket]))
+      setTickets((prev) => prev.map((t) => (updatedMap.get(t.id) as Ticket) || t))
+      
+      // Clear selection
+      setSelectedTicketIds(new Set())
+      setIsSelectMode(false)
+      
+      // If closing tickets, auto-filter them out if preference is set
+      if (updates.status === "closed" && autoFilterClosed) {
+        setStatusFilter("open")
+      }
+      
+      toast({ 
+        title: "Bulk update successful", 
+        description: `Updated ${data.updated} ticket(s)` 
+      })
+      
+      await fetchTickets({ silent: true })
+    } catch (err) {
+      toast({ 
+        title: "Error", 
+        description: err instanceof Error ? err.message : "Failed to update tickets", 
+        variant: "destructive" 
+      })
+    } finally {
+      setBulkUpdating(false)
+    }
+  }
+  
+  const toggleTicketSelection = (ticketId: string) => {
+    setSelectedTicketIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(ticketId)) {
+        next.delete(ticketId)
+      } else {
+        next.add(ticketId)
+      }
+      return next
+    })
+  }
+  
+  const toggleSelectAll = () => {
+    if (selectedTicketIds.size === filteredTickets.length) {
+      setSelectedTicketIds(new Set())
+    } else {
+      setSelectedTicketIds(new Set(filteredTickets.map(t => t.id)))
+    }
+  }
+  
+  const insertQuickReply = (content: string) => {
+    setReplyText(content)
+    setShowQuickReplies(false)
   }
 
   const handleUpdatePriority = async (priority: Ticket["priority"]) => {
@@ -809,6 +1049,11 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
     }
     // "all" tab shows all tickets (no filter)
 
+    // Auto-filter closed tickets if preference is set
+    if (autoFilterClosed && statusFilter === "all") {
+      filtered = filtered.filter(t => t.status !== "closed")
+    }
+    
     // Apply other filters
     if (statusFilter !== "all") {
       filtered = filtered.filter(t => t.status === statusFilter)
@@ -830,9 +1075,12 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
       )
     }
     
-    // Tags filter
+    // Tags filter - support multiple tags (comma-separated)
     if (tagsFilter !== "all") {
-      filtered = filtered.filter(t => t.tags.includes(tagsFilter))
+      const selectedTags = tagsFilter.split(',').map(t => t.trim()).filter(Boolean)
+      if (selectedTags.length > 0) {
+        filtered = filtered.filter(t => selectedTags.some(tag => t.tags.includes(tag)))
+      }
     }
     
     // Date filter
@@ -940,196 +1188,365 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
       <div className="flex items-center justify-center h-full">
         <div className="text-center space-y-4">
           <p className="text-destructive">{error}</p>
-          <Button onClick={fetchTickets}>Retry</Button>
+          <Button onClick={() => fetchTickets()}>Retry</Button>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="flex flex-col md:flex-row h-full bg-background">
-      {/* Tickets List */}
-      <div className={`border-b md:border-b-0 md:border-r border-border bg-card overflow-y-auto ${
-        selectedTicket ? "hidden md:flex md:w-96" : "flex w-full md:w-96"
-      } flex-col`}>
-        <div className="p-3 border-b border-border space-y-3">
-          <h2 className="text-lg font-semibold">Tickets</h2>
+    <div className="h-full w-full bg-background">
+      <ResizablePanelGroup 
+        direction="horizontal" 
+        className="h-full w-full"
+        onLayout={handlePanelResize}
+      >
+        {/* Tickets List */}
+        <ResizablePanel 
+          defaultSize={panelSizes[0]} 
+          minSize={25}
+          maxSize={60}
+          onResize={handleListPanelResize}
+          className="flex flex-col border-r border-border bg-card overflow-hidden"
+        >
+          <div className="flex flex-col h-full overflow-hidden">
+            <div className="p-3 border-b border-border space-y-2 flex-shrink-0">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold">Tickets</h2>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setIsSelectMode(!isSelectMode)
+                  if (isSelectMode) {
+                    setSelectedTicketIds(new Set())
+                  }
+                }}
+                className="h-7 text-xs"
+              >
+                {isSelectMode ? "Cancel" : "Select"}
+              </Button>
+            </div>
+          </div>
           
           {/* Tabs */}
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
-            <TabsList className="grid w-full grid-cols-3 transition-all duration-200">
-              <TabsTrigger value="assigned">Assigned to Me</TabsTrigger>
+            <TabsList className="grid w-full grid-cols-3 h-8 text-xs">
+              <TabsTrigger value="assigned">Assigned</TabsTrigger>
               <TabsTrigger value="unassigned">Unassigned</TabsTrigger>
-              <TabsTrigger value="all">All Tickets</TabsTrigger>
+              <TabsTrigger value="all">All</TabsTrigger>
             </TabsList>
           </Tabs>
 
-          {/* Search and Filters */}
-          <div className="space-y-2.5 animate-in fade-in duration-300">
-            <Input
-              placeholder="Search by subject or email..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="transition-all duration-200 focus:scale-[1.01] focus:shadow-md"
-            />
-            
-            {/* Filters - Compact Horizontal Layout */}
-            <div className="flex flex-wrap gap-3 animate-in fade-in slide-in-from-top-2 duration-300">
-              <div className="flex flex-col gap-1.5 min-w-[140px]">
-                <Label className="text-xs font-medium text-muted-foreground">Status</Label>
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="w-full [&>span]:!line-clamp-none [&>span]:truncate">
-                    <SelectValue placeholder="Status" />
-                  </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Statuses</SelectItem>
-                      <SelectItem value="open">Open</SelectItem>
-                      <SelectItem value="pending">Pending</SelectItem>
-                      <SelectItem value="on_hold">On Hold</SelectItem>
-                      <SelectItem value="closed">Closed</SelectItem>
-                    </SelectContent>
-                  </Select>
+          {/* Search */}
+          <Input
+            placeholder="Search by subject or email..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="h-8 text-sm"
+          />
+          
+          {/* Collapsible Filters */}
+          <Accordion type="single" collapsible value={filtersExpanded ? "filters" : undefined}>
+            <AccordionItem value="filters" className="border-none">
+              <AccordionTrigger 
+                className="py-1 h-7 text-xs text-muted-foreground hover:no-underline"
+                onClick={() => setFiltersExpanded(!filtersExpanded)}
+              >
+                <div className="flex items-center gap-1.5">
+                  <Filter className="w-3 h-3" />
+                  <span>Filters</span>
+                  {(statusFilter !== "all" || priorityFilter !== "all" || assigneeFilter !== "all" || tagsFilter !== "all" || dateFilter !== "all" || showUnreadOnly) && (
+                    <Badge variant="secondary" className="h-4 px-1 text-[10px]">Active</Badge>
+                  )}
                 </div>
+              </AccordionTrigger>
+              <AccordionContent className="pt-2 pb-1">
+                <div className="space-y-2">
+                  {/* Compact Filters Grid */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-[10px] text-muted-foreground">Status</Label>
+                      <Select value={statusFilter} onValueChange={setStatusFilter}>
+                        <SelectTrigger className="h-7 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All</SelectItem>
+                          <SelectItem value="open">Open</SelectItem>
+                          <SelectItem value="pending">Pending</SelectItem>
+                          <SelectItem value="on_hold">On Hold</SelectItem>
+                          <SelectItem value="closed">Closed</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
 
-              <div className="flex flex-col gap-1.5 min-w-[140px]">
-                <Label className="text-xs font-medium text-muted-foreground">Priority</Label>
-                <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-                  <SelectTrigger className="w-full [&>span]:!line-clamp-none [&>span]:truncate">
-                    <SelectValue placeholder="Priority" />
-                  </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Priorities</SelectItem>
-                      <SelectItem value="urgent">Urgent</SelectItem>
-                      <SelectItem value="high">High</SelectItem>
-                      <SelectItem value="medium">Medium</SelectItem>
-                      <SelectItem value="low">Low</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-[10px] text-muted-foreground">Priority</Label>
+                      <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+                        <SelectTrigger className="h-7 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All</SelectItem>
+                          <SelectItem value="urgent">Urgent</SelectItem>
+                          <SelectItem value="high">High</SelectItem>
+                          <SelectItem value="medium">Medium</SelectItem>
+                          <SelectItem value="low">Low</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-[10px] text-muted-foreground">Assignee</Label>
+                      <Select value={assigneeFilter} onValueChange={setAssigneeFilter}>
+                        <SelectTrigger className="h-7 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All</SelectItem>
+                          <SelectItem value="unassigned">Unassigned</SelectItem>
+                          {users.map((user) => (
+                            <SelectItem key={user.id} value={user.id}>
+                              {user.name}
+                            </SelectItem>
+                          ))}
+                          {currentUserId && (
+                            <SelectItem value={currentUserId}>Me</SelectItem>
+                          )}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-[10px] text-muted-foreground">Tags</Label>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button variant="outline" className="h-7 text-xs justify-between">
+                            {tagsFilter === "all" ? "All Tags" : tagsFilter.split(',').length === 1 ? tagsFilter : `${tagsFilter.split(',').length} tags`}
+                            <ChevronDown className="w-3 h-3 ml-1" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-64 p-2" align="start">
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <Label className="text-xs font-semibold">Filter by Tags</Label>
+                              {tagsFilter !== "all" && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 text-xs"
+                                  onClick={() => setTagsFilter("all")}
+                                >
+                                  Clear
+                                </Button>
+                              )}
+                            </div>
+                            <div className="max-h-64 overflow-y-auto space-y-1">
+                              {Array.from(new Set(tickets.flatMap(t => t.tags)))
+                                .map(tag => ({
+                                  tag,
+                                  count: tickets.filter(t => t.tags.includes(tag)).length
+                                }))
+                                .sort((a, b) => b.count - a.count)
+                                .map(({ tag, count }) => {
+                                  const selectedTags = tagsFilter === "all" ? [] : tagsFilter.split(',').map(t => t.trim())
+                                  const isSelected = selectedTags.includes(tag)
+                                  return (
+                                    <div
+                                      key={tag}
+                                      className="flex items-center gap-2 p-1.5 rounded hover:bg-muted cursor-pointer"
+                                      onClick={() => {
+                                        if (isSelected) {
+                                          const newTags = selectedTags.filter(t => t !== tag)
+                                          setTagsFilter(newTags.length === 0 ? "all" : newTags.join(','))
+                                        } else {
+                                          const newTags = tagsFilter === "all" ? [tag] : [...selectedTags, tag]
+                                          setTagsFilter(newTags.join(','))
+                                        }
+                                      }}
+                                    >
+                                      <Checkbox checked={isSelected} />
+                                      <span className="text-xs flex-1">{tag}</span>
+                                      <Badge variant="secondary" className="h-4 px-1 text-[10px]">{count}</Badge>
+                                    </div>
+                                  )
+                                })}
+                            </div>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-[10px] text-muted-foreground">Date</Label>
+                      <Select value={dateFilter} onValueChange={setDateFilter}>
+                        <SelectTrigger className="h-7 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All</SelectItem>
+                          <SelectItem value="today">Today</SelectItem>
+                          <SelectItem value="week">7 Days</SelectItem>
+                          <SelectItem value="month">30 Days</SelectItem>
+                          <SelectItem value="custom">Custom</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="flex flex-col gap-1 justify-end">
+                      <div className="flex items-center gap-1.5 h-7">
+                        <Switch 
+                          checked={showUnreadOnly} 
+                          onCheckedChange={setShowUnreadOnly}
+                          className="scale-75"
+                        />
+                        <Label className="text-[10px] text-muted-foreground">Unread only</Label>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-2 pt-1">
+                    <Switch 
+                      checked={autoFilterClosed} 
+                      onCheckedChange={setAutoFilterClosed}
+                      className="scale-75"
+                    />
+                    <Label className="text-[10px] text-muted-foreground">Auto-hide closed tickets</Label>
+                  </div>
+                  
+                  {/* Custom Date Range Inputs */}
+                  {dateFilter === "custom" && (
+                    <div className="grid grid-cols-2 gap-2 pt-1">
+                      <Input
+                        type="date"
+                        placeholder="Start Date"
+                        value={customDateStart}
+                        onChange={(e) => setCustomDateStart(e.target.value)}
+                        className="h-7 text-xs"
+                      />
+                      <Input
+                        type="date"
+                        placeholder="End Date"
+                        value={customDateEnd}
+                        onChange={(e) => setCustomDateEnd(e.target.value)}
+                        className="h-7 text-xs"
+                      />
+                    </div>
+                  )}
                 </div>
-
-              <div className="flex flex-col gap-1.5 min-w-[160px]">
-                <Label className="text-xs font-medium text-muted-foreground">Assignee</Label>
-                <Select value={assigneeFilter} onValueChange={setAssigneeFilter}>
-                  <SelectTrigger className="w-full [&>span]:!line-clamp-none [&>span]:truncate">
-                    <SelectValue placeholder="Assignee" />
-                  </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Assignees</SelectItem>
-                      <SelectItem value="unassigned">Unassigned</SelectItem>
-                      {users.map((user) => (
-                        <SelectItem key={user.id} value={user.id}>
-                          {user.name}
-                        </SelectItem>
-                      ))}
-                      {currentUserId && (
-                        <SelectItem value={currentUserId}>Me</SelectItem>
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-              {/* Tags Filter */}
-              <div className="flex flex-col gap-1.5 min-w-[140px]">
-                <Label className="text-xs font-medium text-muted-foreground">Tags</Label>
-                <Select value={tagsFilter} onValueChange={setTagsFilter}>
-                  <SelectTrigger className="w-full [&>span]:!line-clamp-none [&>span]:truncate">
-                    <SelectValue placeholder="Tags" />
-                  </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Tags</SelectItem>
-                      {Array.from(new Set(tickets.flatMap(t => t.tags))).sort().map((tag) => (
-                        <SelectItem key={tag} value={tag}>
-                          {tag}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-              {/* Date Filter */}
-              <div className="flex flex-col gap-1.5 min-w-[160px]">
-                <Label className="text-xs font-medium text-muted-foreground">Date</Label>
-                <Select value={dateFilter} onValueChange={setDateFilter}>
-                  <SelectTrigger className="w-full [&>span]:!line-clamp-none [&>span]:truncate">
-                    <SelectValue placeholder="Date" />
-                  </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Dates</SelectItem>
-                      <SelectItem value="today">Today</SelectItem>
-                      <SelectItem value="week">Last 7 Days</SelectItem>
-                      <SelectItem value="month">Last 30 Days</SelectItem>
-                      <SelectItem value="custom">Custom Range</SelectItem>
-                    </SelectContent>
-                  </Select>
-              </div>
-
-              <div className="flex items-center gap-2 px-2">
-                <Switch checked={showUnreadOnly} onCheckedChange={setShowUnreadOnly} />
-                <span className="text-xs text-muted-foreground">Show only unread updates</span>
-              </div>
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
             </div>
-            
-            {/* Custom Date Range Inputs */}
-            {dateFilter === "custom" && (
-              <div className="grid grid-cols-2 gap-2">
-                <Input
-                  type="date"
-                  placeholder="Start Date"
-                  value={customDateStart}
-                  onChange={(e) => setCustomDateStart(e.target.value)}
-                />
-                <Input
-                  type="date"
-                  placeholder="End Date"
-                  value={customDateEnd}
-                  onChange={(e) => setCustomDateEnd(e.target.value)}
-                />
-              </div>
-            )}
+
+        {/* Bulk Actions Bar */}
+        {isSelectMode && selectedTicketIds.size > 0 && (
+          <div className="px-3 py-2 border-b border-border bg-muted/50 flex items-center justify-between flex-shrink-0">
+            <span className="text-sm text-muted-foreground">
+              {selectedTicketIds.size} ticket{selectedTicketIds.size !== 1 ? 's' : ''} selected
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handleBulkUpdate({ status: "closed" })}
+                disabled={bulkUpdating}
+                className="h-7 text-xs"
+              >
+                Close Selected
+              </Button>
+              {/* Allow all users to bulk assign */}
+              <Select
+                onValueChange={(userId) => handleBulkUpdate({ assigneeUserId: userId === "unassigned" ? null : userId })}
+                disabled={bulkUpdating}
+              >
+                <SelectTrigger className="h-7 w-32 text-xs">
+                  <SelectValue placeholder="Assign..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="unassigned">Unassign</SelectItem>
+                  {users.map((user) => (
+                    <SelectItem key={user.id} value={user.id}>
+                      {user.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
-        </div>
+        )}
 
         <div className="flex-1 overflow-y-auto">
           {filteredTickets.length === 0 ? (
             <div className="p-4 text-center text-muted-foreground space-y-2 animate-in fade-in duration-300">
-              <p>No tickets found</p>
+              <p className="text-sm">No tickets found</p>
               {tickets.length > 0 && (
-                <p className="text-xs">Total tickets: {tickets.length} (filtered out by current filters)</p>
+                <p className="text-xs">Total tickets: {tickets.length} (filtered out)</p>
               )}
-              {dateFilter !== "all" && (
-                <p className="text-xs">Active date filter: {dateFilter}</p>
-              )}
-              <p className="text-xs">Check browser console (F12) for debugging info</p>
-              No tickets found
             </div>
           ) : (
-            filteredTickets.map((ticket, index) => {
-              const isSelected = selectedTicket?.id === ticket.id
-              const isUnread = hasNewCustomerReply(ticket)
-              return (
-              <Card
-                key={ticket.id}
-                className={`m-2 cursor-pointer relative transition-all duration-300 ease-out animate-in fade-in slide-in-from-left-4 ${
-                  isSelected 
-                    ? "border-primary border-2 bg-muted/30 shadow-md scale-[1.01]" 
-                    : isUnread 
-                      ? "border-primary/60 bg-primary/5 hover:bg-primary/10 hover:shadow-sm hover:scale-[1.005]" 
-                      : "border-border hover:bg-muted/50 hover:shadow-sm hover:scale-[1.005]"
-                }`}
-                style={{ animationDelay: `${index * 30}ms` }}
-                onClick={() => {
-                  markTicketViewed(ticket)
-                  setSelectedTicket(ticket)
-                }}
-              >
-                {isUnread && (
-                  <div className="absolute top-3 right-3 w-2.5 h-2.5 rounded-full bg-destructive shadow-sm" aria-label="New reply" />
-                )}
-                <CardContent className="p-4 space-y-2">
-                  <div className="flex items-start justify-between gap-2">
-                    <h3 className={`font-medium text-sm line-clamp-2 flex-1 ${isUnread ? "font-semibold text-foreground" : ""}`}>
-                      {ticket.subject}
-                    </h3>
+            <>
+              {isSelectMode && (
+                <div className="px-3 py-2 border-b border-border flex items-center gap-2">
+                  <Checkbox
+                    checked={selectedTicketIds.size === filteredTickets.length && filteredTickets.length > 0}
+                    onCheckedChange={toggleSelectAll}
+                  />
+                  <span className="text-xs text-muted-foreground">Select all</span>
+                </div>
+              )}
+              {filteredTickets.map((ticket, index) => {
+                const isSelected = selectedTicket?.id === ticket.id
+                const isUnread = hasNewCustomerReply(ticket)
+                const isChecked = selectedTicketIds.has(ticket.id)
+                return (
+                <Card
+                  key={ticket.id}
+                  className={`m-2 cursor-pointer relative transition-all duration-200 ${
+                    isSelected 
+                      ? "border-primary border-2 bg-muted/30 shadow-md" 
+                      : isUnread 
+                        ? "border-primary/60 bg-primary/5 hover:bg-primary/10" 
+                        : "border-border hover:bg-muted/50"
+                  }`}
+                  onClick={(e) => {
+                    if (isSelectMode) {
+                      e.stopPropagation()
+                      toggleTicketSelection(ticket.id)
+                    } else {
+                      markTicketViewed(ticket)
+                      setSelectedTicket(ticket)
+                    }
+                  }}
+                >
+                  {isUnread && (
+                    <div className="absolute top-3 right-3 w-2.5 h-2.5 rounded-full bg-destructive shadow-sm" aria-label="New reply" />
+                  )}
+                  <CardContent className="p-3 space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      {isSelectMode && (
+                        <Checkbox
+                          checked={isChecked}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              setSelectedTicketIds(prev => new Set(prev).add(ticket.id))
+                            } else {
+                              setSelectedTicketIds(prev => {
+                                const next = new Set(prev)
+                                next.delete(ticket.id)
+                                return next
+                              })
+                            }
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          className="mt-0.5"
+                        />
+                      )}
+                      <h3 className={`font-medium text-sm line-clamp-2 flex-1 ${isUnread ? "font-semibold text-foreground" : ""}`}>
+                        {ticket.subject}
+                      </h3>
                     <div className="flex gap-1 flex-shrink-0 items-center">
                       {isUnread && (
                         <Badge variant="secondary" className="text-[11px] bg-primary/10 text-primary border border-primary/30">
@@ -1166,15 +1583,28 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                     <Clock className="w-3 h-3" />
                     <span>{formatDate(ticket.lastCustomerReplyAt)}</span>
                   </div>
-                </CardContent>
-              </Card>
-            )})
+                    </CardContent>
+                  </Card>
+                )})}
+            </>
           )}
-        </div>
-      </div>
+          </div>
+          </div>
+        </ResizablePanel>
+
+      <ResizableHandle 
+        withHandle 
+        className="w-1 bg-border hover:bg-primary/50 transition-colors cursor-col-resize group"
+      />
 
       {/* Ticket Detail */}
-      <div className={`flex-1 overflow-y-auto transition-all duration-300 ${selectedTicket ? "flex flex-col" : "hidden md:flex"}`}>
+      <ResizablePanel 
+        defaultSize={panelSizes[1]} 
+        minSize={40}
+        maxSize={75}
+        className="flex flex-col bg-background overflow-hidden"
+      >
+        <div className={`flex-1 overflow-y-auto transition-all duration-300 ${selectedTicket ? "flex flex-col h-full w-full" : "hidden md:flex"}`}>
         {selectedTicket ? (
           <div className="flex flex-col h-full animate-in fade-in slide-in-from-right-4 duration-300">
             <div className="p-6 border-b border-border space-y-4 flex-shrink-0">
@@ -1214,50 +1644,49 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
 
               {/* Quick Actions */}
               <div className="flex items-center gap-2 flex-wrap">
-                {!canAssign && !selectedTicket.assigneeUserId && (
+                {!selectedTicket.assigneeUserId && (
                   <Button 
                     size="sm" 
                     onClick={handleTakeTicket} 
                     disabled={assigning === selectedTicket.id}
-                    className="transition-all duration-200 hover:scale-105 disabled:hover:scale-100"
+                    className="h-8 text-xs"
                   >
-                    {assigning === selectedTicket.id ? <Loader2 className="w-4 h-4 animate-spin" /> : "Take Ticket"}
+                    {assigning === selectedTicket.id ? <Loader2 className="w-3 h-3 animate-spin" /> : "Take Ticket"}
                   </Button>
                 )}
-                {canAssign && (
-                  <Select
-                    value={selectedTicket.assigneeUserId || "unassigned"}
-                    onValueChange={(value) => {
-                      const assigneeId = value === "unassigned" ? null : value
-                      // If assigning to someone (not unassigning), require priority
-                      if (assigneeId && !selectedTicket.assigneeUserId) {
-                        setPendingAssignment({ ticketId: selectedTicket.id, assigneeUserId: assigneeId })
-                        setShowAssignDialog(true)
-                      } else {
-                        handleAssign(selectedTicket.id, assigneeId)
-                      }
-                    }}
-                    disabled={assigning === selectedTicket.id}
-                  >
-                    <SelectTrigger className="w-48">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="unassigned">Unassigned</SelectItem>
-                      {users.map((user) => (
-                        <SelectItem key={user.id} value={user.id}>
-                          {user.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
+                {/* Allow all users to assign tickets to others */}
+                <Select
+                  value={selectedTicket.assigneeUserId || "unassigned"}
+                  onValueChange={(value) => {
+                    const assigneeId = value === "unassigned" ? null : value
+                    // If assigning to someone (not unassigning), require priority
+                    if (assigneeId && !selectedTicket.assigneeUserId) {
+                      setPendingAssignment({ ticketId: selectedTicket.id, assigneeUserId: assigneeId })
+                      setShowAssignDialog(true)
+                    } else {
+                      handleAssign(selectedTicket.id, assigneeId)
+                    }
+                  }}
+                  disabled={assigning === selectedTicket.id}
+                >
+                  <SelectTrigger className="w-40 h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unassigned">Unassigned</SelectItem>
+                    {users.map((user) => (
+                      <SelectItem key={user.id} value={user.id}>
+                        {user.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Select
                   value={selectedTicket.status}
                   onValueChange={(v) => handleUpdateStatus(v as Ticket["status"])}
                   disabled={updatingStatus}
                 >
-                  <SelectTrigger className="w-32">
+                  <SelectTrigger className="w-28 h-8 text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1299,11 +1728,36 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
 
               {/* Tags Editor */}
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-sm font-medium">Tags:</span>
+                <span className="text-xs font-medium">Tags:</span>
+                {/* Popular tags as chips - sorted by frequency */}
+                {Array.from(new Set(tickets.flatMap(t => t.tags)))
+                  .map(tag => ({
+                    tag,
+                    count: tickets.filter(t => t.tags.includes(tag)).length
+                  }))
+                  .filter(({ tag }) => !selectedTicket.tags.includes(tag))
+                  .sort((a, b) => b.count - a.count)
+                  .slice(0, 8)
+                  .map(({ tag, count }) => (
+                    <Badge 
+                      key={tag} 
+                      variant="outline" 
+                      className="h-6 text-xs cursor-pointer hover:bg-muted"
+                      onClick={() => {
+                        const updatedTags = [...selectedTicket.tags, tag]
+                        handleUpdateTags(updatedTags)
+                      }}
+                      title={`Used ${count} time${count !== 1 ? 's' : ''}`}
+                    >
+                      <Plus className="w-3 h-3 mr-1" />
+                      {tag}
+                      {count > 1 && <span className="ml-1 text-[10px] opacity-60">({count})</span>}
+                    </Badge>
+                  ))}
                 {selectedTicket.tags.map((tag, idx) => (
-                  <Badge key={idx} variant="outline" className="gap-1 transition-all duration-200 hover:scale-105 hover:bg-muted">
+                  <Badge key={idx} variant="outline" className="gap-1 h-6 text-xs hover:bg-muted">
                     {tag}
-                    <X className="w-3 h-3 cursor-pointer transition-all duration-200 hover:scale-110 hover:text-destructive" onClick={() => handleRemoveTag(tag)} />
+                    <X className="w-3 h-3 cursor-pointer hover:text-destructive" onClick={() => handleRemoveTag(tag)} />
                   </Badge>
                 ))}
                 <div className="flex items-center gap-1">
@@ -1312,15 +1766,23 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                     value={newTag}
                     onChange={(e) => setNewTag(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && handleAddTag()}
-                    className="h-7 w-32 transition-all duration-200 focus:scale-[1.02] focus:shadow-sm"
+                    className="h-6 w-24 text-xs"
+                    list="tag-suggestions"
                   />
+                  <datalist id="tag-suggestions">
+                    {Array.from(new Set(tickets.flatMap(t => t.tags)))
+                      .filter(tag => !selectedTicket.tags.includes(tag))
+                      .map((tag) => (
+                        <option key={tag} value={tag} />
+                      ))}
+                  </datalist>
                   <Button 
                     size="sm" 
                     onClick={handleAddTag} 
                     disabled={!newTag.trim() || updatingTags}
-                    className="transition-all duration-200 hover:scale-110 disabled:hover:scale-100"
+                    className="h-6 w-6 p-0"
                   >
-                    <Plus className="w-4 h-4" />
+                    <Plus className="w-3 h-3" />
                   </Button>
                 </div>
               </div>
@@ -1407,19 +1869,21 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                                 </div>
 
                                 {hasQuoted && (
-                                  <div className="space-y-2">
+                                  <div className="space-y-1">
                                     <Button
                                       variant="ghost"
                                       size="sm"
-                                      className="h-7 px-2 text-xs text-muted-foreground"
-                                      onClick={() =>
+                                      className="h-6 px-2 text-[10px] text-muted-foreground hover:text-muted-foreground"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
                                         setShowQuotedMap(prev => ({ ...prev, [key]: !prev[key] }))
-                                      }
+                                      }}
                                     >
-                                      {showQuoted ? "Hide quoted history" : "Show quoted history"}
+                                      <MoreVertical className="w-3 h-3 mr-1" />
+                                      {showQuoted ? "Hide" : "Show"} quoted text
                                     </Button>
                                     {showQuoted && (
-                                      <div className="text-xs text-muted-foreground whitespace-pre-wrap bg-muted/60 border border-border/60 rounded-md p-3 leading-5">
+                                      <div className="text-[11px] text-muted-foreground/70 whitespace-pre-wrap bg-muted/40 border-l-2 border-muted-foreground/30 pl-3 py-2 rounded leading-4 max-h-32 overflow-y-auto">
                                         {quoted.join("\n")}
                                       </div>
                                     )}
@@ -1520,27 +1984,81 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
               {/* Reply Box */}
               <Card className="animate-in fade-in slide-in-from-bottom-2 duration-300" style={{ animationDelay: '300ms' }}>
                 <CardContent className="p-4">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="font-semibold">Reply</h3>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={handleGenerateDraft}
-                      disabled={generatingDraft || !threadMessages.length}
-                      className="transition-all duration-200 hover:scale-105 disabled:hover:scale-100 text-foreground hover:text-foreground"
-                    >
-                      {generatingDraft ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                          Generating...
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="w-4 h-4 mr-2" />
-                          Generate AI Draft
-                        </>
-                      )}
-                    </Button>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-semibold text-sm">Reply</h3>
+                    <div className="flex items-center gap-2">
+                      <Popover open={showQuickReplies} onOpenChange={setShowQuickReplies}>
+                        <PopoverTrigger asChild>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 text-xs"
+                            >
+                              Quick Replies
+                              {quickReplies.length > 0 && (
+                                <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">
+                                  {quickReplies.length}
+                                </Badge>
+                              )}
+                            </Button>
+                          </PopoverTrigger>
+                        <PopoverContent className="w-80 p-2" align="end">
+                          {quickReplies.length === 0 ? (
+                            <div className="p-4 text-center text-sm text-muted-foreground">
+                              <p>No quick replies available</p>
+                              <p className="text-xs mt-1">Admins can add quick replies in settings</p>
+                            </div>
+                          ) : (
+                            <div className="space-y-1 max-h-96 overflow-y-auto">
+                              {Object.entries(
+                                quickReplies.reduce((acc, qr) => {
+                                  const cat = qr.category || "General"
+                                  if (!acc[cat]) acc[cat] = []
+                                  acc[cat].push(qr)
+                                  return acc
+                                }, {} as Record<string, QuickReply[]>)
+                              ).map(([category, replies]) => (
+                                <div key={category} className="mb-2">
+                                  <div className="text-xs font-semibold text-muted-foreground mb-1 px-2 sticky top-0 bg-background py-1">
+                                    {category} ({replies.length})
+                                  </div>
+                                  {replies.map((qr) => (
+                                    <Button
+                                      key={qr.id}
+                                      variant="ghost"
+                                      size="sm"
+                                      className="w-full justify-start h-8 text-xs text-left"
+                                      onClick={() => insertQuickReply(qr.content)}
+                                    >
+                                      {qr.title}
+                                    </Button>
+                                  ))}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </PopoverContent>
+                      </Popover>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={handleGenerateDraft}
+                        disabled={generatingDraft || !threadMessages.length}
+                        className="h-7 text-xs"
+                      >
+                        {generatingDraft ? (
+                          <>
+                            <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                            Generating...
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="w-3 h-3 mr-1" />
+                            AI Draft
+                          </>
+                        )}
+                      </Button>
+                    </div>
                   </div>
                   {showDraft && draftText && (
                     <div className="mb-4 p-3 bg-muted rounded border border-primary/20 animate-in fade-in slide-in-from-bottom-2 duration-300">
@@ -1590,12 +2108,16 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                       setReplyText(e.target.value)
                       handleTyping()
                     }}
-                    className="min-h-32 mb-4 transition-all duration-200 focus:scale-[1.01] focus:shadow-md"
+                    className="min-h-32 mb-3 text-sm"
                   />
-                  <Button onClick={handleSendReply} disabled={!replyText.trim() || sendingReply}>
+                  <Button 
+                    onClick={handleSendReply} 
+                    disabled={!replyText.trim() || sendingReply}
+                    className="h-8 text-xs"
+                  >
                     {sendingReply ? (
                       <>
-                        <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                        <Loader2 className="w-3 h-3 animate-spin mr-2" />
                         Sending...
                       </>
                     ) : (
@@ -1621,10 +2143,12 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
             </div>
           </div>
         )}
-      </div>
+        </div>
+      </ResizablePanel>
+    </ResizablePanelGroup>
 
-      {/* Assignment Dialog with Priority Selection */}
-      <Dialog open={showAssignDialog} onOpenChange={setShowAssignDialog}>
+    {/* Assignment Dialog with Priority Selection */}
+    <Dialog open={showAssignDialog} onOpenChange={setShowAssignDialog}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Assign Ticket</DialogTitle>
@@ -1648,10 +2172,14 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
               </Select>
             </div>
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => {
-                setShowAssignDialog(false)
-                setPendingAssignment(null)
-              }}>
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  setShowAssignDialog(false)
+                  setPendingAssignment(null)
+                }}
+                className=""
+              >
                 Cancel
               </Button>
               <Button 
