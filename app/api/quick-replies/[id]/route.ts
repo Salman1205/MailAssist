@@ -6,6 +6,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUserIdFromRequest } from '@/lib/permissions';
 import { canViewAllTickets } from '@/lib/permissions';
+import { getCurrentUserEmail } from '@/lib/storage';
+import { getSessionUserEmailFromRequest } from '@/lib/session';
 import { supabase } from '@/lib/supabase';
 
 type RouteContext =
@@ -35,12 +37,12 @@ export async function PATCH(
       );
     }
 
-    // Only admins/managers can update quick replies
-    const canManage = await canViewAllTickets(userId);
-    if (!canManage) {
+    // Get user_email from session for RLS scoping
+    const userEmail = getSessionUserEmailFromRequest(request) || await getCurrentUserEmail();
+    if (!userEmail) {
       return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 403 }
+        { error: 'Unable to determine user email' },
+        { status: 401 }
       );
     }
 
@@ -48,6 +50,30 @@ export async function PATCH(
       return NextResponse.json(
         { error: 'Database not available' },
         { status: 500 }
+      );
+    }
+
+    // Check if quick reply exists and user has permission (filter by user_email for RLS)
+    const { data: existing } = await supabase
+      .from('quick_replies')
+      .select('created_by, user_email')
+      .eq('id', id)
+      .eq('user_email', userEmail)
+      .single();
+
+    if (!existing) {
+      return NextResponse.json(
+        { error: 'Quick reply not found' },
+        { status: 404 }
+      );
+    }
+
+    // Users can only edit their own quick replies, unless they're admin/manager
+    const canManage = await canViewAllTickets(userId);
+    if (!canManage && existing.created_by !== userId) {
+      return NextResponse.json(
+        { error: 'Unauthorized - you can only edit your own quick replies' },
+        { status: 403 }
       );
     }
 
@@ -116,12 +142,12 @@ export async function DELETE(
       );
     }
 
-    // Only admins/managers can delete quick replies
-    const canManage = await canViewAllTickets(userId);
-    if (!canManage) {
+    // Get user_email from session for RLS scoping
+    const userEmail = getSessionUserEmailFromRequest(request) || await getCurrentUserEmail();
+    if (!userEmail) {
       return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 403 }
+        { error: 'Unable to determine user email' },
+        { status: 401 }
       );
     }
 
@@ -129,6 +155,30 @@ export async function DELETE(
       return NextResponse.json(
         { error: 'Database not available' },
         { status: 500 }
+      );
+    }
+
+    // Check if quick reply exists and user has permission (filter by user_email for RLS)
+    const { data: existing } = await supabase
+      .from('quick_replies')
+      .select('created_by, user_email')
+      .eq('id', id)
+      .eq('user_email', userEmail)
+      .single();
+
+    if (!existing) {
+      return NextResponse.json(
+        { error: 'Quick reply not found' },
+        { status: 404 }
+      );
+    }
+
+    // Users can only delete their own quick replies, unless they're admin/manager
+    const canManage = await canViewAllTickets(userId);
+    if (!canManage && existing.created_by !== userId) {
+      return NextResponse.json(
+        { error: 'Unauthorized - you can only delete your own quick replies' },
+        { status: 403 }
       );
     }
 

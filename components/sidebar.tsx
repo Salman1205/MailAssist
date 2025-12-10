@@ -12,6 +12,7 @@ export type SidebarView =
   | "users"
   | "tickets"
   | "ai-settings"
+  | "quick-replies"
 
 interface SidebarProps {
   activeView: SidebarView
@@ -27,6 +28,7 @@ const NAV_ITEMS = [
   { id: "trash", label: "Trash", icon: TrashIcon },
   { id: "tickets", label: "Tickets", icon: TicketIcon },
   { id: "drafts", label: "Drafts", icon: DraftIcon },
+  { id: "quick-replies", label: "Quick Replies", icon: QuickRepliesIcon },
   { id: "settings", label: "Settings", icon: SettingsIcon },
 ] as const
 
@@ -202,6 +204,16 @@ function TicketIcon(props: React.SVGProps<SVGSVGElement>) {
 
 function SparklesIcon(props: React.SVGProps<SVGSVGElement>) {
   return <Sparkles className="w-5 h-5" {...props} />
+}
+
+function QuickRepliesIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" {...props}>
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+      <path d="M8 10h8" />
+      <path d="M8 14h6" />
+    </svg>
+  )
 }
 
 function LogoutIcon(props: React.SVGProps<SVGSVGElement>) {

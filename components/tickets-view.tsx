@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -19,6 +19,7 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/componen
 import { useToast } from "@/components/ui/use-toast"
 import { supabaseBrowser } from "@/lib/supabase-client"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import QuickRepliesSidebar from "@/components/quick-replies-sidebar"
 
 interface Ticket {
   id: string
@@ -134,8 +135,9 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
   // Quick replies state
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>([])
   const [showQuickReplies, setShowQuickReplies] = useState(false)
+  const [showQuickRepliesSidebar, setShowQuickRepliesSidebar] = useState(false)
   
-  // Panel width preferences - load from localStorage
+  // Panel width preferences - load from localStorage with proper state management
   const getInitialPanelSizes = (): number[] => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('ticket-panel-widths')
@@ -144,18 +146,55 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
           const parsed = JSON.parse(saved)
           // Convert from {list, detail} format to array format [list, detail]
           if (parsed.list && parsed.detail) {
-            return [parsed.list, parsed.detail]
+            const sizes = [parsed.list, parsed.detail]
+            // Normalize to ensure they add up to 100%
+            const total = sizes[0] + sizes[1]
+            if (total > 0 && total <= 100) {
+              return sizes
+            }
           }
         } catch {
           // ignore
         }
       }
     }
-    return [40, 60] // Default: 40% list, 60% detail
+    return [35, 65] // Default: 35% list, 65% detail (better for email content)
   }
   
-  const [panelSizes, setPanelSizes] = useState<number[]>(getInitialPanelSizes)
-  const panelInitializedRef = useRef(false)
+  // Use state for panel sizes to ensure proper reactivity
+  const [panelSizes, setPanelSizes] = useState<number[]>(getInitialPanelSizes())
+  const panelGroupRef = useRef<HTMLDivElement>(null)
+  const isResizingRef = useRef(false)
+  
+  // Ensure panel sizes are normalized on mount
+  useEffect(() => {
+    const sizes = panelSizes
+    if (sizes.length === 2) {
+      const total = sizes[0] + sizes[1]
+      if (total > 100 || total < 95) {
+        // Normalize to ensure they add up to 100%
+        const normalized = [
+          (sizes[0] / total) * 100,
+          (sizes[1] / total) * 100
+        ]
+        setPanelSizes(normalized)
+      }
+    }
+  }, [])
+  
+  // Prevent layout shifts when conversation loads - stabilize panel sizes
+  const prevThreadLengthRef = useRef(0)
+  useEffect(() => {
+    if (threadMessages.length > 0 && threadMessages.length !== prevThreadLengthRef.current && !isResizingRef.current) {
+      prevThreadLengthRef.current = threadMessages.length
+      // Ensure panel sizes remain stable when content loads
+      // Use requestAnimationFrame to ensure DOM has updated
+      requestAnimationFrame(() => {
+        // Panel should maintain its size - no action needed
+        // The CSS containment should prevent layout shifts
+      })
+    }
+  }, [threadMessages.length])
   
   // Auto-filter closed tickets
   const [autoFilterClosed, setAutoFilterClosed] = useState(() => {
@@ -176,31 +215,45 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
   const { toast } = useToast()
   const canAssign = currentUserRole === "admin" || currentUserRole === "manager"
   
-  // Save panel sizes to localStorage when they change (debounced)
+  // Debounced localStorage save
   const resizeTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const handlePanelResize = (sizes: number[]) => {
-    // Only update if sizes actually changed (avoid unnecessary re-renders)
-    if (sizes.length === 2 && (sizes[0] !== panelSizes[0] || sizes[1] !== panelSizes[1])) {
-      setPanelSizes(sizes)
-      panelInitializedRef.current = true
-      
-      // Debounce localStorage writes to avoid excessive writes
-      if (resizeTimeoutRef.current) {
-        clearTimeout(resizeTimeoutRef.current)
-      }
-      resizeTimeoutRef.current = setTimeout(() => {
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('ticket-panel-widths', JSON.stringify({ list: sizes[0], detail: sizes[1] }))
-        }
-      }, 300)
-    }
-  }
   
-  // Handle individual panel resize
-  const handleListPanelResize = (size: number) => {
-    const newSizes = [size, 100 - size]
-    handlePanelResize(newSizes)
-  }
+  const handlePanelResize = useCallback((sizes: number[]) => {
+    if (!sizes || sizes.length < 2) return
+    
+    isResizingRef.current = true
+    
+    // Ensure sizes are valid percentages (between 0 and 100)
+    let normalizedSizes = sizes.map(s => Math.max(0, Math.min(100, s)))
+    
+    // Ensure they add up to approximately 100% (accounting for handle width)
+    const total = normalizedSizes.reduce((a, b) => a + b, 0)
+    if (total > 100 || total < 95) {
+      // Scale proportionally to ensure they add up to 100%
+      normalizedSizes = normalizedSizes.map(s => (s / total) * 100)
+    }
+    
+    // Update state immediately for smooth resizing
+    setPanelSizes(normalizedSizes)
+    
+    // Debounce localStorage writes
+    if (resizeTimeoutRef.current) {
+      clearTimeout(resizeTimeoutRef.current)
+    }
+    resizeTimeoutRef.current = setTimeout(() => {
+      if (typeof window !== 'undefined') {
+        const saveData: any = { 
+          list: normalizedSizes[0], 
+          detail: normalizedSizes[1]
+        }
+        if (normalizedSizes.length === 3) {
+          saveData.quickReplies = normalizedSizes[2]
+        }
+        localStorage.setItem('ticket-panel-widths', JSON.stringify(saveData))
+      }
+      isResizingRef.current = false
+    }, 300)
+  }, [])
   
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -621,8 +674,8 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
       
       toast({ title: "Ticket assigned successfully" })
       
-      // Refresh tickets to ensure UI is up to date
-      await fetchTickets()
+      // Refresh tickets silently to ensure UI is up to date (no page refresh)
+      await fetchTickets({ silent: true })
     } catch (err) {
       console.error('[Assign Ticket] Error:', err)
       setError(err instanceof Error ? err.message : "Failed to assign ticket")
@@ -771,6 +824,18 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
   const insertQuickReply = (content: string) => {
     setReplyText(content)
     setShowQuickReplies(false)
+  }
+  
+  const handleQuickReplySelect = (content: string) => {
+    setReplyText(content)
+    // Focus the reply textarea if possible
+    setTimeout(() => {
+      const textarea = document.querySelector('textarea[placeholder*="reply"]') as HTMLTextAreaElement
+      if (textarea) {
+        textarea.focus()
+        textarea.setSelectionRange(textarea.value.length, textarea.value.length)
+      }
+    }, 100)
   }
 
   const handleUpdatePriority = async (priority: Ticket["priority"]) => {
@@ -1195,23 +1260,24 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
   }
 
   return (
-    <div className="h-full w-full bg-background">
+    <div className="h-full w-full bg-background overflow-hidden" ref={panelGroupRef} style={{ contain: 'layout size' }}>
       <ResizablePanelGroup 
         direction="horizontal" 
         className="h-full w-full"
         onLayout={handlePanelResize}
+        autoSaveId="ticket-panels-layout"
       >
         {/* Tickets List */}
         <ResizablePanel 
           defaultSize={panelSizes[0]} 
           minSize={25}
-          maxSize={60}
-          onResize={handleListPanelResize}
-          className="flex flex-col border-r border-border bg-card overflow-hidden"
+          maxSize={55}
+          className="flex flex-col border-r border-border/50 bg-card overflow-hidden"
+          style={{ minWidth: 0, contain: 'layout size' }}
         >
-          <div className="flex flex-col h-full overflow-hidden">
-            <div className="p-3 border-b border-border space-y-2 flex-shrink-0">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col h-full overflow-hidden w-full" style={{ contain: 'layout' }}>
+            <div className="p-3 border-b border-border/50 space-y-2 flex-shrink-0 bg-card/50 backdrop-blur-sm">
+          <div className="flex items-center justify-between gap-2">
             <h2 className="text-lg font-semibold">Tickets</h2>
             <div className="flex items-center gap-2">
               <Button
@@ -1223,7 +1289,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                     setSelectedTicketIds(new Set())
                   }
                 }}
-                className="h-7 text-xs"
+                className="h-7 text-xs transition-all duration-200 hover:scale-105"
               >
                 {isSelectMode ? "Cancel" : "Select"}
               </Button>
@@ -1443,17 +1509,17 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
 
         {/* Bulk Actions Bar */}
         {isSelectMode && selectedTicketIds.size > 0 && (
-          <div className="px-3 py-2 border-b border-border bg-muted/50 flex items-center justify-between flex-shrink-0">
-            <span className="text-sm text-muted-foreground">
+          <div className="px-3 py-2 border-b border-border/50 bg-muted/50 flex items-center justify-between flex-shrink-0 flex-wrap gap-2">
+            <span className="text-sm text-muted-foreground font-medium">
               {selectedTicketIds.size} ticket{selectedTicketIds.size !== 1 ? 's' : ''} selected
             </span>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <Button
                 size="sm"
                 variant="outline"
                 onClick={() => handleBulkUpdate({ status: "closed" })}
                 disabled={bulkUpdating}
-                className="h-7 text-xs"
+                className="h-7 text-xs transition-all duration-200 hover:scale-105"
               >
                 Close Selected
               </Button>
@@ -1475,10 +1541,10 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                 </SelectContent>
               </Select>
             </div>
-          </div>
+              </div>
         )}
 
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden min-w-0 w-full">
           {filteredTickets.length === 0 ? (
             <div className="p-4 text-center text-muted-foreground space-y-2 animate-in fade-in duration-300">
               <p className="text-sm">No tickets found</p>
@@ -1489,7 +1555,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
           ) : (
             <>
               {isSelectMode && (
-                <div className="px-3 py-2 border-b border-border flex items-center gap-2">
+                <div className="px-3 py-2 border-b border-border/50 flex items-center gap-2 bg-muted/30">
                   <Checkbox
                     checked={selectedTicketIds.size === filteredTickets.length && filteredTickets.length > 0}
                     onCheckedChange={toggleSelectAll}
@@ -1502,14 +1568,14 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                 const isUnread = hasNewCustomerReply(ticket)
                 const isChecked = selectedTicketIds.has(ticket.id)
                 return (
-                <Card
+                  <Card
                   key={ticket.id}
                   className={`m-2 cursor-pointer relative transition-all duration-200 ${
                     isSelected 
-                      ? "border-primary border-2 bg-muted/30 shadow-md" 
+                      ? "border-primary border-2 bg-muted/30 shadow-md ring-2 ring-primary/20" 
                       : isUnread 
-                        ? "border-primary/60 bg-primary/5 hover:bg-primary/10" 
-                        : "border-border hover:bg-muted/50"
+                        ? "border-primary/60 bg-primary/5 hover:bg-primary/10 hover:shadow-sm" 
+                        : "border-border/50 hover:bg-muted/50 hover:shadow-sm"
                   }`}
                   onClick={(e) => {
                     if (isSelectMode) {
@@ -1522,10 +1588,10 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                   }}
                 >
                   {isUnread && (
-                    <div className="absolute top-3 right-3 w-2.5 h-2.5 rounded-full bg-destructive shadow-sm" aria-label="New reply" />
+                    <div className="absolute top-3 right-3 w-2.5 h-2.5 rounded-full bg-destructive shadow-sm animate-pulse" aria-label="New reply" />
                   )}
                   <CardContent className="p-3 space-y-2">
-                    <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start justify-between gap-2 w-full">
                       {isSelectMode && (
                         <Checkbox
                           checked={isChecked}
@@ -1541,10 +1607,10 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                             }
                           }}
                           onClick={(e) => e.stopPropagation()}
-                          className="mt-0.5"
+                          className="mt-0.5 flex-shrink-0"
                         />
                       )}
-                      <h3 className={`font-medium text-sm line-clamp-2 flex-1 ${isUnread ? "font-semibold text-foreground" : ""}`}>
+                      <h3 className={`font-medium text-sm line-clamp-2 flex-1 min-w-0 break-words overflow-wrap-anywhere ${isUnread ? "font-semibold text-foreground" : ""}`}>
                         {ticket.subject}
                       </h3>
                     <div className="flex gap-1 flex-shrink-0 items-center">
@@ -1564,9 +1630,9 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Mail className="w-3 h-3" />
-                    <span className="truncate">{ticket.customerEmail}</span>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground min-w-0">
+                    <Mail className="w-3 h-3 flex-shrink-0" />
+                    <span className="truncate min-w-0">{ticket.customerEmail}</span>
                   </div>
                   {ticket.assigneeName ? (
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -1594,23 +1660,24 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
 
       <ResizableHandle 
         withHandle 
-        className="w-1 bg-border hover:bg-primary/50 transition-colors cursor-col-resize group"
+        className="w-1 bg-border/50 hover:bg-primary/30 active:bg-primary/50 transition-all duration-200 cursor-col-resize group relative z-10"
       />
 
       {/* Ticket Detail */}
       <ResizablePanel 
         defaultSize={panelSizes[1]} 
-        minSize={40}
+        minSize={45}
         maxSize={75}
         className="flex flex-col bg-background overflow-hidden"
+        style={{ minWidth: 0, contain: 'layout size' }}
       >
-        <div className={`flex-1 overflow-y-auto transition-all duration-300 ${selectedTicket ? "flex flex-col h-full w-full" : "hidden md:flex"}`}>
+        <div className={`flex-1 overflow-y-auto overflow-x-hidden transition-all duration-300 ${selectedTicket ? "flex flex-col h-full w-full" : "hidden md:flex"}`} style={{ contain: 'layout' }}>
         {selectedTicket ? (
-          <div className="flex flex-col h-full animate-in fade-in slide-in-from-right-4 duration-300">
-            <div className="p-6 border-b border-border space-y-4 flex-shrink-0">
-              <div className="flex items-start justify-between">
-                <div className="space-y-2 flex-1">
-                  <h1 className="text-2xl font-bold">{selectedTicket.subject}</h1>
+          <div className="flex flex-col h-full w-full animate-in fade-in slide-in-from-right-4 duration-300 max-w-full" style={{ contain: 'layout' }}>
+            <div className="p-4 md:p-6 border-b border-border/50 space-y-4 flex-shrink-0 w-full max-w-full">
+              <div className="flex items-start justify-between gap-4 w-full max-w-full">
+                <div className="space-y-2 flex-1 min-w-0 max-w-full overflow-hidden">
+                  <h1 className="text-xl md:text-2xl font-bold break-words overflow-wrap-anywhere max-w-full">{selectedTicket.subject}</h1>
                   <div className="flex items-center gap-2 flex-wrap">
                     <Badge className={`${getStatusColor(selectedTicket.status)} transition-all duration-200 hover:scale-105`}>
                       {selectedTicket.status}
@@ -1636,9 +1703,9 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
               </div>
 
               {hasNewCustomerReply(selectedTicket) && (
-                <div className="flex items-center gap-2 p-3 bg-primary/10 border border-primary/20 rounded-md text-sm text-primary animate-in fade-in">
-                  <div className="w-2 h-2 rounded-full bg-primary" />
-                  <span>New customer reply received.</span>
+                <div className="flex items-center gap-2 p-3 bg-primary/10 border border-primary/20 rounded-md text-sm text-primary animate-in fade-in shadow-sm">
+                  <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                  <span className="font-medium">New customer reply received.</span>
                 </div>
               )}
 
@@ -1646,10 +1713,15 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
               <div className="flex items-center gap-2 flex-wrap">
                 {!selectedTicket.assigneeUserId && (
                   <Button 
+                    type="button"
                     size="sm" 
-                    onClick={handleTakeTicket} 
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      handleTakeTicket()
+                    }}
                     disabled={assigning === selectedTicket.id}
-                    className="h-8 text-xs"
+                    className="h-8 text-xs transition-all duration-200 hover:scale-105"
                   >
                     {assigning === selectedTicket.id ? <Loader2 className="w-3 h-3 animate-spin" /> : "Take Ticket"}
                   </Button>
@@ -1789,17 +1861,17 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
             </div>
 
             {/* Main Content Area */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6 space-y-4 md:space-y-6 w-full max-w-full">
               {/* Customer Info */}
-              <Card className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-                <CardContent className="p-4 space-y-2">
+              <Card className="animate-in fade-in slide-in-from-bottom-2 duration-300 w-full max-w-full border-border/50 shadow-sm">
+                <CardContent className="p-4 space-y-2 w-full max-w-full overflow-hidden">
                   <div className="flex items-center gap-2">
-                    <Mail className="w-4 h-4 text-muted-foreground" />
+                    <Mail className="w-4 h-4 text-muted-foreground flex-shrink-0" />
                     <span className="text-sm font-medium">Customer</span>
                   </div>
-                  <p className="text-sm">{selectedTicket.customerEmail}</p>
+                  <p className="text-sm break-words overflow-wrap-anywhere max-w-full">{selectedTicket.customerEmail}</p>
                   {selectedTicket.customerName && (
-                    <p className="text-sm text-muted-foreground">{selectedTicket.customerName}</p>
+                    <p className="text-sm text-muted-foreground break-words overflow-wrap-anywhere max-w-full">{selectedTicket.customerName}</p>
                   )}
                   <div className="text-xs text-muted-foreground space-y-1">
                     <p>Last customer reply: {formatDate(selectedTicket.lastCustomerReplyAt)}</p>
@@ -1809,8 +1881,8 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
               </Card>
 
               {/* Conversation Thread */}
-              <Card className="animate-in fade-in slide-in-from-bottom-2 duration-300" style={{ animationDelay: '100ms' }}>
-                <CardContent className="p-4">
+              <Card className="animate-in fade-in slide-in-from-bottom-2 duration-300 w-full max-w-full border-border/50 shadow-sm" style={{ animationDelay: '100ms' }}>
+                <CardContent className="p-4 w-full max-w-full overflow-hidden">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="font-semibold flex items-center gap-2">
                       <MessageSquare className="w-4 h-4" />
@@ -1820,7 +1892,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                       variant="ghost"
                       size="sm"
                       onClick={() => setConversationMinimized(!conversationMinimized)}
-                      className="h-8 w-8 p-0 transition-all duration-200 hover:scale-110 hover:bg-muted"
+                      className="h-8 w-8 p-0 transition-all duration-200 hover:scale-110 hover:bg-muted flex-shrink-0"
                     >
                       {conversationMinimized ? (
                         <ChevronDown className="w-4 h-4 transition-transform duration-200" />
@@ -1830,7 +1902,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                     </Button>
                   </div>
                   {!conversationMinimized && (
-                    <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                    <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300 w-full max-w-full overflow-hidden">
                       {loadingThread ? (
                         <div className="flex items-center justify-center py-8">
                           <div className="flex flex-col items-center gap-2 animate-in fade-in duration-300">
@@ -1849,22 +1921,22 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                           return (
                           <div 
                             key={key} 
-                            className="rounded-lg border border-border/60 bg-background/60 shadow-sm p-4 transition-all duration-200 hover:bg-muted/40 animate-in fade-in slide-in-from-left-2"
+                            className="rounded-lg border border-border/50 bg-background/60 shadow-sm p-4 transition-all duration-200 hover:bg-muted/40 hover:shadow-md animate-in fade-in slide-in-from-left-2 w-full max-w-full overflow-hidden"
                             style={{ animationDelay: `${idx * 50}ms` }}
                           >
-                            <div className="flex items-start gap-3">
-                              <div className="h-9 w-9 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-semibold">
+                            <div className="flex items-start gap-3 w-full max-w-full">
+                              <div className="h-9 w-9 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-semibold flex-shrink-0">
                                 {getInitials(msg.from || "User")}
                               </div>
-                              <div className="flex-1 space-y-2">
-                                <div className="flex items-center justify-between gap-2">
-                                  <div className="text-sm font-semibold text-foreground leading-tight">
+                              <div className="flex-1 space-y-2 min-w-0 max-w-full overflow-hidden">
+                                <div className="flex items-center justify-between gap-2 flex-wrap">
+                                  <div className="text-sm font-semibold text-foreground leading-tight break-words overflow-wrap-anywhere min-w-0 max-w-full">
                                     {msg.from}
                                   </div>
-                                  <span className="text-xs text-muted-foreground">{formatDate(msg.date)}</span>
+                                  <span className="text-xs text-muted-foreground flex-shrink-0">{formatDate(msg.date)}</span>
                                 </div>
 
-                                <div className="text-sm leading-6 whitespace-pre-wrap">
+                                <div className="text-sm leading-6 whitespace-pre-wrap break-words overflow-wrap-anywhere w-full max-w-full overflow-hidden">
                                   {main.join("\n") || msg.subject || "No content"}
                                 </div>
 
@@ -1883,7 +1955,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                                       {showQuoted ? "Hide" : "Show"} quoted text
                                     </Button>
                                     {showQuoted && (
-                                      <div className="text-[11px] text-muted-foreground/70 whitespace-pre-wrap bg-muted/40 border-l-2 border-muted-foreground/30 pl-3 py-2 rounded leading-4 max-h-32 overflow-y-auto">
+                                      <div className="text-[11px] text-muted-foreground/70 whitespace-pre-wrap bg-muted/40 border-l-2 border-muted-foreground/30 pl-3 py-2 rounded leading-4 max-h-32 overflow-y-auto break-words overflow-wrap-anywhere w-full max-w-full overflow-x-hidden">
                                         {quoted.join("\n")}
                                       </div>
                                     )}
@@ -1900,14 +1972,14 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
               </Card>
 
               {/* Internal Notes */}
-              <Card className="animate-in fade-in slide-in-from-bottom-2 duration-300" style={{ animationDelay: '200ms' }}>
-                <CardContent className="p-4">
+              <Card className="animate-in fade-in slide-in-from-bottom-2 duration-300 w-full max-w-full border-border/50 shadow-sm" style={{ animationDelay: '200ms' }}>
+                <CardContent className="p-4 w-full max-w-full overflow-hidden">
                   <h3 className="font-semibold mb-4">Internal Notes</h3>
-                  <div className="space-y-3 mb-4">
+                  <div className="space-y-3 mb-4 w-full max-w-full overflow-hidden">
                     {notes.map((note, idx) => (
                       <div 
                         key={note.id} 
-                        className="border-l-2 border-primary pl-4 py-2 bg-muted/50 rounded transition-all duration-200 hover:bg-muted/70 animate-in fade-in slide-in-from-left-2"
+                        className="border-l-2 border-primary pl-4 py-2 bg-muted/50 rounded transition-all duration-200 hover:bg-muted/70 hover:shadow-sm animate-in fade-in slide-in-from-left-2 w-full max-w-full overflow-hidden"
                         style={{ animationDelay: `${idx * 50}ms` }}
                       >
                         <div className="flex items-center justify-between mb-1">
@@ -1958,11 +2030,11 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                           <Textarea
                             value={editingNoteContent}
                             onChange={(e) => setEditingNoteContent(e.target.value)}
-                            className="min-h-20 text-sm"
+                            className="min-h-20 text-sm w-full"
                             autoFocus
                           />
                         ) : (
-                          <p className="text-sm whitespace-pre-wrap">{note.content}</p>
+                          <p className="text-sm whitespace-pre-wrap break-words overflow-wrap-anywhere">{note.content}</p>
                         )}
                       </div>
                     ))}
@@ -1982,11 +2054,25 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
               </Card>
 
               {/* Reply Box */}
-              <Card className="animate-in fade-in slide-in-from-bottom-2 duration-300" style={{ animationDelay: '300ms' }}>
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between mb-3">
+              <Card className="animate-in fade-in slide-in-from-bottom-2 duration-300 w-full max-w-full border-border/50 shadow-sm" style={{ animationDelay: '300ms' }}>
+                <CardContent className="p-4 w-full max-w-full overflow-hidden">
+                  <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                     <h3 className="font-semibold text-sm">Reply</h3>
                     <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant={showQuickRepliesSidebar ? "default" : "outline"}
+                        onClick={() => setShowQuickRepliesSidebar(!showQuickRepliesSidebar)}
+                        className="h-7 text-xs transition-all duration-200 hover:scale-105"
+                      >
+                        <MessageSquare className="w-3 h-3 mr-1" />
+                        Quick Replies
+                        {quickReplies.length > 0 && (
+                          <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">
+                            {quickReplies.length}
+                          </Badge>
+                        )}
+                      </Button>
                       <Popover open={showQuickReplies} onOpenChange={setShowQuickReplies}>
                         <PopoverTrigger asChild>
                             <Button
@@ -1994,12 +2080,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                               variant="outline"
                               className="h-7 text-xs"
                             >
-                              Quick Replies
-                              {quickReplies.length > 0 && (
-                                <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">
-                                  {quickReplies.length}
-                                </Badge>
-                              )}
+                              Quick Menu
                             </Button>
                           </PopoverTrigger>
                         <PopoverContent className="w-80 p-2" align="end">
@@ -2061,7 +2142,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                     </div>
                   </div>
                   {showDraft && draftText && (
-                    <div className="mb-4 p-3 bg-muted rounded border border-primary/20 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                    <div className="mb-4 p-3 bg-muted rounded border border-primary/20 animate-in fade-in slide-in-from-bottom-2 duration-300 w-full max-w-full overflow-hidden">
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-sm font-medium">AI Draft</span>
                         <Button
@@ -2071,12 +2152,12 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                             setShowDraft(false)
                             setDraftText("")
                           }}
-                          className="transition-all duration-200 hover:scale-110"
+                          className="transition-all duration-200 hover:scale-110 flex-shrink-0"
                         >
                           <X className="w-4 h-4" />
                         </Button>
                       </div>
-                      <p className="text-sm whitespace-pre-wrap">{draftText}</p>
+                      <p className="text-sm whitespace-pre-wrap break-words overflow-wrap-anywhere w-full max-w-full overflow-hidden">{draftText}</p>
                       <Button
                         size="sm"
                         className="mt-2 transition-all duration-200 hover:scale-105"
@@ -2108,7 +2189,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                       setReplyText(e.target.value)
                       handleTyping()
                     }}
-                    className="min-h-32 mb-3 text-sm"
+                    className="min-h-32 mb-3 text-sm w-full max-w-full resize-none break-words overflow-x-hidden"
                   />
                   <Button 
                     onClick={handleSendReply} 
@@ -2129,14 +2210,14 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
             </div>
           </div>
         ) : (
-          <div className="flex items-center justify-center h-full px-6 md:pl-48 py-10">
-            <div className="text-center md:text-left space-y-4 max-w-md">
-              <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto md:mx-0">
+          <div className="flex items-center justify-center h-full px-6 md:pl-48 py-10 w-full">
+            <div className="text-center md:text-left space-y-4 max-w-md animate-in fade-in duration-500">
+              <div className="w-16 h-16 bg-muted/50 rounded-full flex items-center justify-center mx-auto md:mx-0 shadow-sm">
                 <Mail className="w-8 h-8 text-muted-foreground" />
               </div>
               <div>
                 <h2 className="text-xl font-semibold mb-2">Select a ticket</h2>
-                <p className="text-muted-foreground">
+                <p className="text-muted-foreground text-sm leading-relaxed">
                   Choose a ticket from the list to view details, manage assignment, and reply.
                 </p>
               </div>
@@ -2145,6 +2226,29 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
         )}
         </div>
       </ResizablePanel>
+
+      {/* Quick Replies Sidebar */}
+      {showQuickRepliesSidebar && (
+        <>
+          <ResizableHandle 
+            withHandle 
+            className="w-1 bg-border/50 hover:bg-primary/30 active:bg-primary/50 transition-all duration-200 cursor-col-resize group relative z-10"
+          />
+          <ResizablePanel 
+            defaultSize={panelSizes.length === 3 ? panelSizes[2] : 20} 
+            minSize={15}
+            maxSize={35}
+            className="flex flex-col bg-background overflow-hidden"
+            style={{ minWidth: 0, contain: 'layout size' }}
+          >
+            <QuickRepliesSidebar 
+              onSelectReply={handleQuickReplySelect}
+              currentUserId={currentUserId}
+              onQuickRepliesChange={fetchQuickReplies}
+            />
+          </ResizablePanel>
+        </>
+      )}
     </ResizablePanelGroup>
 
     {/* Assignment Dialog with Priority Selection */}

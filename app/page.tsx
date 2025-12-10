@@ -12,6 +12,7 @@ import UserSelector from "@/components/user-selector"
 import UserManagement from "@/components/user-management"
 import TicketsView from "@/components/tickets-view"
 import AISettings from "@/components/ai-settings"
+import QuickRepliesView from "@/components/quick-replies-view"
 
 type View = SidebarView
 
@@ -210,11 +211,34 @@ export default function Page() {
     }
   }
 
-  const handleSwitchUser = (userId: string) => {
-    // User switching is handled in TopNav component
-    // This function is called after user is selected
+  const handleSwitchUser = async (userId: string) => {
+    // User switching - update state smoothly without page reload
     setCurrentUserId(userId)
-    // Fetch user details will happen in TopNav
+    
+    // Fetch user details to update UI
+    try {
+      const response = await fetch(`/api/users/${userId}`)
+      if (response.ok) {
+        const data = await response.json()
+        if (data.user) {
+          setCurrentUser({
+            id: data.user.id,
+            name: data.user.name,
+            role: data.user.role,
+          })
+          // Store in sessionStorage for this tab
+          if (typeof window !== "undefined") {
+            sessionStorage.setItem("current_user_id", data.user.id)
+            sessionStorage.setItem("current_user_name", data.user.name)
+            sessionStorage.setItem("current_user_role", data.user.role)
+          }
+          // Refresh admin check after user selection
+          await checkAdminExists()
+        }
+      }
+    } catch {
+      // Ignore errors
+    }
   }
 
   const fetchSyncStatus = useCallback(async () => {
@@ -432,6 +456,8 @@ export default function Page() {
         )
       case "drafts":
         return <DraftsView refreshKey={draftsVersion} />
+      case "quick-replies":
+        return <QuickRepliesView currentUserId={currentUserId} />
       case "tickets":
         return (
           <TicketsView

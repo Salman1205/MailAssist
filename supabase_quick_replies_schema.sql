@@ -77,15 +77,61 @@ CREATE POLICY "Admins can update quick replies"
   );
 
 -- Policy: Only admins/managers can delete quick replies
-CREATE POLICY "Admins can delete quick replies"
+-- NOTE: Updated policies below allow all users to create/edit/delete their own quick replies
+-- Drop old policies first, then create new ones
+
+-- Drop old admin-only policies
+DROP POLICY IF EXISTS "Admins can create quick replies" ON public.quick_replies;
+DROP POLICY IF EXISTS "Admins can update quick replies" ON public.quick_replies;
+DROP POLICY IF EXISTS "Admins can delete quick replies" ON public.quick_replies;
+
+-- Updated INSERT policy: All authenticated users can create quick replies
+CREATE POLICY "Users can create quick replies"
+  ON public.quick_replies
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    user_email IN (
+      SELECT user_email FROM public.tokens WHERE user_email IS NOT NULL
+    )
+  );
+
+-- Updated UPDATE policy: Users can edit their own, admins/managers can edit any
+CREATE POLICY "Users can update quick replies"
+  ON public.quick_replies
+  FOR UPDATE
+  TO authenticated
+  USING (
+    user_email IN (
+      SELECT user_email FROM public.tokens WHERE user_email IS NOT NULL
+    )
+    AND (
+      created_by = auth.uid() OR
+      EXISTS (
+        SELECT 1 FROM public.users
+        WHERE users.id = auth.uid()
+        AND users.role IN ('admin', 'manager')
+        AND users.user_email = quick_replies.user_email
+      )
+    )
+  );
+
+-- Updated DELETE policy: Users can delete their own, admins/managers can delete any
+CREATE POLICY "Users can delete quick replies"
   ON public.quick_replies
   FOR DELETE
   TO authenticated
   USING (
-    EXISTS (
-      SELECT 1 FROM public.users
-      WHERE users.id = auth.uid()
-      AND users.role IN ('admin', 'manager')
-      AND users.user_email = quick_replies.user_email
+    user_email IN (
+      SELECT user_email FROM public.tokens WHERE user_email IS NOT NULL
+    )
+    AND (
+      created_by = auth.uid() OR
+      EXISTS (
+        SELECT 1 FROM public.users
+        WHERE users.id = auth.uid()
+        AND users.role IN ('admin', 'manager')
+        AND users.user_email = quick_replies.user_email
+      )
     )
   );

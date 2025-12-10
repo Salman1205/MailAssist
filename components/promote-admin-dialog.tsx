@@ -37,8 +37,7 @@ export default function PromoteAdminDialog({ open, onOpenChange, onPromoted }: P
       setTimeout(() => {
         onPromoted()
         onOpenChange(false)
-        // Reload page to refresh user role
-        window.location.reload()
+        // State will update smoothly without page reload
       }, 1500)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to promote user")
@@ -72,15 +71,14 @@ export default function PromoteAdminDialog({ open, onOpenChange, onPromoted }: P
             <Alert>
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>
-                User successfully promoted to admin! Refreshing...
+                User successfully promoted to admin!
               </AlertDescription>
             </Alert>
           ) : (
             <Alert>
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>
-                This will promote the first user account (oldest by creation date) to admin role. 
-                You'll need to refresh the page after promotion.
+                This will promote the first user account (oldest by creation date) to admin role.
               </AlertDescription>
             </Alert>
           )}

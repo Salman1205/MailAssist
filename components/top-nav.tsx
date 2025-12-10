@@ -75,8 +75,7 @@ export default function TopNav({ isConnected, userProfile, currentUser, onLogout
         }
         onSwitchUser(userId)
         setShowUserDialog(false)
-        // Reload page to refresh all state
-        window.location.reload()
+        // State will update smoothly without page reload
       }
     } catch {
       // Ignore errors

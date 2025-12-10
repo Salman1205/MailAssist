@@ -5,7 +5,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUserIdFromRequest } from '@/lib/permissions';
-import { canViewAllTickets } from '@/lib/permissions';
+import { getCurrentUserEmail } from '@/lib/storage';
+import { getSessionUserEmailFromRequest } from '@/lib/session';
 import { supabase } from '@/lib/supabase';
 
 export async function GET(request: NextRequest) {
@@ -18,6 +19,15 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // Get user_email from session for RLS scoping
+    const userEmail = getSessionUserEmailFromRequest(request) || await getCurrentUserEmail();
+    if (!userEmail) {
+      return NextResponse.json(
+        { error: 'Unable to determine user email' },
+        { status: 401 }
+      );
+    }
+
     if (!supabase) {
       return NextResponse.json(
         { error: 'Database not available' },
@@ -25,9 +35,11 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // Filter by user_email to respect RLS policies
     const { data, error } = await supabase
       .from('quick_replies')
       .select('*')
+      .eq('user_email', userEmail)
       .order('category', { ascending: true })
       .order('title', { ascending: true });
 
@@ -59,14 +71,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Only admins/managers can create quick replies
-    const canManage = await canViewAllTickets(userId);
-    if (!canManage) {
+    // Get user_email from session for RLS scoping
+    const userEmail = getSessionUserEmailFromRequest(request) || await getCurrentUserEmail();
+    if (!userEmail) {
       return NextResponse.json(
-        { error: 'Unauthorized - only admins and managers can create quick replies' },
-        { status: 403 }
+        { error: 'Unable to determine user email' },
+        { status: 401 }
       );
     }
+
+    // All authenticated users can create quick replies
 
     if (!supabase) {
       return NextResponse.json(
@@ -93,6 +107,7 @@ export async function POST(request: NextRequest) {
         category: category?.trim() || 'General',
         tags: tags || [],
         created_by: userId,
+        user_email: userEmail, // CRITICAL: Set user_email for RLS scoping
       })
       .select()
       .single();

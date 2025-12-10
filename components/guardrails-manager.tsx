@@ -176,13 +176,13 @@ export default function GuardrailsManager() {
                 className="min-h-16"
               />
               <div className="flex justify-end">
-                <Button variant="ghost" size="sm" onClick={() => removeTopicRule(idx)}>
+                <Button variant="ghost" size="sm" onClick={() => removeTopicRule(idx)} className="hover:bg-accent hover:text-accent-foreground">
                   Remove
                 </Button>
               </div>
             </div>
           ))}
-          <Button variant="outline" size="sm" onClick={addTopicRule} className="hover:bg-accent hover:text-foreground">
+          <Button variant="outline" size="sm" onClick={addTopicRule} className="transition-all hover:bg-accent hover:text-accent-foreground">
             Add topic rule
           </Button>
         </div>
@@ -191,7 +191,7 @@ export default function GuardrailsManager() {
           <Button onClick={() => handleSave(false)} disabled={saving}>
             {saving ? "Saving..." : "Save (submit)"}
           </Button>
-          <Button variant="outline" onClick={() => handleSave(true)} disabled={saving} className="hover:bg-accent hover:text-foreground">
+          <Button variant="outline" onClick={() => handleSave(true)} disabled={saving} className="transition-all hover:bg-accent hover:text-accent-foreground">
             {saving ? "..." : "Publish (admin)"}
           </Button>
           {loading && <div className="text-sm text-muted-foreground">Loading...</div>}
