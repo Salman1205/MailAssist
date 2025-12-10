@@ -457,10 +457,11 @@ export default function Page() {
       case "drafts":
         return <DraftsView refreshKey={draftsVersion} />
       case "quick-replies":
-        return <QuickRepliesView currentUserId={currentUserId} />
+        return <QuickRepliesView key={currentUserId || "no-user"} currentUserId={currentUserId} />
       case "tickets":
         return (
           <TicketsView
+            key={currentUserId || "no-user"}
             currentUserId={currentUserId}
             currentUserRole={currentUser?.role as "admin" | "manager" | "agent" | null}
           />

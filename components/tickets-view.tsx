@@ -278,6 +278,14 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
     fetchQuickReplies()
   }, [])
   
+  // Close quick replies sidebar and refetch when user changes
+  useEffect(() => {
+    if (currentUserId) {
+      setShowQuickRepliesSidebar(false)
+      fetchQuickReplies()
+    }
+  }, [currentUserId])
+  
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

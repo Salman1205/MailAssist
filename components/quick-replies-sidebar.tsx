@@ -55,7 +55,7 @@ export default function QuickRepliesSidebar({ onSelectReply, currentUserId, onQu
     const timer = setTimeout(() => setShowSkeleton(true), 100)
     fetchQuickReplies()
     return () => clearTimeout(timer)
-  }, [])
+  }, [currentUserId])
 
   const fetchQuickReplies = async () => {
     try {

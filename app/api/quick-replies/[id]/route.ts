@@ -53,12 +53,11 @@ export async function PATCH(
       );
     }
 
-    // Check if quick reply exists and user has permission (filter by user_email for RLS)
+    // Check if quick reply exists and user has permission (filter by created_by)
     const { data: existing } = await supabase
       .from('quick_replies')
       .select('created_by, user_email')
       .eq('id', id)
-      .eq('user_email', userEmail)
       .single();
 
     if (!existing) {
@@ -158,12 +157,11 @@ export async function DELETE(
       );
     }
 
-    // Check if quick reply exists and user has permission (filter by user_email for RLS)
+    // Check if quick reply exists and user has permission (filter by created_by)
     const { data: existing } = await supabase
       .from('quick_replies')
       .select('created_by, user_email')
       .eq('id', id)
-      .eq('user_email', userEmail)
       .single();
 
     if (!existing) {

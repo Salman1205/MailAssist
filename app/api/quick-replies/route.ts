@@ -19,15 +19,6 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Get user_email from session for RLS scoping
-    const userEmail = getSessionUserEmailFromRequest(request) || await getCurrentUserEmail();
-    if (!userEmail) {
-      return NextResponse.json(
-        { error: 'Unable to determine user email' },
-        { status: 401 }
-      );
-    }
-
     if (!supabase) {
       return NextResponse.json(
         { error: 'Database not available' },
@@ -35,11 +26,11 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Filter by user_email to respect RLS policies
+    // Filter by created_by (user ID) so each user only sees their own quick replies
     const { data, error } = await supabase
       .from('quick_replies')
       .select('*')
-      .eq('user_email', userEmail)
+      .eq('created_by', userId)
       .order('category', { ascending: true })
       .order('title', { ascending: true });
 
@@ -99,6 +90,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Get user_email from session for RLS scoping
+    const userEmail = getSessionUserEmailFromRequest(request) || await getCurrentUserEmail();
+    if (!userEmail) {
+      return NextResponse.json(
+        { error: 'Unable to determine user email' },
+        { status: 401 }
+      );
+    }
+
     const { data, error } = await supabase
       .from('quick_replies')
       .insert({
@@ -106,8 +106,8 @@ export async function POST(request: NextRequest) {
         content: content.trim(),
         category: category?.trim() || 'General',
         tags: tags || [],
-        created_by: userId,
-        user_email: userEmail, // CRITICAL: Set user_email for RLS scoping
+        created_by: userId, // Filter by this for user-specific quick replies
+        user_email: userEmail, // Required for RLS policies
       })
       .select()
       .single();
