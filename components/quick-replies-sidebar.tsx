@@ -26,11 +26,13 @@ interface QuickRepliesSidebarProps {
   onSelectReply: (content: string) => void
   currentUserId: string | null
   onQuickRepliesChange?: () => void
+  onClose?: () => void
 }
 
-export default function QuickRepliesSidebar({ onSelectReply, currentUserId, onQuickRepliesChange }: QuickRepliesSidebarProps) {
+export default function QuickRepliesSidebar({ onSelectReply, currentUserId, onQuickRepliesChange, onClose }: QuickRepliesSidebarProps) {
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
+  const [showSkeleton, setShowSkeleton] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedCategory, setSelectedCategory] = useState<string>("all")
   const [showCreateDialog, setShowCreateDialog] = useState(false)
@@ -49,7 +51,10 @@ export default function QuickRepliesSidebar({ onSelectReply, currentUserId, onQu
   const { toast } = useToast()
 
   useEffect(() => {
+    // Delay showing skeleton to prevent flash
+    const timer = setTimeout(() => setShowSkeleton(true), 100)
     fetchQuickReplies()
+    return () => clearTimeout(timer)
   }, [])
 
   const fetchQuickReplies = async () => {
@@ -221,14 +226,27 @@ export default function QuickRepliesSidebar({ onSelectReply, currentUserId, onQu
             <MessageSquare className="w-5 h-5 text-primary" />
             <h2 className="text-lg font-semibold">Quick Replies</h2>
           </div>
+          <div className="flex items-center gap-2">
           <Button
             size="sm"
             onClick={handleCreate}
-            className="h-8 text-xs transition-all duration-200 hover:scale-105"
+            className="h-8 text-xs transition-all duration-300 ease-out hover:scale-110 hover:shadow-md"
           >
-            <Plus className="w-3 h-3 mr-1" />
+            <Plus className="w-3 h-3 mr-1 transition-transform duration-300 group-hover:rotate-90" />
             New
           </Button>
+          {onClose && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={onClose}
+                className="h-8 w-8 p-0 transition-all duration-300 ease-out hover:scale-110 hover:bg-muted hover:shadow-sm"
+                title="Close Quick Replies"
+              >
+                <X className="w-4 h-4 transition-transform duration-300 hover:rotate-90" />
+              </Button>
+            )}
+          </div>
         </div>
         
         {/* Search */}
@@ -258,13 +276,13 @@ export default function QuickRepliesSidebar({ onSelectReply, currentUserId, onQu
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {loading ? (
+        {loading && showSkeleton ? (
           <div className="space-y-3">
             {[1, 2, 3].map(i => (
-              <Skeleton key={i} className="h-24 w-full" />
+              <Skeleton key={i} className="h-24 w-full bg-muted/30" />
             ))}
           </div>
-        ) : filteredReplies.length === 0 ? (
+        ) : !loading && filteredReplies.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center p-8">
             <MessageSquare className="w-12 h-12 text-muted-foreground/50 mb-4" />
             <p className="text-sm text-muted-foreground mb-2">
@@ -295,10 +313,22 @@ export default function QuickRepliesSidebar({ onSelectReply, currentUserId, onQu
                   {replies.length}
                 </Badge>
               </div>
-              {replies.map((reply) => (
+              {replies.map((reply, idx) => (
                 <Card
                   key={reply.id}
-                  className="group hover:shadow-md transition-all duration-200 border-border/50 hover:border-primary/30"
+                  className="group hover:shadow-lg transition-all duration-300 ease-out border-border/50 hover:border-primary/30 cursor-pointer hover:scale-[1.02] animate-in fade-in slide-in-from-right-2"
+                  style={{ animationDelay: `${idx * 40}ms` }}
+                  onClick={(e) => {
+                    // Only trigger if clicking on the card itself, not on buttons
+                    if ((e.target as HTMLElement).closest('button')) {
+                      return
+                    }
+                    onSelectReply(reply.content)
+                    toast({
+                      title: "Quick reply added",
+                      description: `"${reply.title}" added to draft`,
+                    })
+                  }}
                 >
                   <CardContent className="p-3">
                     <div className="flex items-start justify-between gap-2 mb-2">
@@ -312,6 +342,7 @@ export default function QuickRepliesSidebar({ onSelectReply, currentUserId, onQu
                             variant="ghost"
                             className="h-6 w-6 p-0"
                             disabled
+                            onClick={(e) => e.stopPropagation()}
                           >
                             <Check className="w-3 h-3 text-green-500" />
                           </Button>
@@ -320,28 +351,25 @@ export default function QuickRepliesSidebar({ onSelectReply, currentUserId, onQu
                             size="sm"
                             variant="ghost"
                             className="h-6 w-6 p-0"
-                            onClick={() => handleCopy(reply.content, reply.id)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleCopy(reply.content, reply.id)
+                            }}
                             title="Copy to clipboard"
                           >
                             <Copy className="w-3 h-3" />
                           </Button>
                         )}
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-6 w-6 p-0"
-                          onClick={() => onSelectReply(reply.content)}
-                          title="Use in reply"
-                        >
-                          <Sparkles className="w-3 h-3 text-primary" />
-                        </Button>
                         {canEdit(reply) && (
                           <>
                             <Button
                               size="sm"
                               variant="ghost"
                               className="h-6 w-6 p-0"
-                              onClick={() => handleEdit(reply)}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleEdit(reply)
+                              }}
                               title="Edit"
                             >
                               <Edit2 className="w-3 h-3" />
@@ -350,7 +378,10 @@ export default function QuickRepliesSidebar({ onSelectReply, currentUserId, onQu
                               size="sm"
                               variant="ghost"
                               className="h-6 w-6 p-0 text-destructive hover:text-destructive"
-                              onClick={() => setDeletingReply(reply.id)}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setDeletingReply(reply.id)
+                              }}
                               title="Delete"
                             >
                               <Trash2 className="w-3 h-3" />

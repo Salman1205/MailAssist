@@ -31,6 +31,7 @@ interface QuickRepliesViewProps {
 export default function QuickRepliesView({ currentUserId }: QuickRepliesViewProps) {
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>([])
   const [loading, setLoading] = useState(true)
+  const [showSkeleton, setShowSkeleton] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedCategory, setSelectedCategory] = useState<string>("all")
   const [showCreateDialog, setShowCreateDialog] = useState(false)
@@ -49,7 +50,10 @@ export default function QuickRepliesView({ currentUserId }: QuickRepliesViewProp
   const { toast } = useToast()
 
   useEffect(() => {
+    // Delay showing skeleton to prevent flash
+    const timer = setTimeout(() => setShowSkeleton(true), 100)
     fetchQuickReplies()
+    return () => clearTimeout(timer)
   }, [])
 
   const fetchQuickReplies = async () => {
@@ -223,9 +227,9 @@ export default function QuickRepliesView({ currentUserId }: QuickRepliesViewProp
           </div>
           <Button
             onClick={handleCreate}
-            className="transition-all duration-200 hover:scale-105 shadow-sm"
+            className="transition-all duration-300 ease-out hover:scale-110 hover:shadow-lg shadow-md"
           >
-            <Plus className="w-4 h-4 mr-2" />
+            <Plus className="w-4 h-4 mr-2 transition-transform duration-300 group-hover:rotate-90" />
             New Quick Reply
           </Button>
         </div>
@@ -258,13 +262,13 @@ export default function QuickRepliesView({ currentUserId }: QuickRepliesViewProp
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-6">
-        {loading ? (
+        {loading && showSkeleton ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {[1, 2, 3, 4, 5, 6].map(i => (
-              <Skeleton key={i} className="h-48 w-full rounded-lg" />
+              <Skeleton key={i} className="h-48 w-full rounded-lg bg-muted/30" />
             ))}
           </div>
-        ) : filteredReplies.length === 0 ? (
+        ) : !loading && filteredReplies.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center p-12">
             <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center mb-6">
               <MessageSquare className="w-10 h-10 text-primary" />
@@ -300,10 +304,11 @@ export default function QuickRepliesView({ currentUserId }: QuickRepliesViewProp
                   </Badge>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {replies.map((reply) => (
+                  {replies.map((reply, idx) => (
                     <Card
                       key={reply.id}
-                      className="group hover:shadow-lg transition-all duration-200 border-border/50 hover:border-primary/30 relative overflow-hidden"
+                      className="group hover:shadow-xl transition-all duration-300 ease-out border-border/50 hover:border-primary/30 relative overflow-hidden hover:scale-[1.02] animate-in fade-in slide-in-from-bottom-2"
+                      style={{ animationDelay: `${idx * 50}ms` }}
                     >
                       <CardContent className="p-5">
                         {/* Header */}

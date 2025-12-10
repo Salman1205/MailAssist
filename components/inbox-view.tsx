@@ -28,12 +28,17 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
           showDetail ? "hidden md:flex md:w-80" : "flex w-full md:w-80"
         } flex-col`}
       >
-        <EmailList
-          selectedEmail={selectedEmail}
-          onSelectEmail={onSelectEmail}
-          onLoadingChange={setListLoading}
-          viewType={viewType}
-        />
+        <div className="sticky top-0 z-10 bg-card border-b border-border/50 px-4 py-3 backdrop-blur-sm">
+          <h2 className="text-lg font-semibold capitalize">{viewType || "Inbox"}</h2>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          <EmailList
+            selectedEmail={selectedEmail}
+            onSelectEmail={onSelectEmail}
+            onLoadingChange={setListLoading}
+            viewType={viewType}
+          />
+        </div>
       </div>
 
       <div className={`flex-1 overflow-y-auto ${showDetail ? "flex" : "hidden md:flex"}`}>

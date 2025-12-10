@@ -108,8 +108,11 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
 
   if (loading && !loadingMore) {
     return (
-      <div className="flex items-center justify-center p-8">
-        <div className="text-sm text-muted-foreground">Loading emails...</div>
+      <div className="flex items-center justify-center p-8 animate-in fade-in duration-300">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+          <div className="text-sm text-muted-foreground">Loading emails...</div>
+        </div>
       </div>
     )
   }
@@ -130,47 +133,55 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
 
   if (emails.length === 0 && !loadingMore) {
     return (
-      <div className="flex items-center justify-center p-8">
-        <div className="text-sm text-muted-foreground">No emails found</div>
+      <div className="flex items-center justify-center p-8 animate-in fade-in duration-300">
+        <div className="text-center space-y-2">
+          <div className="text-sm text-muted-foreground">No emails found</div>
+          <p className="text-xs text-muted-foreground/70">Try checking another folder</p>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="divide-y divide-border">
-      {emails.map((email) => (
+    <div className="p-2 space-y-2">
+      {emails.map((email, index) => (
         <button
           key={email.id}
           onClick={() => onSelectEmail(email.id)}
-          className={`w-full p-4 text-left hover:bg-secondary transition-colors border-l-4 ${
-            selectedEmail === email.id ? "border-l-primary bg-secondary" : "border-l-transparent"
+          className={`w-full p-4 text-left rounded-lg transition-all duration-300 ease-out border-l-4 animate-in fade-in slide-in-from-left-2 ${
+            selectedEmail === email.id 
+              ? "border-l-primary bg-primary/10 shadow-md scale-[1.01]" 
+              : "border-l-transparent hover:bg-muted/50 hover:shadow-sm hover:scale-[1.005]"
           }`}
+          style={{ animationDelay: `${index * 30}ms` }}
         >
-          <div className="space-y-2">
-            <div className="flex justify-between items-start gap-2">
-              <h3 className="font-medium text-foreground text-sm truncate">
+          <div className="space-y-2.5">
+            <div className="flex justify-between items-start gap-3">
+              <h3 className="font-semibold text-foreground text-sm truncate flex-1">
                 {email.from.split("<")[0].trim() || email.from}
               </h3>
-              <span className="text-xs text-muted-foreground flex-shrink-0">
+              <span className="text-xs text-muted-foreground flex-shrink-0 whitespace-nowrap">
                 {formatDate(email.date)}
               </span>
             </div>
-            <p className="text-sm font-medium text-foreground truncate">
+            <p className="text-sm font-medium text-foreground line-clamp-1">
               {email.subject || "(No subject)"}
             </p>
-            <p className="text-xs text-muted-foreground line-clamp-1">
-              {email.snippet || ""}
-            </p>
+            {email.snippet && (
+              <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
+                {email.snippet}
+              </p>
+            )}
           </div>
         </button>
       ))}
 
       {hasMore && (
-        <div className="flex justify-center p-4">
+        <div className="flex justify-center p-4 pt-6">
           <button
             onClick={handleLoadMore}
             disabled={loadingMore}
-            className="text-xs px-3 py-1 rounded border border-border text-primary hover:bg-secondary disabled:opacity-60"
+            className="text-xs px-4 py-2 rounded-lg border border-border text-primary hover:bg-secondary hover:shadow-sm transition-all duration-300 ease-out hover:scale-105 disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {loadingMore ? "Loading more..." : "Load more"}
           </button>

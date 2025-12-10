@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { Loader2, User, Mail, Clock, Tag, MessageSquare, Sparkles, X, Plus, ChevronDown, ChevronUp, Edit2, Check, XCircle, MoreVertical, Filter, ChevronRight } from "lucide-react"
+import { Loader2, User, Mail, Clock, Tag, MessageSquare, Sparkles, X, Plus, ChevronDown, ChevronUp, Edit2, Check, XCircle, MoreVertical, Filter, ChevronRight, Search } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -827,12 +827,19 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
   }
   
   const handleQuickReplySelect = (content: string) => {
-    setReplyText(content)
+    setReplyText(prev => {
+      // Append to existing text if there's already content, otherwise just set it
+      if (prev.trim()) {
+        return prev + "\n\n" + content
+      }
+      return content
+    })
     // Focus the reply textarea if possible
     setTimeout(() => {
       const textarea = document.querySelector('textarea[placeholder*="reply"]') as HTMLTextAreaElement
       if (textarea) {
         textarea.focus()
+        // Move cursor to end
         textarea.setSelectionRange(textarea.value.length, textarea.value.length)
       }
     }, 100)
@@ -1073,6 +1080,17 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
     return date.toLocaleDateString() + " " + date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
   }
 
+  const formatTimeAgo = (dateString: string | null | undefined) => {
+    if (!dateString) return "N/A"
+    const diff = Date.now() - new Date(dateString).getTime()
+    const hours = Math.floor(diff / (1000 * 60 * 60))
+    const days = Math.floor(hours / 24)
+    if (days > 0) return `${days}d ago`
+    if (hours > 0) return `${hours}h ago`
+    const minutes = Math.floor(diff / (1000 * 60))
+    return minutes > 0 ? `${minutes}m ago` : 'Just now'
+  }
+
   const getMessageKey = (msg: any, idx: number) =>
     msg.id || `${msg.from}-${msg.date}-${idx}`
 
@@ -1242,8 +1260,11 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+      <div className="flex items-center justify-center h-full animate-in fade-in duration-300">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+          <p className="text-sm text-muted-foreground animate-pulse">Loading tickets...</p>
+        </div>
       </div>
     )
   }
@@ -1278,10 +1299,15 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
           <div className="flex flex-col h-full overflow-hidden w-full" style={{ contain: 'layout' }}>
             <div className="p-3 border-b border-border/50 space-y-2 flex-shrink-0 bg-card/50 backdrop-blur-sm">
           <div className="flex items-center justify-between gap-2">
-            <h2 className="text-lg font-semibold">Tickets</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-semibold">Tickets</h2>
+              <Badge variant="secondary" className="h-5 px-2 text-xs font-medium">
+                {filteredTickets.length}
+              </Badge>
+            </div>
             <div className="flex items-center gap-2">
               <Button
-                variant="ghost"
+                variant={isSelectMode ? "default" : "outline"}
                 size="sm"
                 onClick={() => {
                   setIsSelectMode(!isSelectMode)
@@ -1289,29 +1315,65 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                     setSelectedTicketIds(new Set())
                   }
                 }}
-                className="h-7 text-xs transition-all duration-200 hover:scale-105"
+                className="h-7 text-xs transition-all duration-300 ease-out hover:scale-110 hover:shadow-md"
               >
                 {isSelectMode ? "Cancel" : "Select"}
               </Button>
             </div>
           </div>
           
-          {/* Tabs */}
+          {/* Tabs with counts */}
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
             <TabsList className="grid w-full grid-cols-3 h-8 text-xs">
-              <TabsTrigger value="assigned">Assigned</TabsTrigger>
-              <TabsTrigger value="unassigned">Unassigned</TabsTrigger>
-              <TabsTrigger value="all">All</TabsTrigger>
+              <TabsTrigger value="assigned" className="relative pr-1">
+                <span className="flex items-center gap-1.5">
+                  Assigned
+                  {(() => {
+                    const count = tickets.filter(t => t.assigneeUserId === currentUserId).length
+                    return count > 0 && (
+                      <Badge variant="secondary" className="h-4 px-1.5 text-[10px] flex-shrink-0">
+                        {count}
+                      </Badge>
+                    )
+                  })()}
+                </span>
+              </TabsTrigger>
+              <TabsTrigger value="unassigned" className="relative pr-1">
+                <span className="flex items-center gap-1.5">
+                  Unassigned
+                  {(() => {
+                    const count = tickets.filter(t => t.assigneeUserId === null).length
+                    return count > 0 && (
+                      <Badge variant="secondary" className="h-4 px-1.5 text-[10px] flex-shrink-0">
+                        {count}
+                      </Badge>
+                    )
+                  })()}
+                </span>
+              </TabsTrigger>
+              <TabsTrigger value="all" className="relative pr-1">
+                <span className="flex items-center gap-1.5">
+                  All
+                  {tickets.length > 0 && (
+                    <Badge variant="secondary" className="h-4 px-1.5 text-[10px] flex-shrink-0">
+                      {tickets.length}
+                    </Badge>
+                  )}
+                </span>
+              </TabsTrigger>
             </TabsList>
           </Tabs>
 
           {/* Search */}
-          <Input
-            placeholder="Search by subject or email..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="h-8 text-sm"
-          />
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground transition-colors duration-300" />
+            <Input
+              placeholder="Search tickets..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="h-9 pl-8 text-sm transition-all duration-300 ease-out focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+            />
+          </div>
           
           {/* Collapsible Filters */}
           <Accordion type="single" collapsible value={filtersExpanded ? "filters" : undefined}>
@@ -1570,13 +1632,14 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                 return (
                   <Card
                   key={ticket.id}
-                  className={`m-2 cursor-pointer relative transition-all duration-200 ${
+                  className={`m-2 cursor-pointer relative transition-all duration-300 ease-out animate-in fade-in slide-in-from-left-4 ${
                     isSelected 
-                      ? "border-primary border-2 bg-muted/30 shadow-md ring-2 ring-primary/20" 
+                      ? "border-primary border-2 bg-muted/30 shadow-lg ring-2 ring-primary/20 scale-[1.02]" 
                       : isUnread 
-                        ? "border-primary/60 bg-primary/5 hover:bg-primary/10 hover:shadow-sm" 
-                        : "border-border/50 hover:bg-muted/50 hover:shadow-sm"
+                        ? "border-primary/60 bg-primary/5 hover:bg-primary/10 hover:shadow-md hover:scale-[1.01] hover:border-primary/80" 
+                        : "border-border/50 hover:bg-muted/50 hover:shadow-md hover:scale-[1.01] hover:border-border"
                   }`}
+                  style={{ animationDelay: `${index * 30}ms` }}
                   onClick={(e) => {
                     if (isSelectMode) {
                       e.stopPropagation()
@@ -1588,7 +1651,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                   }}
                 >
                   {isUnread && (
-                    <div className="absolute top-3 right-3 w-2.5 h-2.5 rounded-full bg-destructive shadow-sm animate-pulse" aria-label="New reply" />
+                    <div className="absolute top-3 right-3 w-2.5 h-2.5 rounded-full bg-destructive shadow-sm animate-pulse ring-2 ring-destructive/30" aria-label="New reply" />
                   )}
                   <CardContent className="p-3 space-y-2">
                     <div className="flex items-start justify-between gap-2 w-full">
@@ -1622,7 +1685,6 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                       <Badge className={`${getStatusColor(ticket.status)} text-white text-xs transition-all duration-200 hover:scale-105`}>
                         {ticket.status}
                       </Badge>
-                      {/* Only show priority if ticket is assigned */}
                       {ticket.assigneeUserId && (
                         <Badge className={`${getPriorityColor(ticket.priority)} text-white text-xs transition-all duration-200 hover:scale-105`}>
                           {ticket.priority}
@@ -1673,38 +1735,37 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
       >
         <div className={`flex-1 overflow-y-auto overflow-x-hidden transition-all duration-300 ${selectedTicket ? "flex flex-col h-full w-full" : "hidden md:flex"}`} style={{ contain: 'layout' }}>
         {selectedTicket ? (
-          <div className="flex flex-col h-full w-full animate-in fade-in slide-in-from-right-4 duration-300 max-w-full" style={{ contain: 'layout' }}>
-            <div className="p-4 md:p-6 border-b border-border/50 space-y-4 flex-shrink-0 w-full max-w-full">
+          <div className="flex flex-col h-full w-full animate-in fade-in slide-in-from-right-4 duration-500 ease-out max-w-full" style={{ contain: 'layout' }}>
+            <div className="p-4 md:p-6 border-b border-border/50 space-y-4 flex-shrink-0 w-full max-w-full animate-in fade-in slide-in-from-top-2 duration-300">
               <div className="flex items-start justify-between gap-4 w-full max-w-full">
                 <div className="space-y-2 flex-1 min-w-0 max-w-full overflow-hidden">
                   <h1 className="text-xl md:text-2xl font-bold break-words overflow-wrap-anywhere max-w-full">{selectedTicket.subject}</h1>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <Badge className={`${getStatusColor(selectedTicket.status)} transition-all duration-200 hover:scale-105`}>
+                    <Badge className={`${getStatusColor(selectedTicket.status)} transition-all duration-300 ease-out hover:scale-110 hover:shadow-md`}>
                       {selectedTicket.status}
                     </Badge>
-                    {/* Only show priority badge if ticket is assigned and has priority */}
                     {selectedTicket.assigneeUserId && selectedTicket.priority && (
-                      <Badge className={`${getPriorityColor(selectedTicket.priority)} transition-all duration-200 hover:scale-105`}>
+                      <Badge className={`${getPriorityColor(selectedTicket.priority)} transition-all duration-300 ease-out hover:scale-110 hover:shadow-md`}>
                         {selectedTicket.priority}
                       </Badge>
                     )}
                     {selectedTicket.tags.map((tag, idx) => (
-                      <Badge key={idx} variant="outline" className="transition-all duration-200 hover:scale-105 hover:bg-muted">{tag}</Badge>
+                      <Badge key={idx} variant="outline" className="transition-all duration-300 ease-out hover:scale-110 hover:bg-muted hover:shadow-sm animate-in fade-in slide-in-from-bottom-2" style={{ animationDelay: `${idx * 50}ms` }}>{tag}</Badge>
                     ))}
                   </div>
                 </div>
                 <Button 
                   variant="outline" 
                   onClick={() => setSelectedTicket(null)}
-                  className="transition-all duration-200 hover:scale-105"
+                  className="transition-all duration-300 ease-out hover:scale-110 hover:shadow-md"
                 >
                   Close
                 </Button>
               </div>
 
               {hasNewCustomerReply(selectedTicket) && (
-                <div className="flex items-center gap-2 p-3 bg-primary/10 border border-primary/20 rounded-md text-sm text-primary animate-in fade-in shadow-sm">
-                  <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                <div className="flex items-center gap-2 p-3 bg-primary/10 border border-primary/20 rounded-md text-sm text-primary animate-in fade-in slide-in-from-top-2 duration-500 shadow-md hover:shadow-lg transition-all duration-300">
+                  <div className="w-2 h-2 rounded-full bg-primary animate-pulse ring-2 ring-primary/50" />
                   <span className="font-medium">New customer reply received.</span>
                 </div>
               )}
@@ -1721,17 +1782,15 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                       handleTakeTicket()
                     }}
                     disabled={assigning === selectedTicket.id}
-                    className="h-8 text-xs transition-all duration-200 hover:scale-105"
+                    className="h-8 text-xs transition-all duration-300 ease-out hover:scale-110 hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {assigning === selectedTicket.id ? <Loader2 className="w-3 h-3 animate-spin" /> : "Take Ticket"}
                   </Button>
                 )}
-                {/* Allow all users to assign tickets to others */}
                 <Select
                   value={selectedTicket.assigneeUserId || "unassigned"}
                   onValueChange={(value) => {
                     const assigneeId = value === "unassigned" ? null : value
-                    // If assigning to someone (not unassigning), require priority
                     if (assigneeId && !selectedTicket.assigneeUserId) {
                       setPendingAssignment({ ticketId: selectedTicket.id, assigneeUserId: assigneeId })
                       setShowAssignDialog(true)
@@ -1768,7 +1827,6 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                     <SelectItem value="closed">Closed</SelectItem>
                   </SelectContent>
                 </Select>
-                {/* Priority selector - only shown for assigned tickets and Admin/Manager */}
                 {selectedTicket.assigneeUserId ? (
                   canAssign ? (
                     <Select
@@ -1863,7 +1921,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
             {/* Main Content Area */}
             <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6 space-y-4 md:space-y-6 w-full max-w-full">
               {/* Customer Info */}
-              <Card className="animate-in fade-in slide-in-from-bottom-2 duration-300 w-full max-w-full border-border/50 shadow-sm">
+              <Card className="animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out w-full max-w-full border-border/50 shadow-sm hover:shadow-md transition-all duration-300">
                 <CardContent className="p-4 space-y-2 w-full max-w-full overflow-hidden">
                   <div className="flex items-center gap-2">
                     <Mail className="w-4 h-4 text-muted-foreground flex-shrink-0" />
@@ -1881,7 +1939,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
               </Card>
 
               {/* Conversation Thread */}
-              <Card className="animate-in fade-in slide-in-from-bottom-2 duration-300 w-full max-w-full border-border/50 shadow-sm" style={{ animationDelay: '100ms' }}>
+              <Card className="animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out w-full max-w-full border-border/50 shadow-sm hover:shadow-md transition-all duration-300" style={{ animationDelay: '100ms' }}>
                 <CardContent className="p-4 w-full max-w-full overflow-hidden">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="font-semibold flex items-center gap-2">
@@ -1892,12 +1950,12 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                       variant="ghost"
                       size="sm"
                       onClick={() => setConversationMinimized(!conversationMinimized)}
-                      className="h-8 w-8 p-0 transition-all duration-200 hover:scale-110 hover:bg-muted flex-shrink-0"
+                      className="h-8 w-8 p-0 transition-all duration-300 ease-out hover:scale-110 hover:bg-muted hover:shadow-sm flex-shrink-0"
                     >
                       {conversationMinimized ? (
-                        <ChevronDown className="w-4 h-4 transition-transform duration-200" />
+                        <ChevronDown className="w-4 h-4 transition-transform duration-300 ease-out" />
                       ) : (
-                        <ChevronUp className="w-4 h-4 transition-transform duration-200" />
+                        <ChevronUp className="w-4 h-4 transition-transform duration-300 ease-out" />
                       )}
                     </Button>
                   </div>
@@ -1921,7 +1979,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                           return (
                           <div 
                             key={key} 
-                            className="rounded-lg border border-border/50 bg-background/60 shadow-sm p-4 transition-all duration-200 hover:bg-muted/40 hover:shadow-md animate-in fade-in slide-in-from-left-2 w-full max-w-full overflow-hidden"
+                            className="rounded-lg border border-border/50 bg-background/60 shadow-sm p-4 transition-all duration-300 ease-out hover:bg-muted/40 hover:shadow-lg hover:scale-[1.01] animate-in fade-in slide-in-from-left-4 w-full max-w-full overflow-hidden"
                             style={{ animationDelay: `${idx * 50}ms` }}
                           >
                             <div className="flex items-start gap-3 w-full max-w-full">
@@ -1972,14 +2030,14 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
               </Card>
 
               {/* Internal Notes */}
-              <Card className="animate-in fade-in slide-in-from-bottom-2 duration-300 w-full max-w-full border-border/50 shadow-sm" style={{ animationDelay: '200ms' }}>
+              <Card className="animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out w-full max-w-full border-border/50 shadow-sm hover:shadow-md transition-all duration-300" style={{ animationDelay: '150ms' }}>
                 <CardContent className="p-4 w-full max-w-full overflow-hidden">
                   <h3 className="font-semibold mb-4">Internal Notes</h3>
                   <div className="space-y-3 mb-4 w-full max-w-full overflow-hidden">
                     {notes.map((note, idx) => (
                       <div 
                         key={note.id} 
-                        className="border-l-2 border-primary pl-4 py-2 bg-muted/50 rounded transition-all duration-200 hover:bg-muted/70 hover:shadow-sm animate-in fade-in slide-in-from-left-2 w-full max-w-full overflow-hidden"
+                        className="border-l-2 border-primary pl-4 py-2 bg-muted/50 rounded transition-all duration-300 ease-out hover:bg-muted/70 hover:shadow-md hover:scale-[1.01] animate-in fade-in slide-in-from-left-4 w-full max-w-full overflow-hidden"
                         style={{ animationDelay: `${idx * 50}ms` }}
                       >
                         <div className="flex items-center justify-between mb-1">
@@ -2054,7 +2112,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
               </Card>
 
               {/* Reply Box */}
-              <Card className="animate-in fade-in slide-in-from-bottom-2 duration-300 w-full max-w-full border-border/50 shadow-sm" style={{ animationDelay: '300ms' }}>
+              <Card className="animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out w-full max-w-full border-border/50 shadow-sm hover:shadow-md transition-all duration-300" style={{ animationDelay: '200ms' }}>
                 <CardContent className="p-4 w-full max-w-full overflow-hidden">
                   <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                     <h3 className="font-semibold text-sm">Reply</h3>
@@ -2189,12 +2247,12 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                       setReplyText(e.target.value)
                       handleTyping()
                     }}
-                    className="min-h-32 mb-3 text-sm w-full max-w-full resize-none break-words overflow-x-hidden"
+                    className="min-h-32 mb-3 text-sm w-full max-w-full resize-none break-words overflow-x-hidden transition-all duration-300 ease-out focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
                   />
                   <Button 
                     onClick={handleSendReply} 
                     disabled={!replyText.trim() || sendingReply}
-                    className="h-8 text-xs"
+                    className="h-8 text-xs transition-all duration-300 ease-out hover:scale-105 hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {sendingReply ? (
                       <>
@@ -2210,13 +2268,13 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
             </div>
           </div>
         ) : (
-          <div className="flex items-center justify-center h-full px-6 md:pl-48 py-10 w-full">
-            <div className="text-center md:text-left space-y-4 max-w-md animate-in fade-in duration-500">
-              <div className="w-16 h-16 bg-muted/50 rounded-full flex items-center justify-center mx-auto md:mx-0 shadow-sm">
+          <div className="flex items-center justify-center h-full px-6 py-10 w-full">
+            <div className="text-center space-y-4 max-w-md animate-in fade-in duration-500">
+              <div className="w-16 h-16 bg-muted/50 rounded-full flex items-center justify-center mx-auto shadow-sm">
                 <Mail className="w-8 h-8 text-muted-foreground" />
               </div>
-              <div>
-                <h2 className="text-xl font-semibold mb-2">Select a ticket</h2>
+              <div className="space-y-2">
+                <h2 className="text-xl font-semibold">Select a ticket</h2>
                 <p className="text-muted-foreground text-sm leading-relaxed">
                   Choose a ticket from the list to view details, manage assignment, and reply.
                 </p>
@@ -2245,6 +2303,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
               onSelectReply={handleQuickReplySelect}
               currentUserId={currentUserId}
               onQuickRepliesChange={fetchQuickReplies}
+              onClose={() => setShowQuickRepliesSidebar(false)}
             />
           </ResizablePanel>
         </>

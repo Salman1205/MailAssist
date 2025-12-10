@@ -54,11 +54,13 @@ export default function Sidebar({ activeView, setActiveView, onLogout, currentUs
             <button
               key={item.id}
               onClick={() => setActiveView(item.id)}
-              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-left font-medium transition-all ${
-                isActive ? "bg-primary text-primary-foreground shadow-sm" : "text-foreground hover:bg-secondary"
+              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-left font-medium transition-all duration-300 ease-out ${
+                isActive 
+                  ? "bg-primary text-primary-foreground shadow-md scale-[1.02]" 
+                  : "text-foreground hover:bg-secondary hover:scale-[1.01] hover:shadow-sm"
               }`}
             >
-              <Icon className="w-5 h-5 flex-shrink-0" />
+              <Icon className="w-5 h-5 flex-shrink-0 transition-transform duration-300 ease-out group-hover:scale-110" />
               <span className="text-sm">{item.label}</span>
             </button>
           )
