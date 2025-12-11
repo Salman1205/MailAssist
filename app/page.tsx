@@ -55,6 +55,7 @@ export default function Page() {
   const [hideSyncToast, setHideSyncToast] = useState(false)
   const [syncContinueCount, setSyncContinueCount] = useState(0) // Safety counter
   const LOCAL_STORAGE_KEY = "gmail_connected"
+  const [loggingOut, setLoggingOut] = useState(false)
 
   useEffect(() => {
     checkAuthStatus()
@@ -413,6 +414,7 @@ export default function Page() {
   }
 
   const handleLogout = async () => {
+    setLoggingOut(true)
     try {
       await fetch("/api/auth/logout", { method: "POST" })
     } finally {
@@ -429,6 +431,8 @@ export default function Page() {
       setSelectedEmail(null)
       setUserProfile(null)
       setDraftsVersion((v) => v + 1)
+      // Keep the logging overlay visible briefly to show feedback
+      setTimeout(() => setLoggingOut(false), 600)
     }
   }
 
@@ -633,6 +637,19 @@ export default function Page() {
           </main>
         </div>
       </div>
+
+      {loggingOut && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-3 animate-in fade-in duration-300">
+            <div className="flex gap-1.5">
+              <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+              <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+              <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+            </div>
+            <p className="text-sm text-muted-foreground">Logging you out...</p>
+          </div>
+        </div>
+      )}
 
       {showSyncToast && (
         <SyncToast
