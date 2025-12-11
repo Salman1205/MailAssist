@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from "next/server"
 import { listKnowledge, createKnowledge } from "@/lib/knowledge"
 import { checkPermission } from "@/lib/permissions"
-import { getCurrentUserIdFromRequest } from "@/lib/session"
+import { getCurrentUserIdFromRequest, getSessionUserEmailFromRequest } from "@/lib/session"
 
 export async function GET(request: NextRequest) {
   const url = new URL(request.url)
   const includeAll = url.searchParams.get("all") === "1"
+  const userEmail = getSessionUserEmailFromRequest(request as any)
+  if (!userEmail) return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
 
   if (!includeAll) {
-    const items = await listKnowledge(false)
+    const items = await listKnowledge(userEmail, false)
     return NextResponse.json({ items })
   }
 
@@ -20,14 +22,15 @@ export async function GET(request: NextRequest) {
   const allowed = adminCheck.allowed || managerCheck.allowed
   if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
 
-  const items = await listKnowledge(true)
+  const items = await listKnowledge(userEmail, true)
   return NextResponse.json({ items })
 }
 
 export async function POST(request: NextRequest) {
   try {
     const userId = getCurrentUserIdFromRequest(request as any)
-    if (!userId) return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
+    const userEmail = getSessionUserEmailFromRequest(request as any)
+    if (!userId || !userEmail) return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
 
     const adminCheck = await checkPermission(userId, "admin")
     const managerCheck = await checkPermission(userId, "manager")
@@ -42,6 +45,8 @@ export async function POST(request: NextRequest) {
       tags: Array.isArray(body.tags) ? body.tags : [],
       canParaphrase: !!body.canParaphrase,
       status,
+      userEmail,
+      userId,
     })
     if (!item) return NextResponse.json({ error: "Failed to create item" }, { status: 500 })
     return NextResponse.json({ item })

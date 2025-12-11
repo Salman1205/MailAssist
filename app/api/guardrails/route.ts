@@ -1,17 +1,20 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getGuardrails, upsertGuardrails } from "@/lib/guardrails"
-import { getCurrentUserIdFromRequest } from "@/lib/session"
+import { getCurrentUserIdFromRequest, getSessionUserEmailFromRequest } from "@/lib/session"
 import { checkPermission } from "@/lib/permissions"
 
-export async function GET() {
-  const data = await getGuardrails()
+export async function GET(request: NextRequest) {
+  const userEmail = getSessionUserEmailFromRequest(request as any)
+  if (!userEmail) return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
+  const data = await getGuardrails(userEmail)
   return NextResponse.json({ guardrails: data })
 }
 
 export async function POST(request: NextRequest) {
   try {
     const userId = getCurrentUserIdFromRequest(request as any)
-    if (!userId) return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
+    const userEmail = getSessionUserEmailFromRequest(request as any)
+    if (!userId || !userEmail) return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
 
     const adminCheck = await checkPermission(userId, "admin")
     const managerCheck = await checkPermission(userId, "manager")
@@ -19,7 +22,8 @@ export async function POST(request: NextRequest) {
     if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
 
     const body = await request.json()
-    const publish = !!body.publish && adminCheck.allowed
+    // For now we allow both admin and manager to save live guardrails; no pending flow.
+    const publish = false
 
     const payload = {
       toneStyle: body.toneStyle || "",
@@ -28,7 +32,13 @@ export async function POST(request: NextRequest) {
       topicRules: Array.isArray(body.topicRules) ? body.topicRules : [],
     }
 
-    const saved = await upsertGuardrails(payload, { publish, asAdmin: adminCheck.allowed })
+    const saved = await upsertGuardrails(payload, {
+      publish,
+      // Treat both admin and manager as privileged for live saves (no pending)
+      asAdmin: true,
+      userEmail,
+      userId,
+    })
     if (!saved) return NextResponse.json({ error: "Failed to save" }, { status: 500 })
     return NextResponse.json({ guardrails: saved })
   } catch (error) {

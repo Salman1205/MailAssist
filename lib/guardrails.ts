@@ -20,26 +20,41 @@ export interface Guardrails {
   }
 }
 
-const mapRow = (row: any): Guardrails => ({
-  toneStyle: row.tone_style || "",
-  rules: row.rules || "",
-  bannedWords: row.banned_words || [],
-  topicRules: row.topic_rules || [],
-  updatedAt: row.updated_at,
-  pending: !!row.pending,
-  draft: row.pending
-    ? {
-        toneStyle: row.draft_tone_style || "",
-        rules: row.draft_rules || "",
-        bannedWords: row.draft_banned_words || [],
-        topicRules: row.draft_topic_rules || [],
-      }
-    : undefined,
-})
+const mapRow = (row: any): Guardrails => {
+  const hasDraft =
+    !!row.draft_tone_style ||
+    !!row.draft_rules ||
+    (Array.isArray(row.draft_banned_words) && row.draft_banned_words.length > 0) ||
+    (row.draft_topic_rules && Array.isArray(row.draft_topic_rules) && row.draft_topic_rules.length > 0)
 
-export async function getGuardrails(): Promise<Guardrails | null> {
-  if (!supabase) return null
-  const { data, error } = await supabase.from("guardrails").select("*").limit(1).maybeSingle()
+  const effectivePending = !!(row.pending && hasDraft)
+
+  return {
+    toneStyle: row.tone_style || "",
+    rules: row.rules || "",
+    bannedWords: row.banned_words || [],
+    topicRules: row.topic_rules || [],
+    updatedAt: row.updated_at,
+    pending: effectivePending,
+    draft: effectivePending
+      ? {
+          toneStyle: row.draft_tone_style || "",
+          rules: row.draft_rules || "",
+          bannedWords: row.draft_banned_words || [],
+          topicRules: row.draft_topic_rules || [],
+        }
+      : undefined,
+  }
+}
+
+export async function getGuardrails(userEmail: string | null): Promise<Guardrails | null> {
+  if (!supabase || !userEmail) return null
+  const { data, error } = await supabase
+    .from("guardrails")
+    .select("*")
+    .eq("user_email", userEmail)
+    .limit(1)
+    .maybeSingle()
   if (error || !data) {
     if (error) console.error("Error fetching guardrails:", error)
     return null
@@ -51,19 +66,28 @@ type UpsertOptions = { publish?: boolean; asAdmin?: boolean }
 
 export async function upsertGuardrails(
   input: Guardrails,
-  options: UpsertOptions = {}
+  options: UpsertOptions & { userEmail?: string | null; userId?: string | null } = {}
 ): Promise<Guardrails | null> {
-  if (!supabase) return null
+  if (!supabase || !options.userEmail) return null
+
+  const userEmail = options.userEmail
 
   // If publish, copy draft -> live and clear pending
   if (options.publish) {
-    const { data: existing } = await supabase.from("guardrails").select("*").limit(1).maybeSingle()
+    const { data: existing } = await supabase
+      .from("guardrails")
+      .select("*")
+      .eq("user_email", userEmail)
+      .limit(1)
+      .maybeSingle()
     if (!existing) return null
     const { data, error } = await supabase
       .from("guardrails")
       .upsert(
         {
-          id: 1,
+          id: existing.id,
+          user_email: userEmail,
+          created_by: options.userId || existing.created_by || null,
           tone_style: existing.draft_tone_style || existing.tone_style || "",
           rules: existing.draft_rules || existing.rules || "",
           banned_words: existing.draft_banned_words || existing.banned_words || [],
@@ -88,7 +112,8 @@ export async function upsertGuardrails(
 
   const isAdmin = !!options.asAdmin
   const payload: any = {
-    id: 1,
+    user_email: userEmail,
+    created_by: options.userId || null,
     updated_at: new Date().toISOString(),
   }
 
@@ -112,7 +137,7 @@ export async function upsertGuardrails(
 
   const { data, error } = await supabase
     .from("guardrails")
-    .upsert(payload, { onConflict: "id" })
+    .upsert(payload, { onConflict: "user_email" })
     .select("*")
     .maybeSingle()
 

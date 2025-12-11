@@ -107,9 +107,9 @@ export default function GuardrailsManager() {
       }
       if (!res.ok) throw new Error("Save failed")
       const data = await res.json()
-      setPending(data.guardrails?.pending || false)
-      setHasDraft(!!data.guardrails?.draft)
-      setMessage(publish ? "Guardrails published" : "Guardrails saved (pending admin approval if not admin)")
+        setPending(data.guardrails?.pending || false)
+        setHasDraft(!!data.guardrails?.draft)
+        setMessage("Guardrails saved")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed")
     } finally {
@@ -182,17 +182,23 @@ export default function GuardrailsManager() {
               </div>
             </div>
           ))}
-          <Button variant="outline" size="sm" onClick={addTopicRule} className="transition-all hover:bg-accent hover:text-accent-foreground">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={addTopicRule}
+            className="transition-all duration-150 hover:-translate-y-0.5 hover:shadow-sm hover:bg-accent hover:text-accent-foreground"
+          >
             Add topic rule
           </Button>
         </div>
 
         <div className="flex gap-2 items-center">
-          <Button onClick={() => handleSave(false)} disabled={saving}>
+          <Button
+            onClick={() => handleSave(false)}
+            disabled={saving}
+            className="transition-transform duration-150 hover:-translate-y-0.5 hover:shadow-sm"
+          >
             {saving ? "Saving..." : "Save (submit)"}
-          </Button>
-          <Button variant="outline" onClick={() => handleSave(true)} disabled={saving} className="transition-all hover:bg-accent hover:text-accent-foreground">
-            {saving ? "..." : "Publish (admin)"}
           </Button>
           {loading && <div className="text-sm text-muted-foreground">Loading...</div>}
         </div>

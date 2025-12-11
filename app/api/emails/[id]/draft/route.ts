@@ -9,7 +9,7 @@ import { getSentEmails, storeDraft, loadStoredEmails } from '@/lib/storage';
 import { generateDraftReply } from '@/lib/ai-draft';
 import { listKnowledge } from '@/lib/knowledge';
 import { getGuardrails } from '@/lib/guardrails';
-import { getCurrentUserIdFromRequest } from '@/lib/session';
+import { getCurrentUserIdFromRequest, getSessionUserEmailFromRequest } from '@/lib/session';
 
 type RouteContext =
   | { params: { id: string } }
@@ -35,6 +35,13 @@ export async function POST(
     }
 
     const groqApiKey = process.env.GROQ_API_KEY;
+    const userEmail = getSessionUserEmailFromRequest(request as any);
+    if (!userEmail) {
+      return NextResponse.json(
+        { error: 'Not authenticated' },
+        { status: 401 }
+      );
+    }
 
     if (!groqApiKey) {
       return NextResponse.json(
@@ -116,8 +123,11 @@ export async function POST(
       console.warn('[Draft] Could not load conversation thread for context:', threadError);
     }
 
-    // Load knowledge base and guardrails
-    const [knowledgeItems, guardrails] = await Promise.all([listKnowledge(), getGuardrails()])
+    // Load knowledge base and guardrails (scoped to current email account)
+    const [knowledgeItems, guardrails] = await Promise.all([
+      listKnowledge(userEmail),
+      getGuardrails(userEmail),
+    ])
 
     // Generate draft reply
     let draft: string;

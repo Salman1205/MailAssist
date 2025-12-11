@@ -24,9 +24,13 @@ const mapRow = (row: any): KnowledgeItem => ({
   version: row.version || 1,
 })
 
-export async function listKnowledge(includeAll = false): Promise<KnowledgeItem[]> {
-  if (!supabase) return []
-  let query = supabase.from("knowledge_items").select("*").order("created_at", { ascending: false })
+export async function listKnowledge(userEmail: string | null, includeAll = false): Promise<KnowledgeItem[]> {
+  if (!supabase || !userEmail) return []
+  let query = supabase
+    .from("knowledge_items")
+    .select("*")
+    .eq("user_email", userEmail)
+    .order("created_at", { ascending: false })
   if (!includeAll) {
     query = query.eq("status", "published")
   }
@@ -38,8 +42,18 @@ export async function listKnowledge(includeAll = false): Promise<KnowledgeItem[]
   return data.map(mapRow)
 }
 
-export async function createKnowledge(input: { title: string; body: string; tags: string[]; canParaphrase: boolean; status?: "published" | "pending" }) {
-  if (!supabase) return null
+export async function createKnowledge(
+  input: {
+    title: string
+    body: string
+    tags: string[]
+    canParaphrase: boolean
+    status?: "published" | "pending"
+    userEmail: string
+    userId?: string | null
+  }
+) {
+  if (!supabase || !input.userEmail) return null
   const { data, error } = await supabase
     .from("knowledge_items")
     .insert({
@@ -49,6 +63,8 @@ export async function createKnowledge(input: { title: string; body: string; tags
       can_paraphrase: input.canParaphrase,
       status: input.status || "published",
       version: 1,
+      user_email: input.userEmail,
+      created_by: input.userId || null,
     })
     .select("*")
     .maybeSingle()
@@ -61,12 +77,25 @@ export async function createKnowledge(input: { title: string; body: string; tags
 
 export async function updateKnowledge(
   id: string,
-  input: { title?: string; body?: string; tags?: string[]; canParaphrase?: boolean; status?: "published" | "pending"; bumpVersion?: boolean }
+  input: {
+    title?: string
+    body?: string
+    tags?: string[]
+    canParaphrase?: boolean
+    status?: "published" | "pending"
+    bumpVersion?: boolean
+    userEmail: string
+  }
 ) {
-  if (!supabase) return null
+  if (!supabase || !input.userEmail) return null
   let versionBump = 0
   if (input.bumpVersion) {
-    const { data: existing } = await supabase.from("knowledge_items").select("version").eq("id", id).maybeSingle()
+    const { data: existing } = await supabase
+      .from("knowledge_items")
+      .select("version")
+      .eq("id", id)
+      .eq("user_email", input.userEmail)
+      .maybeSingle()
     const currentVersion = existing?.version || 1
     versionBump = currentVersion + 1
   }
@@ -82,6 +111,7 @@ export async function updateKnowledge(
     .from("knowledge_items")
     .update(payload)
     .eq("id", id)
+    .eq("user_email", input.userEmail)
     .select("*")
     .maybeSingle()
   if (error || !data) {
@@ -91,9 +121,9 @@ export async function updateKnowledge(
   return mapRow(data)
 }
 
-export async function deleteKnowledge(id: string) {
-  if (!supabase) return false
-  const { error } = await supabase.from("knowledge_items").delete().eq("id", id)
+export async function deleteKnowledge(id: string, userEmail: string | null) {
+  if (!supabase || !userEmail) return false
+  const { error } = await supabase.from("knowledge_items").delete().eq("id", id).eq("user_email", userEmail)
   if (error) {
     console.error("Error deleting knowledge item:", error)
     return false
