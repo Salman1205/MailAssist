@@ -75,7 +75,6 @@ export async function POST(
     const pastEmails = await getSentEmails();
     
     // Optimized debug logging - only load minimal data for stats
-    const userEmail = getSessionUserEmailFromRequest(request as any);
     if (userEmail && supabase) {
       try {
         const { data: stats } = await supabase
