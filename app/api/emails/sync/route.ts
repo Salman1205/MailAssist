@@ -6,7 +6,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getValidTokens } from '@/lib/token-refresh';
 import { fetchSentEmails } from '@/lib/gmail';
-import { loadStoredEmails, storeSentEmail, loadSyncState, saveSyncState, saveStoredEmails, SyncState } from '@/lib/storage';
+import { loadStoredEmails, storeSentEmail, loadSyncState, saveSyncState, saveStoredEmails, SyncState, getCurrentUserEmail } from '@/lib/storage';
+import { supabase } from '@/lib/supabase';
 import { createEmailContext } from '@/lib/similarity';
 
 // Don't use in-memory cache on Vercel (serverless instances don't share memory)
@@ -46,16 +47,35 @@ export async function POST(request: NextRequest) {
     // Fetch sent emails
     const sentEmails = await fetchSentEmails(tokens, maxResults);
     
-    // Get already stored emails to avoid duplicates
-    const storedEmails = await loadStoredEmails();
+    // OPTIMIZED: Only check for emails with embeddings using a lightweight query
+    // Instead of loading all emails, just get IDs that have embeddings
+    const userEmail = await getCurrentUserEmail();
+    let emailsWithEmbeddings = new Set<string>();
     
-    // Only filter out emails that already have embeddings (skip re-embedding)
-    // Emails without embeddings will be processed
-    const emailsWithEmbeddings = new Set(
-      storedEmails
-        .filter(e => e.embedding && e.embedding.length > 0)
-        .map(e => e.id)
-    );
+    if (supabase && userEmail) {
+      try {
+        // Only fetch IDs that have embeddings (much lighter query)
+        const { data: existingEmails } = await supabase
+          .from('emails')
+          .select('id')
+          .eq('is_sent', true)
+          .eq('user_email', userEmail)
+          .not('embedding', 'is', null); // Has embedding
+        
+        if (existingEmails) {
+          emailsWithEmbeddings = new Set(existingEmails.map((e: any) => e.id));
+        }
+      } catch (error) {
+        console.warn('[Sync] Error checking existing emails, will check duplicates later:', error);
+        // Fallback: load stored emails if lightweight query fails
+        const storedEmails = await loadStoredEmails();
+        emailsWithEmbeddings = new Set(
+          storedEmails
+            .filter(e => e.embedding && e.embedding.length > 0)
+            .map(e => e.id)
+        );
+      }
+    }
 
     // Filter out only emails that already have embeddings
     const newEmails = sentEmails.filter(e => !emailsWithEmbeddings.has(e.id));
@@ -208,17 +228,8 @@ async function processEmailsBatch(emails: any[], startedAt: number): Promise<{ p
               isReply: isReply,
             };
             
-            // Save to database (using same logic as storeSentEmail)
-            const storedEmails = await loadStoredEmails();
-            const existing = storedEmails.find((e) => e.id === email.id);
-            
-            if (existing) {
-              Object.assign(existing, storedEmail);
-            } else {
-              storedEmails.push(storedEmail);
-            }
-            
-            await saveStoredEmails(storedEmails);
+            // Save to database using upsert (more efficient than loading all emails)
+            await saveStoredEmails([storedEmail]);
             processed++;
           } catch (saveError) {
             errors++;
@@ -356,12 +367,45 @@ async function processEmailsInBackground(emails: any[], startedAt: number) {
  */
 export async function GET() {
   try {
-    const storedEmails = await loadStoredEmails();
+    const userEmail = await getCurrentUserEmail();
     
-    // Count ALL sent emails with embeddings (not just replies)
-    const allSentWithEmbeddings = storedEmails.filter(e => e.isSent && e.embedding.length > 0);
-    // Also count replies separately for backward compatibility
-    const repliesWithEmbeddings = storedEmails.filter(e => e.isSent && e.isReply && e.embedding.length > 0);
+    // OPTIMIZED: Use lightweight count query instead of loading all emails
+    let allSentWithEmbeddings = 0;
+    let repliesWithEmbeddings = 0;
+    
+    if (supabase && userEmail) {
+      try {
+        // Count all sent emails with embeddings
+        const { count: allCount } = await supabase
+          .from('emails')
+          .select('*', { count: 'exact', head: true })
+          .eq('is_sent', true)
+          .eq('user_email', userEmail)
+          .not('embedding', 'is', null);
+        allSentWithEmbeddings = allCount || 0;
+        
+        // Count replies with embeddings
+        const { count: repliesCount } = await supabase
+          .from('emails')
+          .select('*', { count: 'exact', head: true })
+          .eq('is_sent', true)
+          .eq('is_reply', true)
+          .eq('user_email', userEmail)
+          .not('embedding', 'is', null);
+        repliesWithEmbeddings = repliesCount || 0;
+      } catch (error) {
+        console.warn('[Sync] Error counting emails with embeddings, using fallback:', error);
+        // Fallback to loading all emails if count fails
+        const storedEmails = await loadStoredEmails();
+        allSentWithEmbeddings = storedEmails.filter(e => e.isSent && e.embedding.length > 0).length;
+        repliesWithEmbeddings = storedEmails.filter(e => e.isSent && e.isReply && e.embedding.length > 0).length;
+      }
+    } else {
+      // Fallback if no supabase or userEmail
+      const storedEmails = await loadStoredEmails();
+      allSentWithEmbeddings = storedEmails.filter(e => e.isSent && e.embedding.length > 0).length;
+      repliesWithEmbeddings = storedEmails.filter(e => e.isSent && e.isReply && e.embedding.length > 0).length;
+    }
     
     const syncState = await getSyncState();
 
@@ -376,12 +420,43 @@ export async function GET() {
     // When not running, use the actual stored count
     const actualProcessed = syncState.status === 'running' 
       ? (syncState.processed ?? 0)
-      : allSentWithEmbeddings.length;
+      : allSentWithEmbeddings;
+
+    // Get total stored count if needed for lastSync calculation
+    let totalStored = 0;
+    let lastSync: number | null = null;
+    
+    if (supabase && userEmail) {
+      try {
+        const { count: totalCount } = await supabase
+          .from('emails')
+          .select('*', { count: 'exact', head: true })
+          .eq('is_sent', true)
+          .eq('user_email', userEmail);
+        totalStored = totalCount || 0;
+        
+        // Get most recent email date for lastSync
+        const { data: recentEmail } = await supabase
+          .from('emails')
+          .select('date')
+          .eq('is_sent', true)
+          .eq('user_email', userEmail)
+          .order('date', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        
+        if (recentEmail?.date) {
+          lastSync = new Date(recentEmail.date).getTime();
+        }
+      } catch (error) {
+        console.warn('[Sync] Error getting total count:', error);
+      }
+    }
 
     return NextResponse.json({
-      totalStored: storedEmails.length,
-      sentWithEmbeddings: allSentWithEmbeddings.length, // All sent emails with embeddings
-      completedReplies: repliesWithEmbeddings.length, // Replies with embeddings (for compatibility)
+      totalStored,
+      sentWithEmbeddings: allSentWithEmbeddings, // All sent emails with embeddings
+      completedReplies: repliesWithEmbeddings, // Replies with embeddings (for compatibility)
       pendingReplies: pendingFromJob,
       processing: syncState.status === 'running',
       queued: syncState.queued,
@@ -389,9 +464,7 @@ export async function GET() {
       errors: syncState.errors,
       startedAt: syncState.startedAt,
       finishedAt: syncState.finishedAt,
-      lastSync: storedEmails.length > 0 
-        ? Math.max(...storedEmails.map(e => new Date(e.date).getTime()))
-        : null
+      lastSync
     });
   } catch (error) {
     console.error('Error getting sync status:', error);

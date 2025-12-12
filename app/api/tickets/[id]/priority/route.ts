@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { updateTicketPriority } from '@/lib/tickets';
 import { getCurrentUserEmail } from '@/lib/storage';
 import { getCurrentUserIdFromRequest, canReassignTickets } from '@/lib/permissions';
+import { isValidUUID, isValidTicketPriority } from '@/lib/validation';
 
 type RouteContext =
   | { params: { id: string } }
@@ -19,9 +20,9 @@ export async function PATCH(
     const paramsData = await Promise.resolve((context as any).params);
     const ticketId = paramsData?.id;
 
-    if (!ticketId) {
+    if (!ticketId || !isValidUUID(ticketId)) {
       return NextResponse.json(
-        { error: 'Missing ticket ID' },
+        { error: 'Invalid or missing ticket ID' },
         { status: 400 }
       );
     }
@@ -74,7 +75,7 @@ export async function PATCH(
     const body = await request.json();
     const { priority } = body;
 
-    if (!priority || !['low', 'medium', 'high', 'urgent'].includes(priority)) {
+    if (!isValidTicketPriority(priority)) {
       return NextResponse.json(
         { error: 'Invalid priority. Must be: low, medium, high, or urgent' },
         { status: 400 }

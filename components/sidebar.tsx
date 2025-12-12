@@ -13,6 +13,7 @@ export type SidebarView =
   | "tickets"
   | "ai-settings"
   | "quick-replies"
+  | "analytics"
 
 interface SidebarProps {
   activeView: SidebarView
@@ -38,6 +39,10 @@ const ADMIN_NAV_ITEMS = [
 
 const AI_NAV_ITEMS = [
   { id: "ai-settings", label: "AI Customization", icon: SparklesIcon },
+] as const
+
+const ANALYTICS_NAV_ITEMS = [
+  { id: "analytics", label: "Analytics", icon: AnalyticsIcon },
 ] as const
 
 export default function Sidebar({ activeView, setActiveView, onLogout, currentUser }: SidebarProps) {
@@ -93,6 +98,23 @@ export default function Sidebar({ activeView, setActiveView, onLogout, currentUs
           <>
             <div className="h-px bg-border my-2" />
             {AI_NAV_ITEMS.map((item) => {
+              const isActive = activeView === item.id
+              const Icon = item.icon
+
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setActiveView(item.id)}
+                  className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-left font-medium transition-all ${
+                    isActive ? "bg-primary text-primary-foreground shadow-sm" : "text-foreground hover:bg-secondary"
+                  }`}
+                >
+                  <Icon className="w-5 h-5 flex-shrink-0" />
+                  <span className="text-sm">{item.label}</span>
+                </button>
+              )
+            })}
+            {ANALYTICS_NAV_ITEMS.map((item) => {
               const isActive = activeView === item.id
               const Icon = item.icon
 
@@ -214,6 +236,16 @@ function QuickRepliesIcon(props: React.SVGProps<SVGSVGElement>) {
       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
       <path d="M8 10h8" />
       <path d="M8 14h6" />
+    </svg>
+  )
+}
+
+function AnalyticsIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" {...props}>
+      <line x1="18" y1="20" x2="18" y2="10" />
+      <line x1="12" y1="20" x2="12" y2="4" />
+      <line x1="6" y1="20" x2="6" y2="14" />
     </svg>
   )
 }

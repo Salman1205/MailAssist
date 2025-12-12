@@ -9,6 +9,7 @@ import { assignTicket } from '@/lib/tickets';
 import { getCurrentUserIdFromRequest } from '@/lib/permissions';
 import { canReassignTickets } from '@/lib/permissions';
 import { getCurrentUserEmail } from '@/lib/storage';
+import { isValidUUID } from '@/lib/validation';
 
 type RouteContext =
   | { params: { id: string } }
@@ -22,9 +23,9 @@ export async function PATCH(
     const paramsData = await Promise.resolve((context as any).params);
     const ticketId = paramsData?.id;
 
-    if (!ticketId) {
+    if (!ticketId || !isValidUUID(ticketId)) {
       return NextResponse.json(
-        { error: 'Missing ticket ID' },
+        { error: 'Invalid or missing ticket ID' },
         { status: 400 }
       );
     }
@@ -73,9 +74,7 @@ export async function PATCH(
 
     // Validate assigneeUserId if provided
     if (assigneeUserId !== null && assigneeUserId !== undefined) {
-      // Basic UUID validation
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-      if (!uuidRegex.test(assigneeUserId)) {
+      if (!isValidUUID(assigneeUserId)) {
         return NextResponse.json(
           { error: 'Invalid assignee user ID format' },
           { status: 400 }

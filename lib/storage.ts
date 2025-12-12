@@ -88,8 +88,13 @@ export const defaultSyncState: SyncState = {
 
 /**
  * Load stored emails
+ * OPTIMIZED: Supports filtering by email ID or limit for better performance
  */
-export async function loadStoredEmails(): Promise<StoredEmail[]> {
+export async function loadStoredEmails(options?: {
+  emailId?: string;
+  limit?: number;
+  includeReceived?: boolean;
+}): Promise<StoredEmail[]> {
   if (!supabase) {
     return [];
   }
@@ -98,12 +103,26 @@ export async function loadStoredEmails(): Promise<StoredEmail[]> {
   
   let query = supabase
     .from('emails')
-    .select('*')
-    .eq('is_sent', true);
+    .select('*');
+  
+  // If specific email ID requested, use indexed query (much faster)
+  if (options?.emailId) {
+    query = query.eq('id', options.emailId);
+  } else {
+    // Only sent emails unless includeReceived is true
+    if (!options?.includeReceived) {
+      query = query.eq('is_sent', true);
+    }
+  }
   
   // Only filter by user_email if we have it and column exists
   if (userEmail) {
     query = query.eq('user_email', userEmail);
+  }
+  
+  // Apply limit if specified (for pagination/caching)
+  if (options?.limit) {
+    query = query.limit(options.limit);
   }
   
   const { data, error } = await query.order('date', { ascending: false });
@@ -130,17 +149,64 @@ export async function loadStoredEmails(): Promise<StoredEmail[]> {
 }
 
 /**
+ * Get a single email by ID (optimized)
+ */
+export async function getStoredEmailById(emailId: string): Promise<StoredEmail | null> {
+  if (!supabase || !emailId) {
+    return null;
+  }
+
+  const userEmail = await getCurrentUserEmail();
+  
+  let query = supabase
+    .from('emails')
+    .select('*')
+    .eq('id', emailId)
+    .limit(1);
+  
+  if (userEmail) {
+    query = query.eq('user_email', userEmail);
+  }
+  
+  const { data, error } = await query.maybeSingle();
+
+  if (error) {
+    console.error('Error loading email by ID from Supabase:', error);
+    return null;
+  }
+
+  if (!data) {
+    return null;
+  }
+
+  // Map DB columns (snake_case) to StoredEmail (camelCase)
+  return {
+    id: data.id,
+    threadId: data.thread_id ?? undefined,
+    subject: data.subject,
+    from: data.from_address,
+    to: data.to_address,
+    body: data.body,
+    date: data.date,
+    embedding: data.embedding || [],
+    labels: data.labels || [],
+    isSent: data.is_sent,
+    isReply: data.is_reply ?? undefined,
+  };
+}
+
+/**
  * Save emails
  */
 export async function saveStoredEmails(emails: StoredEmail[], retries = 1) {
-  if (!supabase) {
+  if (!supabase || emails.length === 0) {
     return;
   }
 
   const userEmail = await getCurrentUserEmail();
 
-  // Upsert each email by id
-  for (const email of emails) {
+  // OPTIMIZED: Batch upsert all emails at once instead of individual operations
+  const payloads = emails.map((email) => {
     const payload: any = {
       id: email.id,
       thread_id: email.threadId ?? null,
@@ -160,12 +226,43 @@ export async function saveStoredEmails(emails: StoredEmail[], retries = 1) {
       payload.user_email = userEmail;
     }
     
-    const { error } = await supabase
-      .from('emails')
-      .upsert(payload, { onConflict: 'id' });
+    return payload;
+  });
 
-    if (error) {
-      console.error('Error saving stored email to Supabase:', error, 'for email id', email.id);
+  // Batch upsert (much faster than individual upserts)
+  const { error } = await supabase
+    .from('emails')
+    .upsert(payloads, { onConflict: 'id' });
+
+  if (error) {
+    console.error('Error batch saving emails to Supabase:', error);
+    // Fallback: try individual upserts if batch fails
+    if (retries > 0) {
+      console.warn('Batch upsert failed, retrying individually...');
+      for (const email of emails) {
+        const payload: any = {
+          id: email.id,
+          thread_id: email.threadId ?? null,
+          subject: email.subject,
+          from_address: email.from,
+          to_address: email.to,
+          body: email.body,
+          date: email.date,
+          embedding: email.embedding,
+          labels: email.labels ?? [],
+          is_sent: email.isSent,
+          is_reply: email.isReply ?? null,
+        };
+        if (userEmail) {
+          payload.user_email = userEmail;
+        }
+        const { error: individualError } = await supabase
+          .from('emails')
+          .upsert(payload, { onConflict: 'id' });
+        if (individualError) {
+          console.error('Error saving email individually:', individualError, 'for email id', email.id);
+        }
+      }
     }
   }
 }
@@ -235,6 +332,33 @@ export async function saveDrafts(drafts: StoredDraft[], userId?: string | null) 
   }
 }
 
+export async function deleteDraft(draftId: string, userId?: string | null) {
+  if (!supabase) {
+    return;
+  }
+
+  const userEmail = await getCurrentUserEmail();
+  if (!userEmail) {
+    console.error('Cannot delete draft: no user email');
+    return;
+  }
+
+  let query = supabase.from('drafts').delete().eq('id', draftId);
+  
+  // Filter by created_by (user ID) if provided, otherwise fall back to user_email
+  if (userId) {
+    query = query.eq('created_by', userId);
+  } else {
+    query = query.eq('user_email', userEmail);
+  }
+
+  const { error } = await query;
+  if (error) {
+    console.error('Error deleting draft from Supabase:', error);
+    throw error;
+  }
+}
+
 /**
  * Store a sent email with its embedding
  * Optimized to handle errors gracefully
@@ -289,9 +413,8 @@ export async function storeSentEmail(email: {
     }
   }
   
-  // Load stored emails for the rest of the logic
-  const storedEmails = await loadStoredEmails();
-  const existing = storedEmails.find((e) => e.id === email.id);
+  // Check if email exists using optimized query
+  const existing = await getStoredEmailById(email.id);
   
   // Determine if this is a reply (check email.isReply or infer from subject)
   const isReply = email.isReply ?? /^(re|fwd?):\s*/i.test(email.subject || '');

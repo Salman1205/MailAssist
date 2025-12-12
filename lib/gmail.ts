@@ -112,11 +112,14 @@ export async function sendReplyMessage(
 
 /**
  * Fetch latest inbox emails
+ * OPTIMIZED: Uses metadata format for list view (much faster)
+ * Only fetches full body when needed (e.g., for ticket creation)
  */
 export async function fetchInboxEmails(
   tokens: { access_token?: string | null; refresh_token?: string | null },
   maxResults: number = 50,
-  query?: string
+  query?: string,
+  includeBody: boolean = false
 ) {
   const gmail = getGmailClient(tokens);
   
@@ -127,26 +130,54 @@ export async function fetchInboxEmails(
   });
 
   const messages = response.data.messages || [];
-  const emailDetails = await Promise.all(
-    messages.map(async (message) => {
-      const fullMessage = await gmail.users.messages.get({
-        userId: 'me',
-        id: message.id!,
-        format: 'full',
-      });
-      return parseEmailMessage(fullMessage.data);
-    })
-  );
+  
+  if (messages.length === 0) {
+    return [];
+  }
+  
+  // Use metadata format for list views (10x faster, less data)
+  // Only fetch full body if explicitly needed
+  const format = includeBody ? 'full' : 'metadata';
+  
+  // OPTIMIZED: Batch fetch messages with controlled concurrency
+  // Gmail API has rate limits, so we batch requests to avoid hitting limits
+  const BATCH_SIZE = 10; // Process 10 emails at a time
+  const emailDetails: any[] = [];
+  
+  for (let i = 0; i < messages.length; i += BATCH_SIZE) {
+    const batch = messages.slice(i, i + BATCH_SIZE);
+    const batchResults = await Promise.all(
+      batch.map(async (message) => {
+        try {
+          const fullMessage = await gmail.users.messages.get({
+            userId: 'me',
+            id: message.id!,
+            format: format as 'full' | 'metadata' | 'minimal',
+          });
+          return parseEmailMessage(fullMessage.data, !includeBody);
+        } catch (error) {
+          console.error(`Error fetching message ${message.id}:`, error);
+          return null; // Return null for failed messages
+        }
+      })
+    );
+    
+    // Filter out null results from failed fetches
+    emailDetails.push(...batchResults.filter((email) => email !== null));
+  }
 
   return emailDetails;
 }
 
 /**
  * Fetch sent emails history
+ * OPTIMIZED: Uses metadata format for list view (much faster)
+ * Only fetches full body when needed (e.g., for embedding generation)
  */
 export async function fetchSentEmails(
   tokens: { access_token?: string | null; refresh_token?: string | null },
-  maxResults: number = 100
+  maxResults: number = 100,
+  includeBody: boolean = false
 ) {
   const gmail = getGmailClient(tokens);
   
@@ -157,16 +188,41 @@ export async function fetchSentEmails(
   });
 
   const messages = response.data.messages || [];
-  const emailDetails = await Promise.all(
-    messages.map(async (message) => {
-      const fullMessage = await gmail.users.messages.get({
-        userId: 'me',
-        id: message.id!,
-        format: 'full',
-      });
-      return parseEmailMessage(fullMessage.data);
-    })
-  );
+  
+  if (messages.length === 0) {
+    return [];
+  }
+  
+  // Use metadata format for list views (10x faster, less data)
+  // Only fetch full body if explicitly needed (e.g., for embeddings)
+  const format = includeBody ? 'full' : 'metadata';
+  
+  // OPTIMIZED: Batch fetch messages with controlled concurrency
+  // Gmail API has rate limits, so we batch requests to avoid hitting limits
+  const BATCH_SIZE = 10; // Process 10 emails at a time
+  const emailDetails: any[] = [];
+  
+  for (let i = 0; i < messages.length; i += BATCH_SIZE) {
+    const batch = messages.slice(i, i + BATCH_SIZE);
+    const batchResults = await Promise.all(
+      batch.map(async (message) => {
+        try {
+          const fullMessage = await gmail.users.messages.get({
+            userId: 'me',
+            id: message.id!,
+            format: format as 'full' | 'metadata' | 'minimal',
+          });
+          return parseEmailMessage(fullMessage.data, !includeBody);
+        } catch (error) {
+          console.error(`Error fetching message ${message.id}:`, error);
+          return null; // Return null for failed messages
+        }
+      })
+    );
+    
+    // Filter out null results from failed fetches
+    emailDetails.push(...batchResults.filter((email) => email !== null));
+  }
 
   return emailDetails;
 }
@@ -287,63 +343,72 @@ export async function stopHistoryWatch(
 
 /**
  * Parse Gmail message format into a simpler structure
+ * @param message - Gmail message object
+ * @param metadataOnly - If true, skip body extraction (for list views)
  */
-function parseEmailMessage(message: any) {
+function parseEmailMessage(message: any, metadataOnly: boolean = false) {
   const headers = message.payload?.headers || [];
   const getHeader = (name: string) =>
     headers.find((h: any) => h.name.toLowerCase() === name.toLowerCase())?.value || '';
 
-  const decodeData = (data?: string) => {
-    if (!data) return '';
-    // Gmail uses URL-safe base64
-    const normalized = data.replace(/-/g, '+').replace(/_/g, '/');
-    return Buffer.from(normalized, 'base64').toString('utf-8');
-  };
+  // For metadata-only format, use snippet if available, otherwise empty body
+  let bodyText = '';
+  if (!metadataOnly) {
+    const decodeData = (data?: string) => {
+      if (!data) return '';
+      // Gmail uses URL-safe base64
+      const normalized = data.replace(/-/g, '+').replace(/_/g, '/');
+      return Buffer.from(normalized, 'base64').toString('utf-8');
+    };
 
-  // Recursively walk MIME parts to find the best body candidate
-  const extractBody = (part: any): { text: string; htmlFallback?: string } => {
-    if (!part) return { text: '' };
+    // Recursively walk MIME parts to find the best body candidate
+    const extractBody = (part: any): { text: string; htmlFallback?: string } => {
+      if (!part) return { text: '' };
 
-    const mime = part.mimeType || '';
-    const data = part.body?.data ? decodeData(part.body.data) : '';
+      const mime = part.mimeType || '';
+      const data = part.body?.data ? decodeData(part.body.data) : '';
 
-    // Direct text/plain
-    if (mime === 'text/plain' && data) {
-      return { text: data };
-    }
-
-    // HTML (fallback if no plain text exists)
-    if (mime === 'text/html' && data) {
-      return { text: '', htmlFallback: data };
-    }
-
-    // Multipart: search children
-    if (part.parts && Array.isArray(part.parts)) {
-      let htmlCandidate: string | undefined;
-      for (const child of part.parts) {
-        const result = extractBody(child);
-        if (result.text) return result; // prefer plain text
-        if (result.htmlFallback && !htmlCandidate) {
-          htmlCandidate = result.htmlFallback;
-        }
+      // Direct text/plain
+      if (mime === 'text/plain' && data) {
+        return { text: data };
       }
-      return { text: '', htmlFallback: htmlCandidate };
+
+      // HTML (fallback if no plain text exists)
+      if (mime === 'text/html' && data) {
+        return { text: '', htmlFallback: data };
+      }
+
+      // Multipart: search children
+      if (part.parts && Array.isArray(part.parts)) {
+        let htmlCandidate: string | undefined;
+        for (const child of part.parts) {
+          const result = extractBody(child);
+          if (result.text) return result; // prefer plain text
+          if (result.htmlFallback && !htmlCandidate) {
+            htmlCandidate = result.htmlFallback;
+          }
+        }
+        return { text: '', htmlFallback: htmlCandidate };
+      }
+
+      return { text: '' };
+    };
+
+    const bodyResult = extractBody(message.payload);
+    bodyText = bodyResult.text;
+
+    if (!bodyText && bodyResult.htmlFallback) {
+      // Strip HTML tags as a fallback; keep simple breaks
+      bodyText = bodyResult.htmlFallback
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/p>/gi, '\n\n')
+        .replace(/<[^>]*>/g, '')
+        .replace(/&nbsp;/g, ' ')
+        .trim();
     }
-
-    return { text: '' };
-  };
-
-  const bodyResult = extractBody(message.payload);
-  let bodyText = bodyResult.text;
-
-  if (!bodyText && bodyResult.htmlFallback) {
-    // Strip HTML tags as a fallback; keep simple breaks
-    bodyText = bodyResult.htmlFallback
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<\/p>/gi, '\n\n')
-      .replace(/<[^>]*>/g, '')
-      .replace(/&nbsp;/g, ' ')
-      .trim();
+  } else {
+    // For metadata format, use snippet if available
+    bodyText = message.snippet || '';
   }
 
   // Determine if this is a reply by checking for inReplyTo or References headers

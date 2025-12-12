@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { listKnowledge, createKnowledge } from "@/lib/knowledge"
 import { checkPermission } from "@/lib/permissions"
 import { getCurrentUserIdFromRequest, getSessionUserEmailFromRequest } from "@/lib/session"
+import { validateTextInput, sanitizeStringArray } from "@/lib/validation"
 
 export async function GET(request: NextRequest) {
   const url = new URL(request.url)
@@ -38,11 +39,30 @@ export async function POST(request: NextRequest) {
     if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
 
     const body = await request.json()
+    
+    // Validate and sanitize title
+    const titleValidation = validateTextInput(body.title, 200, true)
+    if (!titleValidation.valid) {
+      return NextResponse.json({ error: titleValidation.error || "Invalid title" }, { status: 400 })
+    }
+    
+    // Validate and sanitize body
+    const bodyValidation = validateTextInput(body.body, 10000, true)
+    if (!bodyValidation.valid) {
+      return NextResponse.json({ error: bodyValidation.error || "Invalid body" }, { status: 400 })
+    }
+    
+    // Sanitize tags
+    const tags = sanitizeStringArray(Array.isArray(body.tags) ? body.tags : [])
+    if (tags.length > 20) {
+      return NextResponse.json({ error: "Maximum 20 tags allowed" }, { status: 400 })
+    }
+    
     const status = adminCheck.allowed ? "published" : "pending"
     const item = await createKnowledge({
-      title: body.title || "",
-      body: body.body || "",
-      tags: Array.isArray(body.tags) ? body.tags : [],
+      title: titleValidation.sanitized,
+      body: bodyValidation.sanitized,
+      tags,
       canParaphrase: !!body.canParaphrase,
       status,
       userEmail,

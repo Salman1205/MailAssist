@@ -29,9 +29,10 @@ interface TopNavProps {
   currentUser?: { id: string; name: string; role: string } | null
   onLogout?: () => void
   onSwitchUser?: (userId: string) => void
+  onSearch?: (query: string) => void
 }
 
-export default function TopNav({ isConnected, userProfile, currentUser, onLogout, onSwitchUser }: TopNavProps) {
+export default function TopNav({ isConnected, userProfile, currentUser, onLogout, onSwitchUser, onSearch }: TopNavProps) {
   const { resolvedTheme, setTheme } = useTheme()
   const isDark = resolvedTheme === "dark"
   const [users, setUsers] = useState<User[]>([])
@@ -91,13 +92,40 @@ export default function TopNav({ isConnected, userProfile, currentUser, onLogout
     : "ME"
 
   return (
-    <header className="bg-card border-b border-border h-16 flex items-center justify-between px-4 md:px-6">
-      <div className="flex items-center gap-2">
+    <header className="bg-card border-b border-border h-16 flex items-center justify-between px-4 md:px-6 gap-3">
+      <div className="flex items-center gap-2 min-w-0">
         <Logo size="small" />
-        <div className="text-lg font-semibold text-foreground">MailAssist</div>
+        <div className="text-lg font-semibold text-foreground truncate">MailAssist</div>
       </div>
 
-      <div className="flex items-center gap-2 md:gap-4">
+      {/* Global Search */}
+      {isConnected && (
+        <form
+          className="hidden md:flex items-center gap-2 flex-1 max-w-xl"
+          onSubmit={(e) => {
+            e.preventDefault()
+            const form = e.currentTarget
+            const input = form.querySelector<HTMLInputElement>('input[name="global-search"]')
+            if (input && onSearch) {
+              onSearch(input.value.trim())
+            }
+          }}
+        >
+          <input
+            name="global-search"
+            type="search"
+            placeholder="Search tickets, emails, knowledge..."
+            className="w-full h-9 px-3 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/60 transition"
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                (e.target as HTMLInputElement).blur()
+              }
+            }}
+          />
+        </form>
+      )}
+
+      <div className="flex items-center gap-2 md:gap-4 flex-shrink-0">
         {isConnected && (
           <button
             onClick={toggleTheme}

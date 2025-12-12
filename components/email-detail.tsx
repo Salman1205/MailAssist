@@ -10,6 +10,16 @@ interface EmailDetailProps {
   emailId: string
   onDraftGenerated?: () => void
   onBack?: () => void
+  // Optional initial email data for instant display
+  initialEmailData?: {
+    subject?: string
+    from?: string
+    to?: string
+    date?: string
+    snippet?: string
+    body?: string
+    threadId?: string
+  }
 }
 
 interface EmailMessage {
@@ -35,13 +45,26 @@ interface EmailSummary {
   snippet?: string
 }
 
-export default function EmailDetail({ emailId, onDraftGenerated, onBack }: EmailDetailProps) {
+export default function EmailDetail({ emailId, onDraftGenerated, onBack, initialEmailData }: EmailDetailProps) {
   const [threadMessages, setThreadMessages] = useState<EmailMessage[]>([])
-  const [emailSummary, setEmailSummary] = useState<EmailSummary | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [emailSummary, setEmailSummary] = useState<EmailSummary | null>(
+    initialEmailData ? {
+      id: emailId,
+      threadId: initialEmailData.threadId,
+      subject: initialEmailData.subject || '',
+      from: initialEmailData.from || '',
+      to: initialEmailData.to || '',
+      date: initialEmailData.date || '',
+      body: initialEmailData.body || initialEmailData.snippet || '',
+      snippet: initialEmailData.snippet,
+    } : null
+  )
+  const [loading, setLoading] = useState(!initialEmailData) // Don't show loading if we have initial data
+  const [loadingFullContent, setLoadingFullContent] = useState(false)
   const [showDraft, setShowDraft] = useState(false)
   const [draftMinimized, setDraftMinimized] = useState(false)
   const [draftText, setDraftText] = useState("")
+  const [draftId, setDraftId] = useState<string | null>(null)
   const [generating, setGenerating] = useState(false)
   const [sending, setSending] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -64,61 +87,137 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack }: Email
       setShowDraft(false)
       setDraftMinimized(false)
       setDraftText("")
+      setDraftId(null)
       setCopied(false)
       setGenerating(false)
       setError(null)
-      setEmailSummary(null)
-      setThreadMessages([])
+      
+      // Set initial email data immediately if provided
+      if (initialEmailData) {
+        setEmailSummary({
+          id: emailId,
+          threadId: initialEmailData.threadId,
+          subject: initialEmailData.subject || '',
+          from: initialEmailData.from || '',
+          to: initialEmailData.to || '',
+          date: initialEmailData.date || '',
+          body: initialEmailData.body || initialEmailData.snippet || '',
+          snippet: initialEmailData.snippet,
+        })
+        // Show initial message if we have snippet/body
+        if (initialEmailData.snippet || initialEmailData.body) {
+          setThreadMessages([{
+            id: emailId,
+            threadId: initialEmailData.threadId,
+            subject: initialEmailData.subject || '',
+            from: initialEmailData.from || '',
+            to: initialEmailData.to || '',
+            date: initialEmailData.date || '',
+            body: initialEmailData.body || initialEmailData.snippet || '',
+            snippet: initialEmailData.snippet,
+          }])
+        }
+        setLoading(false)
+        setLoadingFullContent(true) // Show subtle indicator that we're loading full content
+      } else {
+        setEmailSummary(null)
+        setThreadMessages([])
+        setLoading(true)
+        setLoadingFullContent(false)
+      }
+      
       fetchThread()
     }
-  }, [emailId])
+  }, [emailId, initialEmailData])
 
   const fetchThread = async () => {
     try {
-      setLoading(true)
+      if (!initialEmailData) {
+        setLoading(true)
+      }
       setError(null)
 
-      // 1) Fetch the individual email to get its threadId
-      const emailResponse = await fetch(`/api/emails/${emailId}`)
-      let threadId = emailId
+      // OPTIMIZED: Fetch email and thread in parallel for faster loading
+      // Use initial threadId if available, otherwise fetch email first
+      const initialThreadId = initialEmailData?.threadId || emailId
 
+      // Fetch both email and thread in parallel
+      const [emailResponse, threadResponse] = await Promise.all([
+        fetch(`/api/emails/${emailId}`).catch(() => ({ ok: false, status: 500 })),
+        fetch(`/api/emails/threads/${encodeURIComponent(initialThreadId)}`).catch(() => ({ ok: false, status: 500 }))
+      ])
+
+      // Process email response
       if (emailResponse.ok) {
-        const emailData = await emailResponse.json()
-        const email: EmailSummary = emailData.email
-        setEmailSummary(email)
-        threadId = email.threadId || email.id
-      } else if (emailResponse.status === 404) {
-        // If the specific message isn't cached or found, we can still try
-        // to load the conversation using the provided id as a thread id.
-        console.warn("Email not found, attempting to load conversation with thread id only")
-      } else {
-        const text = await emailResponse.text().catch(() => "")
-        console.error("Failed to fetch email details", text)
-        setError("Failed to fetch email details")
+        try {
+          const emailData = await emailResponse.json()
+          const email: EmailSummary = emailData.email
+          setEmailSummary(email)
+        } catch (e) {
+          // Ignore JSON parse errors, thread will have the data
+        }
       }
 
-      // 2) Fetch the full thread using threadId
-      const threadResponse = await fetch(`/api/emails/threads/${encodeURIComponent(threadId)}`)
-
+      // Process thread response (this is what we really need)
       if (threadResponse.ok) {
-        const threadData = await threadResponse.json()
-        setThreadMessages(threadData.thread?.messages || [])
-        // Clear any previous transient errors now that we have conversation data
-        setError(null)
-      } else if (threadResponse.status === 404) {
-        setError("Conversation not found")
-        return
+        try {
+          const threadData = await threadResponse.json()
+          const messages = threadData.thread?.messages || []
+          setThreadMessages(messages)
+          setError(null)
+          
+          // Update emailSummary from first message if we don't have it
+          if (messages.length > 0 && !emailSummary) {
+            const firstMessage = messages[0]
+            setEmailSummary({
+              id: firstMessage.id,
+              threadId: firstMessage.threadId,
+              subject: firstMessage.subject,
+              from: firstMessage.from,
+              to: firstMessage.to,
+              date: firstMessage.date,
+              body: firstMessage.body,
+              snippet: firstMessage.snippet,
+            })
+          }
+        } catch (e) {
+          console.error('Error parsing thread data:', e)
+        }
       } else {
-        const text = await threadResponse.text().catch(() => "")
-        console.error("Failed to fetch conversation", text)
-        setError("Failed to fetch conversation")
-        return
+        // If thread fetch failed, try with email's threadId
+        if (emailResponse.ok) {
+          try {
+            const emailData = await emailResponse.json()
+            const email: EmailSummary = emailData.email
+            const threadId = email.threadId || email.id
+            
+            if (threadId !== initialThreadId) {
+              // Retry with correct threadId
+              const retryResponse = await fetch(`/api/emails/threads/${encodeURIComponent(threadId)}`)
+              if (retryResponse.ok) {
+                const threadData = await retryResponse.json()
+                setThreadMessages(threadData.thread?.messages || [])
+                setEmailSummary(email)
+                setError(null)
+              } else {
+                setError("Conversation not found")
+              }
+            } else {
+              setError("Conversation not found")
+            }
+          } catch (e) {
+            setError("Failed to load conversation")
+          }
+        } else {
+          setError("Failed to load email")
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load email')
       console.error('Error fetching email:', err)
     } finally {
       setLoading(false)
+      setLoadingFullContent(false)
     }
   }
 
@@ -139,6 +238,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack }: Email
 
       const data = await response.json()
       setDraftText(data.draft || '')
+      setDraftId(data.draftId || null)
       setShowDraft(true)
       onDraftGenerated?.()
     } catch (err) {
@@ -156,7 +256,31 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack }: Email
   }
 
   const handleRegenerate = async () => {
-    await handleGenerateDraft()
+    if (!emailId) return
+    
+    try {
+      setGenerating(true)
+      setError(null)
+      const response = await fetch(`/api/emails/${emailId}/draft?regenerate=true`, {
+        method: 'POST'
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to regenerate draft')
+      }
+
+      const data = await response.json()
+      setDraftText(data.draft || '')
+      setDraftId(data.draftId || null)
+      setShowDraft(true)
+      onDraftGenerated?.()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to regenerate draft')
+      console.error('Error regenerating draft:', err)
+    } finally {
+      setGenerating(false)
+    }
   }
 
   const handleSendReply = async () => {
@@ -177,7 +301,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack }: Email
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ draftText }),
+        body: JSON.stringify({ draftText, draftId: draftId || null }),
       })
 
       const data = await response.json().catch(() => ({}))
@@ -187,6 +311,13 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack }: Email
       }
 
       setSendSuccess(true)
+      
+      // Clear draft UI after successful send
+      setDraftText("")
+      setDraftId(null)
+      setShowDraft(false)
+      setDraftMinimized(false)
+      
       if (sendResetTimer) {
         clearTimeout(sendResetTimer)
       }
@@ -194,7 +325,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack }: Email
         setTimeout(() => {
           setSendSuccess(false)
           setSendResetTimer(null)
-        }, 3000)
+        }, 5000) // Show success for 5 seconds instead of 3
       )
       toast({
         title: "Reply sent",
@@ -289,35 +420,64 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack }: Email
         </div>
 
         <div className="space-y-2 text-sm flex-1 overflow-y-auto pr-1">
-          {threadMessages.map((msg, index) => (
-            <div
-              key={msg.id}
-              className="pb-3 border-b border-border/50 last:border-b-0 last:pb-0 animate-in fade-in slide-in-from-left-2"
-              style={{ animationDelay: `${index * 30}ms` }}
-            >
-              <div className="flex justify-between items-start gap-3 mb-2">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <div className="text-xs font-medium text-muted-foreground">
-                      {index === 0 ? "Started" : "Message"}
+          {threadMessages.length > 0 ? (
+            threadMessages.map((msg, index) => (
+              <div
+                key={msg.id}
+                className="pb-3 border-b border-border/50 last:border-b-0 last:pb-0 animate-in fade-in slide-in-from-left-2"
+                style={{ animationDelay: `${index * 30}ms` }}
+              >
+                <div className="flex justify-between items-start gap-3 mb-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className="text-xs font-medium text-muted-foreground">
+                        {index === 0 ? "Started" : "Message"}
+                      </div>
+                      <div className="text-xs font-semibold text-foreground truncate">
+                        {msg.from.split("<")[0].trim() || msg.from}
+                      </div>
                     </div>
-                    <div className="text-xs font-semibold text-foreground truncate">
-                      {msg.from.split("<")[0].trim() || msg.from}
+                    <div className="text-xs text-muted-foreground truncate">
+                      To: {msg.to.split("<")[0].trim() || msg.to}
                     </div>
                   </div>
-                  <div className="text-xs text-muted-foreground truncate">
-                    To: {msg.to.split("<")[0].trim() || msg.to}
+                  <div className="text-xs text-muted-foreground flex-shrink-0 whitespace-nowrap">
+                    {formatDate(msg.date)}
                   </div>
                 </div>
-                <div className="text-xs text-muted-foreground flex-shrink-0 whitespace-nowrap">
-                  {formatDate(msg.date)}
+                <div className="text-sm text-foreground whitespace-pre-wrap break-words leading-relaxed">
+                  {msg.body || msg.snippet || "No content"}
                 </div>
               </div>
-              <div className="text-sm text-foreground whitespace-pre-wrap break-words leading-relaxed">
-                {msg.body || msg.snippet || "No content"}
+            ))
+          ) : (
+            // Fallback: show emailSummary if we have it but no thread messages yet
+            emailSummary ? (
+              <div className="pb-3 border-b border-border/50 last:border-b-0">
+                <div className="flex justify-between items-start gap-3 mb-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className="text-xs font-medium text-muted-foreground">Message</div>
+                      <div className="text-xs font-semibold text-foreground truncate">
+                        {emailSummary.from.split("<")[0].trim() || emailSummary.from}
+                      </div>
+                    </div>
+                    <div className="text-xs text-muted-foreground truncate">
+                      To: {emailSummary.to.split("<")[0].trim() || emailSummary.to}
+                    </div>
+                  </div>
+                  <div className="text-xs text-muted-foreground flex-shrink-0 whitespace-nowrap">
+                    {formatDate(emailSummary.date)}
+                  </div>
+                </div>
+                <div className="text-sm text-foreground whitespace-pre-wrap break-words leading-relaxed">
+                  {emailSummary.body || emailSummary.snippet || "Loading content..."}
+                </div>
               </div>
-            </div>
-          ))}
+            ) : (
+              <div className="text-sm text-muted-foreground">Loading content...</div>
+            )
+          )}
         </div>
       </Card>
 
@@ -379,9 +539,13 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack }: Email
                 <Button
                   onClick={handleSendReply}
                   disabled={sending || sendSuccess}
-                  className="rounded-lg h-9 bg-primary text-primary-foreground hover:bg-primary/90 transition-all duration-300 ease-out hover:scale-105 hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                  className={`rounded-lg h-9 transition-all duration-300 ease-out hover:scale-105 hover:shadow-md disabled:cursor-not-allowed text-sm ${
+                    sendSuccess 
+                      ? "bg-green-600 text-white hover:bg-green-600" 
+                      : "bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                  }`}
                 >
-                  {sendSuccess ? "Reply sent" : sending ? "Sending..." : "Send Reply"}
+                  {sendSuccess ? "✓ Reply sent!" : sending ? "Sending..." : "Send Reply"}
                 </Button>
                 <div className="flex gap-2">
                   <Button

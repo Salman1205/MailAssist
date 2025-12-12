@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAllUsers, createUser, UserRole } from '@/lib/users';
 import { requirePermission } from '@/lib/permissions';
 import { getCurrentUserIdFromRequest } from '@/lib/session';
+import { validateTextInput, isValidEmail, isValidUserRole } from '@/lib/validation';
 
 export async function GET(request: NextRequest) {
   try {
@@ -50,24 +51,35 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { name, email, role } = body;
 
-    if (!name || !role) {
+    // Validate name
+    const nameValidation = validateTextInput(name, 100, true);
+    if (!nameValidation.valid) {
       return NextResponse.json(
-        { error: 'Name and role are required' },
+        { error: nameValidation.error || 'Invalid name' },
         { status: 400 }
       );
     }
 
-    if (!['admin', 'manager', 'agent'].includes(role)) {
+    // Validate role
+    if (!isValidUserRole(role)) {
       return NextResponse.json(
         { error: 'Invalid role. Must be admin, manager, or agent' },
         { status: 400 }
       );
     }
 
+    // Validate email if provided
+    if (email && !isValidEmail(email)) {
+      return NextResponse.json(
+        { error: 'Invalid email format' },
+        { status: 400 }
+      );
+    }
+
     const user = await createUser({
-      name,
-      email: email || null,
-      role: role as UserRole,
+      name: nameValidation.sanitized,
+      email: email ? email.trim().toLowerCase() : null,
+      role: role.toLowerCase() as UserRole,
     });
 
     if (!user) {

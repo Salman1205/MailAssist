@@ -8,6 +8,7 @@ import { generateEmbedding } from './embeddings';
 import { createEmailContext } from './similarity';
 import type { KnowledgeItem } from './knowledge';
 import type { Guardrails } from './guardrails';
+import { logAIUsage, logGuardrailUsage } from './analytics';
 
 interface Email {
   id: string;
@@ -31,7 +32,14 @@ export async function generateDraftReply(
   groqApiKey: string,
   conversationMessages?: Email[],
   knowledgeItems: KnowledgeItem[] = [],
-  guardrails?: Guardrails | null
+  guardrails?: Guardrails | null,
+  options?: {
+    userEmail?: string | null;
+    userId?: string | null;
+    ticketId?: string | null;
+    draftId?: string | null;
+    isRegeneration?: boolean;
+  }
 ): Promise<string> {
   // Generate embedding for the incoming email
   let queryEmbedding: number[];
@@ -85,9 +93,40 @@ export async function generateDraftReply(
   const relevantKnowledge = selectKnowledge(incomingEmail, knowledgeItems);
   const prompt = createDraftPrompt(incomingEmail, styleExamples, conversationMessages, relevantKnowledge, guardrails);
 
-  // Call Groq API
+  // Call Groq API and measure response time
+  const startTime = Date.now();
   let draft = await callGroqAPI(prompt, groqApiKey);
-  draft = enforceGuardrailsOutput(draft, guardrails);
+  const responseTimeMs = Date.now() - startTime;
+  
+  // Track knowledge items used
+  const knowledgeItemIds = relevantKnowledge.map(k => k.id).filter(Boolean) as string[];
+  
+  // Enforce guardrails and track usage
+  const originalDraft = draft;
+  draft = enforceGuardrailsOutput(draft, guardrails, {
+    userEmail: options?.userEmail,
+    userId: options?.userId,
+    ticketId: options?.ticketId,
+    draftId: options?.draftId,
+  });
+
+  // Log AI usage
+  if (options?.userEmail) {
+    logAIUsage({
+      userEmail: options.userEmail,
+      userId: options.userId || null,
+      ticketId: options.ticketId || null,
+      action: options.isRegeneration ? 'draft_regenerated' : 'draft_generated',
+      draftId: options.draftId || null,
+      knowledgeItemIds: knowledgeItemIds.length > 0 ? knowledgeItemIds : undefined,
+      guardrailApplied: !!guardrails,
+      guardrailBlocked: draft !== originalDraft,
+      responseTimeMs,
+      draftLength: draft.length,
+      wasEdited: false,
+      wasSent: false,
+    });
+  }
 
   return draft;
 }
@@ -197,14 +236,54 @@ function selectKnowledge(incomingEmail: Email, items: KnowledgeItem[]): Knowledg
     .map((s) => s.item)
 }
 
-function enforceGuardrailsOutput(draft: string, guardrails?: Guardrails | null): string {
+function enforceGuardrailsOutput(
+  draft: string,
+  guardrails?: Guardrails | null,
+  options?: {
+    userEmail?: string | null;
+    userId?: string | null;
+    ticketId?: string | null;
+    draftId?: string | null;
+  }
+): string {
   if (!guardrails) return draft
+  
   let result = draft
   const banned = guardrails.bannedWords?.filter(Boolean) || []
+  const foundBannedWords: string[] = []
+  
   banned.forEach((word) => {
     const re = new RegExp(word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi")
-    result = result.replace(re, "[removed]")
+    if (re.test(result)) {
+      foundBannedWords.push(word)
+      result = result.replace(re, "[removed]")
+    }
   })
+  
+  // Log guardrail usage
+  if (options?.userEmail && guardrails) {
+    // Always log guardrails as applied when they exist
+    logGuardrailUsage({
+      userEmail: options.userEmail,
+      userId: options.userId || null,
+      ticketId: options.ticketId || null,
+      draftId: options.draftId || null,
+      action: foundBannedWords.length > 0 ? 'blocked' : 'applied',
+      guardrailType: foundBannedWords.length > 0 ? 'banned_words' : undefined, // Only specify type when blocked
+      details: foundBannedWords.length > 0
+        ? { bannedWordsFound: foundBannedWords }
+        : { guardrailsApplied: true, toneStyle: !!guardrails.toneStyle, rules: !!guardrails.rules, topicRules: guardrails.topicRules?.length || 0 },
+      draftContent: draft,
+    })
+    
+    // Log topic rules if any match ticket tags
+    if (guardrails.topicRules && guardrails.topicRules.length > 0) {
+      // Note: We'd need ticket tags to check, but for now log that topic rules exist
+      // This could be enhanced to check actual ticket tags
+      // For now, topic rules are counted if they exist in the guardrails
+    }
+  }
+  
   return result
 }
 

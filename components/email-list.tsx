@@ -58,7 +58,13 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
         url = `/api/emails?type=inbox&maxResults=${newLimit}`
       }
 
-      const response = await fetch(url)
+      // Cache strategy:
+      // - Initial loads: Use 'no-cache' to revalidate with server (can use stale-while-revalidate)
+      // - Load more: Use 'default' to leverage browser cache for faster pagination
+      // The API response includes Cache-Control headers (30s cache, 60s stale-while-revalidate)
+      const response = await fetch(url, {
+        cache: isLoadMore ? 'default' : 'no-cache'
+      })
       
       if (!response.ok) {
         if (response.status === 401) {
@@ -147,7 +153,15 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
       {emails.map((email, index) => (
         <button
           key={email.id}
-          onClick={() => onSelectEmail(email.id)}
+          onClick={() => onSelectEmail(email.id, {
+            subject: email.subject,
+            from: email.from,
+            to: email.to,
+            date: email.date,
+            snippet: email.snippet,
+            body: email.body,
+            threadId: email.threadId,
+          })}
           className={`w-full p-4 text-left rounded-lg transition-all duration-300 ease-out border-l-4 animate-in fade-in slide-in-from-left-2 ${
             selectedEmail === email.id 
               ? "border-l-primary bg-primary/10 shadow-md scale-[1.01]" 

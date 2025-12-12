@@ -5,7 +5,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getValidTokens } from '@/lib/token-refresh';
 import { getEmailById } from '@/lib/gmail';
-import { loadStoredEmails, storeReceivedEmail } from '@/lib/storage';
+import { getStoredEmailById, storeReceivedEmail } from '@/lib/storage';
 import { ensureTicketForEmail } from '@/lib/tickets';
 
 type RouteContext =
@@ -30,9 +30,8 @@ export async function GET(
       );
     }
 
-    // Check local storage first
-    const storedEmails = await loadStoredEmails();
-    const cachedEmail = storedEmails.find((email) => email.id === emailId);
+    // Check local storage first (optimized indexed query)
+    const cachedEmail = await getStoredEmailById(emailId);
 
     if (cachedEmail) {
       return NextResponse.json({ email: cachedEmail });
@@ -58,11 +57,12 @@ export async function GET(
       );
     }
 
-    // Store for future requests (without embeddings)
-    await storeReceivedEmail(email);
+    // Store for future requests (without embeddings) - non-blocking
+    storeReceivedEmail(email).catch(err => console.error('Error storing email:', err));
 
-    // Ensure ticket exists/updated for this email (treat as customer message)
-    await ensureTicketForEmail(
+    // OPTIMIZED: Ensure ticket exists/updated in background (non-blocking)
+    // This makes the API response faster
+    ensureTicketForEmail(
       {
         id: email.id,
         threadId: email.threadId,
@@ -72,8 +72,9 @@ export async function GET(
         date: email.date,
       },
       false
-    );
+    ).catch(err => console.error('Error creating ticket:', err));
 
+    // Return email immediately - ticket creation happens in background
     return NextResponse.json({ email });
   } catch (error) {
     console.error('Error fetching email:', error);

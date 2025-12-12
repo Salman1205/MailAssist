@@ -3,9 +3,10 @@ import { getCurrentUserEmail } from "@/lib/storage"
 import { getCurrentUserIdFromRequest } from "@/lib/session"
 import { upsertTicketView } from "@/lib/ticket-views"
 
-export async function POST(request: NextRequest, context: { params: { id: string } }) {
+export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   try {
-    const ticketId = context?.params?.id
+    const params = await context.params
+    const ticketId = params?.id
     if (!ticketId) {
       return NextResponse.json({ error: "Missing ticket ID" }, { status: 400 })
     }

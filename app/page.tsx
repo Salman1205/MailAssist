@@ -13,6 +13,7 @@ import UserManagement from "@/components/user-management"
 import TicketsView from "@/components/tickets-view"
 import AISettings from "@/components/ai-settings"
 import QuickRepliesView from "@/components/quick-replies-view"
+import AnalyticsDashboard from "@/components/analytics-dashboard"
 
 type View = SidebarView
 
@@ -56,6 +57,7 @@ export default function Page() {
   const [syncContinueCount, setSyncContinueCount] = useState(0) // Safety counter
   const LOCAL_STORAGE_KEY = "gmail_connected"
   const [loggingOut, setLoggingOut] = useState(false)
+  const [globalSearch, setGlobalSearch] = useState<string>("")
 
   useEffect(() => {
     checkAuthStatus()
@@ -468,10 +470,17 @@ export default function Page() {
             key={currentUserId || "no-user"}
             currentUserId={currentUserId}
             currentUserRole={currentUser?.role as "admin" | "manager" | "agent" | null}
+            globalSearchTerm={globalSearch}
           />
         )
       case "ai-settings":
         return <AISettings />
+      case "analytics":
+        return (
+          <div className="p-6">
+            <AnalyticsDashboard currentUserRole={currentUser?.role as "admin" | "manager" | "agent" | null} />
+          </div>
+        )
       case "sent":
         return (
           <InboxView
@@ -530,6 +539,7 @@ export default function Page() {
     // Add AI tab for admin/manager
     if (currentUser?.role === "admin" || currentUser?.role === "manager") {
       tabs.push({ id: "ai-settings", label: "AI" })
+      tabs.push({ id: "analytics", label: "Analytics" })
     }
 
     return (
@@ -605,6 +615,10 @@ export default function Page() {
             currentUser={currentUser}
             onLogout={handleLogout}
             onSwitchUser={handleSwitchUser}
+            onSearch={(query) => {
+              // Only update global search term. Do not auto-navigate to Tickets.
+              setGlobalSearch(query)
+            }}
           />
           {renderMobileTabs()}
 

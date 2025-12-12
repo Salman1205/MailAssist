@@ -8,6 +8,7 @@ import { getCurrentUserIdFromRequest } from '@/lib/permissions';
 import { getCurrentUserEmail } from '@/lib/storage';
 import { getSessionUserEmailFromRequest } from '@/lib/session';
 import { supabase } from '@/lib/supabase';
+import { validateTextInput, sanitizeStringArray } from '@/lib/validation';
 
 export async function GET(request: NextRequest) {
   try {
@@ -83,9 +84,33 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { title, content, category, tags } = body;
 
-    if (!title || !content) {
+    // Validate and sanitize title
+    const titleValidation = validateTextInput(title, 200, true);
+    if (!titleValidation.valid) {
       return NextResponse.json(
-        { error: 'Title and content are required' },
+        { error: titleValidation.error || 'Invalid title' },
+        { status: 400 }
+      );
+    }
+
+    // Validate and sanitize content
+    const contentValidation = validateTextInput(content, 5000, true);
+    if (!contentValidation.valid) {
+      return NextResponse.json(
+        { error: contentValidation.error || 'Invalid content' },
+        { status: 400 }
+      );
+    }
+
+    // Validate and sanitize category
+    const categoryValidation = validateTextInput(category, 50, false);
+    const sanitizedCategory = categoryValidation.sanitized || 'General';
+
+    // Sanitize tags
+    const sanitizedTags = sanitizeStringArray(Array.isArray(tags) ? tags : []);
+    if (sanitizedTags.length > 20) {
+      return NextResponse.json(
+        { error: 'Maximum 20 tags allowed' },
         { status: 400 }
       );
     }
@@ -93,10 +118,10 @@ export async function POST(request: NextRequest) {
     const { data, error } = await supabase
       .from('quick_replies')
       .insert({
-        title: title.trim(),
-        content: content.trim(),
-        category: category?.trim() || 'General',
-        tags: tags || [],
+        title: titleValidation.sanitized,
+        content: contentValidation.sanitized,
+        category: sanitizedCategory,
+        tags: sanitizedTags,
         created_by: userId, // Filter by this for user-specific quick replies
         user_email: userEmail, // Required for RLS policies
       })

@@ -63,7 +63,7 @@ function mapRowToTicket(row: any): Ticket {
   };
 }
 
-async function getTicketByThreadId(
+export async function getTicketByThreadId(
   threadId: string,
   userEmail: string | null
 ): Promise<Ticket | null> {
@@ -267,11 +267,14 @@ export async function getTickets(
 ): Promise<Ticket[]> {
   if (!supabase) return [];
 
-  // Build query - we'll fetch assignee names separately for now
-  // Supabase foreign key joins can be tricky, so we'll do a simple select
+  // OPTIMIZED: Use JOIN to fetch assignee names in a single query (much faster)
+  // This eliminates the N+1 query problem
   let query = supabase
     .from('tickets')
-    .select('*');
+    .select(`
+      *,
+      assignee:users!tickets_assignee_user_id_fkey(id, name)
+    `);
 
   // Filter by Gmail account
   if (userEmail) {
@@ -291,16 +294,65 @@ export async function getTickets(
   // Tickets with null last_customer_reply_at go to the end
   query = query.order('last_customer_reply_at', { ascending: true, nullsFirst: false });
 
+  // OPTIMIZED: Add limit to prevent fetching too many tickets at once
+  // Most users won't need more than 500 tickets in their view
+  query = query.limit(500);
+
   const { data, error } = await query;
 
   if (error) {
     console.error('Error fetching tickets:', error);
+    // Fallback to simple query if JOIN fails (backward compatibility)
+    return getTicketsFallback(currentUserId, canViewAll, userEmail);
+  }
+
+  if (!data) return [];
+
+  // Map rows to tickets, extracting assignee name from JOIN
+  return data.map((row: any) => {
+    const ticket = mapRowToTicket(row);
+    // Extract assignee name from joined users table
+    if (row.assignee && Array.isArray(row.assignee) && row.assignee.length > 0) {
+      ticket.assigneeName = row.assignee[0].name || null;
+    } else if (row.assignee && typeof row.assignee === 'object' && row.assignee.name) {
+      ticket.assigneeName = row.assignee.name;
+    }
+    return ticket;
+  });
+}
+
+// Fallback method if JOIN fails (backward compatibility)
+async function getTicketsFallback(
+  currentUserId: string | null,
+  canViewAll: boolean,
+  userEmail: string | null
+): Promise<Ticket[]> {
+  if (!supabase) return [];
+
+  let query = supabase
+    .from('tickets')
+    .select('*');
+
+  if (userEmail) {
+    query = query.eq('user_email', userEmail);
+  }
+
+  if (!canViewAll && currentUserId) {
+    query = query.or(`assignee_user_id.eq.${currentUserId},assignee_user_id.is.null`);
+  }
+
+  query = query.order('last_customer_reply_at', { ascending: true, nullsFirst: false }).limit(500);
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error('Error fetching tickets (fallback):', error);
     return [];
   }
 
   if (!data) return [];
 
-  // Fetch assignee names for tickets that have assignees
+  // Fetch assignee names separately (original method)
   const assigneeUserIds = data
     .map((row: any) => row.assignee_user_id)
     .filter((id: string | null) => id !== null) as string[];
@@ -323,7 +375,6 @@ export async function getTickets(
     }
   }
 
-  // Map rows to tickets, adding assignee names
   return data.map((row: any) => {
     const ticket = mapRowToTicket(row);
     if (row.assignee_user_id && assigneeMap.has(row.assignee_user_id)) {

@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardDescription, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
+import ShopifySettings from "@/components/shopify-settings"
 
 interface SyncStats {
   totalStored: number
@@ -107,6 +108,9 @@ export default function SettingsView({ status, syncing, onSync, error }: Setting
           <li>You can re-run the sync anytime to capture new sent emails.</li>
         </ul>
       </Card>
+
+      {/* Shopify Integration Settings */}
+      <ShopifySettings />
     </div>
   )
 }

@@ -6,14 +6,45 @@ import EmailDetail from "@/components/email-detail"
 
 interface InboxViewProps {
   selectedEmail: string | null
-  onSelectEmail: (id: string | null) => void
+  onSelectEmail: (id: string | null, emailData?: {
+    subject?: string
+    from?: string
+    to?: string
+    date?: string
+    snippet?: string
+    body?: string
+    threadId?: string
+  }) => void
   onDraftGenerated?: () => void
   viewType?: "inbox" | "sent" | "spam" | "trash"
 }
 
 export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerated, viewType = "inbox" }: InboxViewProps) {
   const [listLoading, setListLoading] = useState(true)
+  const [selectedEmailData, setSelectedEmailData] = useState<{
+    subject?: string
+    from?: string
+    to?: string
+    date?: string
+    snippet?: string
+    body?: string
+    threadId?: string
+  } | null>(null)
   const showDetail = Boolean(selectedEmail)
+  
+  // Handle email selection with data
+  const handleSelectEmail = (id: string | null, emailData?: {
+    subject?: string
+    from?: string
+    to?: string
+    date?: string
+    snippet?: string
+    body?: string
+    threadId?: string
+  }) => {
+    setSelectedEmailData(emailData || null)
+    onSelectEmail(id, emailData)
+  }
 
   // When switching between Inbox/Sent/Spam/Trash, clear the current selection
   // so the detail view doesn't show stale data from the previous view.
@@ -34,7 +65,7 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
         <div className="flex-1 overflow-y-auto">
           <EmailList
             selectedEmail={selectedEmail}
-            onSelectEmail={onSelectEmail}
+            onSelectEmail={handleSelectEmail}
             onLoadingChange={setListLoading}
             viewType={viewType}
           />
@@ -46,7 +77,11 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
           <EmailDetail
             emailId={selectedEmail}
             onDraftGenerated={onDraftGenerated}
-            onBack={() => onSelectEmail(null)}
+            onBack={() => {
+              setSelectedEmailData(null)
+              onSelectEmail(null)
+            }}
+            initialEmailData={selectedEmailData || undefined}
           />
         ) : (
           <div className="flex items-center justify-center md:justify-start h-full px-6 md:pl-48 py-10">

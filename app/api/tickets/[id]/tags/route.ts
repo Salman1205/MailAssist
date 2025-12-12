@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { updateTicketTags } from '@/lib/tickets';
 import { getCurrentUserEmail } from '@/lib/storage';
 import { getCurrentUserIdFromRequest } from '@/lib/permissions';
+import { isValidUUID, sanitizeStringArray } from '@/lib/validation';
 
 type RouteContext =
   | { params: { id: string } }
@@ -19,9 +20,9 @@ export async function PATCH(
     const paramsData = await Promise.resolve((context as any).params);
     const ticketId = paramsData?.id;
 
-    if (!ticketId) {
+    if (!ticketId || !isValidUUID(ticketId)) {
       return NextResponse.json(
-        { error: 'Missing ticket ID' },
+        { error: 'Invalid or missing ticket ID' },
         { status: 400 }
       );
     }
@@ -52,15 +53,27 @@ export async function PATCH(
       );
     }
 
-    // Validate tags are strings
-    if (!tags.every(tag => typeof tag === 'string')) {
+    // Sanitize and validate tags
+    const sanitizedTags = sanitizeStringArray(tags);
+    
+    // Limit to 20 tags max
+    if (sanitizedTags.length > 20) {
       return NextResponse.json(
-        { error: 'All tags must be strings' },
+        { error: 'Maximum 20 tags allowed' },
         { status: 400 }
       );
     }
 
-    const ticket = await updateTicketTags(ticketId, tags, userEmail);
+    // Limit tag length to 50 characters
+    const invalidTags = sanitizedTags.filter(tag => tag.length > 50);
+    if (invalidTags.length > 0) {
+      return NextResponse.json(
+        { error: 'Tags must be 50 characters or less' },
+        { status: 400 }
+      );
+    }
+
+    const ticket = await updateTicketTags(ticketId, sanitizedTags, userEmail);
 
     if (!ticket) {
       return NextResponse.json(

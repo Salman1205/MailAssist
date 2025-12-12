@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { Loader2, User, Mail, Clock, Tag, MessageSquare, Sparkles, X, Plus, ChevronDown, ChevronUp, Edit2, Check, XCircle, MoreVertical, Filter, ChevronRight, Search } from "lucide-react"
+import { Loader2, User, Mail, Clock, Tag, MessageSquare, Sparkles, X, Plus, ChevronDown, ChevronUp, Edit2, Check, XCircle, MoreVertical, Filter, ChevronRight, Search, ShoppingBag } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -19,7 +19,9 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/componen
 import { useToast } from "@/components/ui/use-toast"
 import { supabaseBrowser } from "@/lib/supabase-client"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import QuickRepliesSidebar from "@/components/quick-replies-sidebar"
+import ShopifySidebar from "@/components/shopify-sidebar"
 
 interface Ticket {
   id: string
@@ -74,9 +76,10 @@ interface QuickReply {
 interface TicketsViewProps {
   currentUserId: string | null
   currentUserRole: "admin" | "manager" | "agent" | null
+  globalSearchTerm?: string
 }
 
-export default function TicketsView({ currentUserId, currentUserRole }: TicketsViewProps) {
+export default function TicketsView({ currentUserId, currentUserRole, globalSearchTerm }: TicketsViewProps) {
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
@@ -94,6 +97,13 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
   const [customDateEnd, setCustomDateEnd] = useState<string>("")
   const [searchQuery, setSearchQuery] = useState<string>("")
   
+  // Sync global search into local search field
+  useEffect(() => {
+    if (globalSearchTerm !== undefined) {
+      setSearchQuery(globalSearchTerm)
+    }
+  }, [globalSearchTerm])
+  
   // Typing indicator state
   const [isTyping, setIsTyping] = useState(false)
   const [typingTimeout, setTypingTimeout] = useState<NodeJS.Timeout | null>(null)
@@ -105,6 +115,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
   const [notes, setNotes] = useState<TicketNote[]>([])
   const [replyText, setReplyText] = useState("")
   const [draftText, setDraftText] = useState("")
+  const [draftId, setDraftId] = useState<string | null>(null)
   const [showDraft, setShowDraft] = useState(false)
   const [generatingDraft, setGeneratingDraft] = useState(false)
   const [sendingReply, setSendingReply] = useState(false)
@@ -128,6 +139,13 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
   const [selectedTicketIds, setSelectedTicketIds] = useState<Set<string>>(new Set())
   const [isSelectMode, setIsSelectMode] = useState(false)
   const [bulkUpdating, setBulkUpdating] = useState(false)
+  const [showShortcutsModal, setShowShortcutsModal] = useState(false)
+
+  // Refs to hold latest values for keyboard handler (avoid re-attaching listener each render)
+  const filteredTicketsRef = useRef<Ticket[]>([])
+  const selectedTicketRef = useRef<Ticket | null>(null)
+  const isSelectModeRef = useRef<boolean>(false)
+  const handleUpdateStatusRef = useRef<(status: Ticket["status"], ticketId?: string) => Promise<void> | undefined>(undefined as any)
   
   // Filters collapse state - collapsed by default
   const [filtersExpanded, setFiltersExpanded] = useState(false)
@@ -136,10 +154,14 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>([])
   const [showQuickReplies, setShowQuickReplies] = useState(false)
   const [showQuickRepliesSidebar, setShowQuickRepliesSidebar] = useState(false)
+  const [showShopifySidebar, setShowShopifySidebar] = useState(false)
   
   // Ref for conversation scroll container to preserve scroll position
   const conversationScrollRef = useRef<HTMLDivElement>(null)
   const savedScrollPositionRef = useRef<number>(0)
+  const ticketListRef = useRef<HTMLDivElement>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const replyTextareaRef = useRef<HTMLTextAreaElement>(null)
   
   // Panel width preferences - load from localStorage with proper state management
   const getInitialPanelSizes = (): number[] => {
@@ -296,12 +318,14 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
   }, [autoFilterClosed])
 
   useEffect(() => {
-    fetchTickets()
-    fetchUsers()
-    fetchTicketViews()
-    if (currentUserId) {
-      fetchQuickReplies()
-    }
+    // OPTIMIZED: Fetch all data in parallel instead of sequentially
+    // This makes initial page load much faster
+    Promise.all([
+      fetchTickets(),
+      fetchUsers(),
+      fetchTicketViews(),
+      ...(currentUserId ? [fetchQuickReplies()] : [])
+    ]).catch(err => console.error('Error loading initial data:', err))
   }, [currentUserId])
   
   // Close quick replies sidebar and refetch when user changes or logs out
@@ -316,32 +340,114 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
   }, [currentUserId])
   
   // Keyboard shortcuts
+  // Use refs to hold latest values so we can attach a single listener once
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const activeTag = (document.activeElement?.tagName || "").toLowerCase()
+      const isTypingInInput = ["input", "textarea", "select"].includes(activeTag) || (document.activeElement as HTMLElement | null)?.isContentEditable
+      if (isTypingInInput) return
+
+      const filtered = filteredTicketsRef.current
+      const selected = selectedTicketRef.current
+      const selectByOffset = (offset: number) => {
+        if (!filtered.length) return
+        const currentIndex = selected ? filtered.findIndex(t => t.id === selected.id) : -1
+        let nextIndex = currentIndex + offset
+        if (nextIndex < 0) nextIndex = 0
+        if (nextIndex >= filtered.length) nextIndex = filtered.length - 1
+        const nextTicket = filtered[nextIndex]
+        if (nextTicket) {
+          setSelectedTicket(nextTicket)
+          setSelectedTicketIds(new Set([nextTicket.id]))
+        }
+      }
+
+      // Arrow navigation (list)
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        selectByOffset(1)
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        selectByOffset(-1)
+      }
+      // Panel focus
+      if (e.key === 'ArrowLeft') {
+        ticketListRef.current?.focus({ preventScroll: false } as any)
+      }
+      if (e.key === 'ArrowRight') {
+        replyTextareaRef.current?.focus()
+      }
+
+      // Gmail-style
+      if (e.key.toLowerCase() === 'j') {
+        e.preventDefault()
+        selectByOffset(1)
+      }
+      if (e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        selectByOffset(-1)
+      }
+
+      // Reply
+      if (e.key.toLowerCase() === 'r') {
+        e.preventDefault()
+        replyTextareaRef.current?.focus()
+      }
+
+      // Assign dialog
+      if (e.key.toLowerCase() === 'a') {
+        e.preventDefault()
+        if (selected) {
+          setPendingAssignment({ ticketId: selected.id, assigneeUserId: selected.assigneeUserId || null })
+          setShowAssignDialog(true)
+        }
+      }
+
+      // Close ticket
+      if (e.key.toLowerCase() === 'c') {
+        e.preventDefault()
+        // Call latest handleUpdateStatus via ref
+        handleUpdateStatusRef.current?.("closed")
+      }
+
+      // Focus search
+      if (e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        searchInputRef.current?.focus()
+      }
+
+      // Shortcuts modal
+      if (e.key === '?') {
+        e.preventDefault()
+        setShowShortcutsModal(true)
+      }
+
       // Ctrl+K or Cmd+K to toggle select mode
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault()
-        setIsSelectMode(!isSelectMode)
-        if (isSelectMode) {
+        const next = !isSelectModeRef.current
+        setIsSelectMode(next)
+        if (isSelectModeRef.current) {
           setSelectedTicketIds(new Set())
         }
       }
       // Ctrl+A to select all when in select mode
-      if ((e.ctrlKey || e.metaKey) && e.key === 'a' && isSelectMode) {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'a' && isSelectModeRef.current) {
         e.preventDefault()
-        const allIds = new Set(filteredTickets.map(t => t.id))
+        const allIds = new Set(filtered.map(t => t.id))
         setSelectedTicketIds(allIds)
       }
       // Escape to exit select mode
-      if (e.key === 'Escape' && isSelectMode) {
+      if (e.key === 'Escape' && isSelectModeRef.current) {
         setIsSelectMode(false)
         setSelectedTicketIds(new Set())
       }
     }
-    
+
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isSelectMode, tickets, activeTab, statusFilter, priorityFilter, assigneeFilter, tagsFilter, dateFilter, searchQuery, showUnreadOnly])
+  }, [])
   
   const fetchQuickReplies = async () => {
     try {
@@ -1048,6 +1154,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
 
       const data = await response.json()
       setDraftText(data.draft || "")
+      setDraftId(data.draftId || null)
       setShowDraft(true)
       // Don't set replyText here - let user click "Use This Draft" to copy it
       toast({ title: "Draft generated" })
@@ -1075,7 +1182,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
       const response = await fetch(`/api/emails/${emailId}/reply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ draftText: replyText.trim() }),
+        body: JSON.stringify({ draftText: replyText.trim(), draftId: draftId || null }),
       })
 
       if (!response.ok) {
@@ -1085,9 +1192,13 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
 
       setReplyText("")
       setDraftText("")
+      setDraftId(null)
       setShowDraft(false)
-      await fetchThread()
-      await fetchTickets()
+      
+      // Refresh thread and tickets silently (no loading screen)
+      await fetchThread({ silent: true })
+      await fetchTickets({ silent: true })
+      
       toast({ title: "Reply sent successfully" })
     } catch (err) {
       toast({ title: "Error", description: err instanceof Error ? err.message : "Failed to send reply", variant: "destructive" })
@@ -1300,6 +1411,14 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
 
   const filteredTickets = getFilteredTickets()
 
+  // Keep refs in sync with latest values used by keyboard handler
+  useEffect(() => {
+    filteredTicketsRef.current = filteredTickets
+    selectedTicketRef.current = selectedTicket
+    isSelectModeRef.current = isSelectMode
+    handleUpdateStatusRef.current = handleUpdateStatus
+  }, [filteredTickets, selectedTicket, isSelectMode, handleUpdateStatus])
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full animate-in fade-in duration-300">
@@ -1338,7 +1457,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
           className="flex flex-col border-r border-border/50 bg-card overflow-hidden"
           style={{ minWidth: 0, contain: 'layout size' }}
         >
-          <div className="flex flex-col h-full overflow-hidden w-full" style={{ contain: 'layout' }}>
+          <div ref={ticketListRef} tabIndex={-1} className="flex flex-col h-full overflow-hidden w-full" style={{ contain: 'layout' }}>
             <div className="p-3 border-b border-border/50 space-y-2 flex-shrink-0 bg-card/50 backdrop-blur-sm">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
@@ -1411,6 +1530,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground transition-colors duration-300" />
             <Input
               placeholder="Search tickets..."
+              ref={searchInputRef}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="h-9 pl-8 text-sm transition-all duration-300 ease-out focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
@@ -1968,15 +2088,43 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
             <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6 space-y-4 md:space-y-6 w-full max-w-full">
               {/* Customer Info */}
               <Card className="animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out w-full max-w-full border-border/50 shadow-sm hover:shadow-md transition-all duration-300">
-                <CardContent className="p-4 space-y-2 w-full max-w-full overflow-hidden">
-                  <div className="flex items-center gap-2">
-                    <Mail className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-                    <span className="text-sm font-medium">Customer</span>
+                <CardContent className="p-4 space-y-3 w-full max-w-full overflow-hidden">
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setShowShopifySidebar(true)}
+                      className="flex-shrink-0 hover:scale-110 transition-transform duration-200 cursor-pointer group"
+                      title="View Shopify customer info"
+                    >
+                      <Avatar className="h-12 w-12 border-2 border-border group-hover:border-primary transition-colors">
+                        <AvatarFallback className="bg-primary/10 text-primary font-semibold text-sm">
+                          {selectedTicket.customerName
+                            ? selectedTicket.customerName
+                                .split(" ")
+                                .map((n) => n[0])
+                                .join("")
+                                .slice(0, 2)
+                                .toUpperCase()
+                            : selectedTicket.customerEmail
+                                .slice(0, 2)
+                                .toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                    </button>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Mail className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                        <span className="text-sm font-medium">Customer</span>
+                      </div>
+                      <p className="text-sm break-words overflow-wrap-anywhere max-w-full font-medium">
+                        {selectedTicket.customerName || selectedTicket.customerEmail}
+                      </p>
+                      {selectedTicket.customerName && (
+                        <p className="text-sm text-muted-foreground break-words overflow-wrap-anywhere max-w-full">
+                          {selectedTicket.customerEmail}
+                        </p>
+                      )}
+                    </div>
                   </div>
-                  <p className="text-sm break-words overflow-wrap-anywhere max-w-full">{selectedTicket.customerEmail}</p>
-                  {selectedTicket.customerName && (
-                    <p className="text-sm text-muted-foreground break-words overflow-wrap-anywhere max-w-full">{selectedTicket.customerName}</p>
-                  )}
                   <div className="text-xs text-muted-foreground space-y-1">
                     <p>Last customer reply: {formatDate(selectedTicket.lastCustomerReplyAt)}</p>
                     <p>Last agent reply: {formatDate(selectedTicket.lastAgentReplyAt)}</p>
@@ -2165,6 +2313,16 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                     <div className="flex items-center gap-2">
                       <Button
                         size="sm"
+                        variant={showShopifySidebar ? "default" : "outline"}
+                        onClick={() => setShowShopifySidebar(!showShopifySidebar)}
+                        className="h-7 text-xs transition-all duration-200 hover:scale-105"
+                        title="Toggle Shopify Customer Info"
+                      >
+                        <ShoppingBag className="w-3 h-3 mr-1" />
+                        Shopify
+                      </Button>
+                      <Button
+                        size="sm"
                         variant={showQuickRepliesSidebar ? "default" : "outline"}
                         onClick={() => setShowQuickRepliesSidebar(!showQuickRepliesSidebar)}
                         className="h-7 text-xs transition-all duration-200 hover:scale-105"
@@ -2288,6 +2446,7 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
                   )}
                   <Textarea
                     placeholder="Type your reply..."
+                    ref={replyTextareaRef}
                     value={replyText}
                     onChange={(e) => {
                       setReplyText(e.target.value)
@@ -2354,7 +2513,73 @@ export default function TicketsView({ currentUserId, currentUserRole }: TicketsV
           </ResizablePanel>
         </>
       )}
+
+      {/* Shopify Sidebar */}
+      {showShopifySidebar && selectedTicket && (
+        <>
+          <ResizableHandle 
+            withHandle 
+            className="w-1 bg-border/50 hover:bg-primary/30 active:bg-primary/50 transition-all duration-200 cursor-col-resize group relative z-10"
+          />
+          <ResizablePanel 
+            defaultSize={panelSizes.length === 4 ? panelSizes[3] : 25} 
+            minSize={20}
+            maxSize={40}
+            className="flex flex-col bg-background overflow-hidden"
+            style={{ minWidth: 0, contain: 'layout size' }}
+          >
+            <ShopifySidebar 
+              customerEmail={selectedTicket.customerEmail}
+              onClose={() => setShowShopifySidebar(false)}
+            />
+          </ResizablePanel>
+        </>
+      )}
     </ResizablePanelGroup>
+
+    {/* Shortcuts Help */}
+    <Dialog open={showShortcutsModal} onOpenChange={setShowShortcutsModal}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Keyboard Shortcuts</DialogTitle>
+          <DialogDescription>Navigate and act faster</DialogDescription>
+        </DialogHeader>
+        <div className="grid grid-cols-2 gap-3 text-sm">
+          <div className="flex items-center justify-between rounded border border-border/60 px-3 py-2">
+            <span>Next / Previous</span>
+            <span className="text-xs text-muted-foreground">J / K or ↑ / ↓</span>
+          </div>
+          <div className="flex items-center justify-between rounded border border-border/60 px-3 py-2">
+            <span>Focus search</span>
+            <span className="text-xs text-muted-foreground">S</span>
+          </div>
+          <div className="flex items-center justify-between rounded border border-border/60 px-3 py-2">
+            <span>Reply</span>
+            <span className="text-xs text-muted-foreground">R</span>
+          </div>
+          <div className="flex items-center justify-between rounded border border-border/60 px-3 py-2">
+            <span>Assign</span>
+            <span className="text-xs text-muted-foreground">A</span>
+          </div>
+          <div className="flex items-center justify-between rounded border border-border/60 px-3 py-2">
+            <span>Close ticket</span>
+            <span className="text-xs text-muted-foreground">C</span>
+          </div>
+          <div className="flex items-center justify-between rounded border border-border/60 px-3 py-2">
+            <span>Toggle select mode</span>
+            <span className="text-xs text-muted-foreground">Ctrl/Cmd + K</span>
+          </div>
+          <div className="flex items-center justify-between rounded border border-border/60 px-3 py-2">
+            <span>Select all (select mode)</span>
+            <span className="text-xs text-muted-foreground">Ctrl/Cmd + A</span>
+          </div>
+          <div className="flex items-center justify-between rounded border border-border/60 px-3 py-2">
+            <span>Open shortcuts</span>
+            <span className="text-xs text-muted-foreground">?</span>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
 
     {/* Assignment Dialog with Priority Selection */}
     <Dialog open={showAssignDialog} onOpenChange={setShowAssignDialog}>

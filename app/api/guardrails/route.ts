@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { getGuardrails, upsertGuardrails } from "@/lib/guardrails"
 import { getCurrentUserIdFromRequest, getSessionUserEmailFromRequest } from "@/lib/session"
 import { checkPermission } from "@/lib/permissions"
+import { validateTextInput, sanitizeStringArray } from "@/lib/validation"
 
 export async function GET(request: NextRequest) {
   const userEmail = getSessionUserEmailFromRequest(request as any)
@@ -22,14 +23,48 @@ export async function POST(request: NextRequest) {
     if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
 
     const body = await request.json()
+    
+    // Validate and sanitize inputs
+    const toneStyleValidation = validateTextInput(body.toneStyle, 1000, false)
+    const rulesValidation = validateTextInput(body.rules, 2000, false)
+    
+    if (!toneStyleValidation.valid || !rulesValidation.valid) {
+      return NextResponse.json({ 
+        error: toneStyleValidation.error || rulesValidation.error || "Invalid input" 
+      }, { status: 400 })
+    }
+    
+    // Sanitize banned words
+    const bannedWords = sanitizeStringArray(Array.isArray(body.bannedWords) ? body.bannedWords : [])
+    if (bannedWords.length > 100) {
+      return NextResponse.json({ error: "Maximum 100 banned words allowed" }, { status: 400 })
+    }
+    
+    // Validate topic rules structure
+    let topicRules = []
+    if (Array.isArray(body.topicRules)) {
+      topicRules = body.topicRules
+        .filter((rule: any) => rule && typeof rule === 'object')
+        .map((rule: any) => ({
+          tag: validateTextInput(rule.tag, 50, false).sanitized,
+          instruction: validateTextInput(rule.instruction, 500, false).sanitized,
+        }))
+        .filter((rule: any) => rule.tag && rule.instruction)
+      
+      if (topicRules.length > 50) {
+        return NextResponse.json({ error: "Maximum 50 topic rules allowed" }, { status: 400 })
+      }
+    }
+    
     // For now we allow both admin and manager to save live guardrails; no pending flow.
     const publish = false
 
     const payload = {
-      toneStyle: body.toneStyle || "",
-      rules: body.rules || "",
-      bannedWords: Array.isArray(body.bannedWords) ? body.bannedWords : [],
-      topicRules: Array.isArray(body.topicRules) ? body.topicRules : [],
+      toneStyle: toneStyleValidation.sanitized,
+      rules: rulesValidation.sanitized,
+      bannedWords,
+      topicRules,
+      pending: false, // Required by Guardrails interface
     }
 
     const saved = await upsertGuardrails(payload, {

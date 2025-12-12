@@ -5,7 +5,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getValidTokens } from '@/lib/token-refresh';
 import { getEmailById, getUserProfile, sendReplyMessage } from '@/lib/gmail';
-import { storeSentEmail } from '@/lib/storage';
+import { storeSentEmail, loadDrafts, deleteDraft } from '@/lib/storage';
+import { logAIUsage } from '@/lib/analytics';
+import { getCurrentUserIdFromRequest, getSessionUserEmailFromRequest } from '@/lib/session';
 
 type RouteContext =
   | { params: { id: string } }
@@ -30,20 +32,43 @@ export async function POST(
       );
     }
 
-    let body: { draftText?: string } | null = null;
+    let body: { draftText?: string; draftId?: string } | null = null;
     try {
       body = await request.json();
     } catch {
       // ignore - body stays null
     }
 
-    const originalDraftText = body?.draftText ?? '';
-    const draftText = originalDraftText.trim();
+    const sentDraftText = body?.draftText ?? '';
+    const draftText = sentDraftText.trim();
     if (!draftText) {
       return NextResponse.json(
         { error: 'Draft text is required to send a reply' },
         { status: 400 }
       );
+    }
+
+    // Get user info for logging
+    const userEmail = getSessionUserEmailFromRequest(request as any);
+    const userId = getCurrentUserIdFromRequest(request as any);
+    
+    // Find the original draft to compare if it was edited
+    let originalDraftText = '';
+    let draftId = body?.draftId || null;
+    let wasEdited = false;
+    
+    if (draftId && userEmail) {
+      try {
+        const drafts = await loadDrafts(userId || null);
+        const originalDraft = drafts.find(d => d.id === draftId);
+        if (originalDraft) {
+          originalDraftText = originalDraft.draftText;
+          // Compare original vs sent to determine if edited
+          wasEdited = originalDraftText.trim() !== draftText.trim();
+        }
+      } catch (error) {
+        console.warn('[Reply] Could not load original draft for comparison:', error);
+      }
     }
 
     const tokens = await getValidTokens();
@@ -60,6 +85,21 @@ export async function POST(
         { error: 'Email not found' },
         { status: 404 }
       );
+    }
+
+    // Try to find associated ticket for logging
+    let ticketId: string | null = null;
+    try {
+      const { getTicketByThreadId } = await import('@/lib/tickets');
+      if (incomingEmail.threadId && userEmail) {
+        const ticket = await getTicketByThreadId(incomingEmail.threadId, userEmail);
+        if (ticket) {
+          ticketId = ticket.id;
+        }
+      }
+    } catch (ticketError) {
+      // Non-critical - continue without ticket ID
+      console.warn('[Reply] Could not find ticket for logging:', ticketError);
     }
 
     const replyRecipient = incomingEmail.from || incomingEmail.to;
@@ -87,7 +127,7 @@ export async function POST(
       to: replyRecipient,
       from: fromAddress,
       subject: replySubject,
-      body: originalDraftText,
+      body: draftText,
       threadId: incomingEmail.threadId,
       inReplyTo: incomingEmail.messageId,
       references: incomingEmail.messageId,
@@ -102,13 +142,40 @@ export async function POST(
           subject: replySubject,
           from: storedFrom,
           to: replyRecipient,
-          body: originalDraftText,
+          body: draftText,
           date: new Date().toISOString(),
           labels: sentMessage.labelIds ?? [],
           isReply: true,
         });
       } catch (storeError) {
         console.warn('[Reply] Unable to store sent email metadata:', storeError);
+      }
+
+      // Log AI usage: draft sent
+      if (userEmail) {
+        logAIUsage({
+          userEmail,
+          userId: userId || null,
+          ticketId,
+          action: 'draft_sent',
+          draftId: draftId || null,
+          wasEdited,
+          wasSent: true,
+          draftLength: draftText.length,
+        }).catch((error) => {
+          console.error('[Reply] Failed to log AI usage:', error);
+          // Don't throw - logging failures shouldn't break the app
+        });
+      }
+
+      // Delete the draft after successful send
+      if (draftId) {
+        try {
+          await deleteDraft(draftId, userId || null);
+        } catch (deleteError) {
+          console.warn('[Reply] Failed to delete draft after sending:', deleteError);
+          // Don't throw - draft deletion failure shouldn't break the send
+        }
       }
     }
 

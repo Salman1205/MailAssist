@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { updateTicketStatus } from '@/lib/tickets';
 import { getCurrentUserEmail } from '@/lib/storage';
 import { getCurrentUserIdFromRequest } from '@/lib/permissions';
+import { isValidUUID, isValidTicketStatus } from '@/lib/validation';
 
 type RouteContext =
   | { params: { id: string } }
@@ -19,9 +20,9 @@ export async function PATCH(
     const paramsData = await Promise.resolve((context as any).params);
     const ticketId = paramsData?.id;
 
-    if (!ticketId) {
+    if (!ticketId || !isValidUUID(ticketId)) {
       return NextResponse.json(
-        { error: 'Missing ticket ID' },
+        { error: 'Invalid or missing ticket ID' },
         { status: 400 }
       );
     }
@@ -45,7 +46,7 @@ export async function PATCH(
     const body = await request.json();
     const { status } = body;
 
-    if (!status || !['open', 'pending', 'on_hold', 'closed'].includes(status)) {
+    if (!isValidTicketStatus(status)) {
       return NextResponse.json(
         { error: 'Invalid status. Must be: open, pending, on_hold, or closed' },
         { status: 400 }

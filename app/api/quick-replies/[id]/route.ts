@@ -9,6 +9,7 @@ import { canViewAllTickets } from '@/lib/permissions';
 import { getCurrentUserEmail } from '@/lib/storage';
 import { getSessionUserEmailFromRequest } from '@/lib/session';
 import { supabase } from '@/lib/supabase';
+import { isValidUUID, validateTextInput, sanitizeStringArray } from '@/lib/validation';
 
 type RouteContext =
   | { params: { id: string } }
@@ -81,10 +82,44 @@ export async function PATCH(
       updated_at: new Date().toISOString(),
     };
 
-    if (body.title !== undefined) updates.title = body.title.trim();
-    if (body.content !== undefined) updates.content = body.content.trim();
-    if (body.category !== undefined) updates.category = body.category?.trim() || 'General';
-    if (body.tags !== undefined) updates.tags = body.tags;
+    // Validate and sanitize inputs if provided
+    if (body.title !== undefined) {
+      const titleValidation = validateTextInput(body.title, 200, false);
+      if (!titleValidation.valid) {
+        return NextResponse.json(
+          { error: titleValidation.error || 'Invalid title' },
+          { status: 400 }
+        );
+      }
+      updates.title = titleValidation.sanitized;
+    }
+
+    if (body.content !== undefined) {
+      const contentValidation = validateTextInput(body.content, 5000, false);
+      if (!contentValidation.valid) {
+        return NextResponse.json(
+          { error: contentValidation.error || 'Invalid content' },
+          { status: 400 }
+        );
+      }
+      updates.content = contentValidation.sanitized;
+    }
+
+    if (body.category !== undefined) {
+      const categoryValidation = validateTextInput(body.category, 50, false);
+      updates.category = categoryValidation.sanitized || 'General';
+    }
+
+    if (body.tags !== undefined) {
+      const sanitizedTags = sanitizeStringArray(Array.isArray(body.tags) ? body.tags : []);
+      if (sanitizedTags.length > 20) {
+        return NextResponse.json(
+          { error: 'Maximum 20 tags allowed' },
+          { status: 400 }
+        );
+      }
+      updates.tags = sanitizedTags;
+    }
 
     const { data, error } = await supabase
       .from('quick_replies')
@@ -126,9 +161,9 @@ export async function DELETE(
     const paramsData = await Promise.resolve((context as any).params);
     const id = paramsData?.id;
 
-    if (!id) {
+    if (!id || !isValidUUID(id)) {
       return NextResponse.json(
-        { error: 'Missing quick reply ID' },
+        { error: 'Invalid or missing quick reply ID' },
         { status: 400 }
       );
     }

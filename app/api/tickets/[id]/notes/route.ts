@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getTicketNotes, createTicketNote, updateTicketNote } from '@/lib/ticket-notes';
 import { getCurrentUserIdFromRequest } from '@/lib/permissions';
 import { getCurrentUserEmail } from '@/lib/storage';
+import { isValidUUID, validateTextInput } from '@/lib/validation';
 
 type RouteContext =
   | { params: { id: string } }
@@ -20,9 +21,9 @@ export async function GET(
     const paramsData = await Promise.resolve((context as any).params);
     const ticketId = paramsData?.id;
 
-    if (!ticketId) {
+    if (!ticketId || !isValidUUID(ticketId)) {
       return NextResponse.json(
-        { error: 'Missing ticket ID' },
+        { error: 'Invalid or missing ticket ID' },
         { status: 400 }
       );
     }
@@ -80,14 +81,16 @@ export async function POST(
     const body = await request.json();
     const { content } = body;
 
-    if (!content || typeof content !== 'string' || !content.trim()) {
+    // Validate and sanitize note content
+    const contentValidation = validateTextInput(content, 5000, true);
+    if (!contentValidation.valid) {
       return NextResponse.json(
-        { error: 'Note content is required' },
+        { error: contentValidation.error || 'Invalid note content' },
         { status: 400 }
       );
     }
 
-    const note = await createTicketNote(ticketId, content, userId);
+    const note = await createTicketNote(ticketId, contentValidation.sanitized, userId);
 
     if (!note) {
       return NextResponse.json(
@@ -114,9 +117,9 @@ export async function PATCH(
     const paramsData = await Promise.resolve((context as any).params);
     const ticketId = paramsData?.id;
 
-    if (!ticketId) {
+    if (!ticketId || !isValidUUID(ticketId)) {
       return NextResponse.json(
-        { error: 'Missing ticket ID' },
+        { error: 'Invalid or missing ticket ID' },
         { status: 400 }
       );
     }
@@ -132,15 +135,24 @@ export async function PATCH(
     const body = await request.json();
     const { noteId, content } = body;
 
-    if (!noteId || !content || typeof content !== 'string' || !content.trim()) {
+    if (!noteId || !isValidUUID(noteId)) {
       return NextResponse.json(
-        { error: 'Note ID and content are required' },
+        { error: 'Invalid or missing note ID' },
         { status: 400 }
       );
     }
 
-    console.log('[Update Note API] Request:', { ticketId, noteId, userId, contentLength: content.length });
-    const note = await updateTicketNote(noteId, content, userId);
+    // Validate and sanitize note content
+    const contentValidation = validateTextInput(content, 5000, true);
+    if (!contentValidation.valid) {
+      return NextResponse.json(
+        { error: contentValidation.error || 'Invalid note content' },
+        { status: 400 }
+      );
+    }
+
+    console.log('[Update Note API] Request:', { ticketId, noteId, userId, contentLength: contentValidation.sanitized.length });
+    const note = await updateTicketNote(noteId, contentValidation.sanitized, userId);
 
     if (!note) {
       return NextResponse.json(
