@@ -4,6 +4,8 @@
 
 import { google } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
+import { getValidTokens } from './token-refresh';
+import { storeSentEmail, getCurrentUserEmail } from './storage';
 
 // Initialize OAuth2 client
 export function getOAuth2Client(): OAuth2Client {
@@ -444,6 +446,171 @@ function encodeBase64Url(input: string) {
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=+$/, '');
+}
+
+/**
+ * Send a new email (not a reply) and create a ticket
+ */
+export async function sendNewEmail(
+  to: string,
+  recipientName: string | null,
+  subject: string,
+  body: string,
+  userId: string
+) {
+  const tokens = await getValidTokens();
+  if (!tokens || !tokens.access_token) {
+    throw new Error('Not authenticated. Please connect Gmail first.');
+  }
+
+  const gmail = getGmailClient(tokens);
+
+  const headers = [
+    `To: ${to}`,
+    `Subject: ${subject}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/plain; charset="UTF-8"',
+  ].filter(Boolean).join('\r\n');
+
+  const normalizedBody = body.replace(/\r?\n/g, '\r\n');
+  const message = `${headers}\r\n\r\n${normalizedBody}`;
+  const encodedMessage = encodeBase64Url(message);
+
+  // Send the email with retry logic and better error handling
+  let response;
+  let retries = 3;
+  let lastError: any = null;
+  
+  while (retries > 0) {
+    try {
+      response = await gmail.users.messages.send({
+        userId: 'me',
+        requestBody: {
+          raw: encodedMessage,
+        },
+      });
+      break; // Success, exit retry loop
+    } catch (error: any) {
+      console.error(`Gmail API send attempt failed (${4 - retries}/3):`, error.message);
+      lastError = error;
+      retries--;
+      
+      // For ECONNRESET, the email might have been sent successfully despite the error
+      // Let's check if we can find the message in sent folder
+      if (error.code === 'ECONNRESET' || error.message?.includes('ECONNRESET')) {
+        console.log('ECONNRESET detected - checking if email was actually sent...');
+        try {
+          // Try to find the message in sent folder by checking recent messages
+          const sentResponse = await gmail.users.messages.list({
+            userId: 'me',
+            q: `subject:(${subject.replace(/"/g, '\\"')}) in:sent`,
+            maxResults: 5,
+          });
+          
+          if (sentResponse.data.messages && sentResponse.data.messages.length > 0) {
+            // Check if any of these messages match our content
+            for (const msg of sentResponse.data.messages) {
+              try {
+                const fullMsg = await gmail.users.messages.get({
+                  userId: 'me',
+                  id: msg.id!,
+                  format: 'metadata',
+                });
+                
+                // Check if this is our message by comparing subject and approximate time
+                const msgSubject = fullMsg.data.payload?.headers?.find((h: any) => h.name === 'Subject')?.value;
+                const msgDate = fullMsg.data.payload?.headers?.find((h: any) => h.name === 'Date')?.value;
+                
+                if (msgSubject === subject && msgDate) {
+                  const msgTime = new Date(msgDate).getTime();
+                  const now = Date.now();
+                  // If message was sent within last 30 seconds, it's likely ours
+                  if (Math.abs(now - msgTime) < 30000) {
+                    console.log('Found matching sent message despite ECONNRESET error');
+                    response = { data: { id: msg.id, threadId: fullMsg.data.threadId } };
+                    break;
+                  }
+                }
+              } catch (checkError) {
+                console.error('Error checking sent message:', checkError);
+              }
+            }
+          }
+          
+          if (response) break; // Found the message
+        } catch (checkError) {
+          console.error('Error checking for sent message:', checkError);
+        }
+      }
+      
+      if (retries === 0) {
+        throw lastError; // All retries failed
+      }
+      // Wait before retry
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+  }
+
+  const messageId = response!.data.id;
+  const threadId = response!.data.threadId;
+
+  if (!threadId) {
+    throw new Error('Failed to get thread ID from sent message');
+  }
+
+  // Store the sent email
+  const sentEmail = {
+    id: messageId,
+    threadId,
+    subject,
+    from: await getCurrentUserEmail(),
+    to,
+    body,
+    date: new Date().toISOString(),
+  };
+
+  // Store the sent email
+  try {
+    await storeSentEmail(sentEmail);
+  } catch (storeError) {
+    console.warn('Failed to store sent email for embedding, but email was sent successfully:', storeError);
+  }
+
+  // Create a ticket for this new email thread
+  const { getOrCreateTicketForThread } = await import('./tickets');
+  const ticket = await getOrCreateTicketForThread(threadId, {
+    subject,
+    customerEmail: to,
+    customerName: recipientName,
+    initialStatus: 'open',
+    priority: null, // Let it be unassigned initially
+    tags: ['outbound'],
+    lastCustomerReplyAt: null,
+    lastAgentReplyAt: new Date().toISOString(),
+  });
+
+  if (!ticket) {
+    console.error('Failed to create ticket for sent email, but email was sent successfully');
+    // Don't throw error here - email was sent, just log the ticket creation failure
+  } else {
+    // Try to assign the ticket to the current user since they sent it
+    try {
+      const { assignTicket } = await import('./tickets');
+      const userEmail = await getCurrentUserEmail();
+      const assignedTicket = await assignTicket(ticket.id, userId, userEmail);
+      if (!assignedTicket) {
+        console.warn(`Failed to assign ticket ${ticket.id} to user ${userId}, but ticket was created`);
+      }
+    } catch (assignError) {
+      console.warn('Failed to assign ticket to user, but ticket was created:', assignError);
+    }
+  }
+
+  return {
+    messageId,
+    threadId,
+    ticketId: ticket?.id || null,
+  };
 }
 
 

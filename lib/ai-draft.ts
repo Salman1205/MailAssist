@@ -6,6 +6,7 @@
 import { findSimilarEmails } from './similarity';
 import { generateEmbedding } from './embeddings';
 import { createEmailContext } from './similarity';
+import { loadStoredEmails } from './storage';
 import type { KnowledgeItem } from './knowledge';
 import type { Guardrails } from './guardrails';
 import { logAIUsage, logGuardrailUsage } from './analytics';
@@ -129,6 +130,203 @@ export async function generateDraftReply(
   }
 
   return draft;
+}
+
+/**
+ * Generate a draft for a new email (not a reply)
+ */
+export async function generateNewEmailDraft(
+  recipientEmail: string,
+  recipientName: string | null,
+  subject: string,
+  context: string,
+  pastEmails: StoredEmail[],
+  groqApiKey: string,
+  knowledgeItems: KnowledgeItem[] = [],
+  guardrails?: Guardrails | null,
+  options?: {
+    userEmail?: string | null;
+    userId?: string | null;
+    ticketId?: string | null;
+    draftId?: string | null;
+  }
+): Promise<string> {
+  // Generate embedding for the context
+  let queryEmbedding: number[];
+  try {
+    const queryContext = `Subject: ${subject}\nContext: ${context}`;
+    queryEmbedding = await generateEmbedding(queryContext);
+  } catch (error) {
+    console.error('Error generating embedding for new email context:', error);
+    queryEmbedding = [];
+  }
+
+  // Find similar past emails to match tone and style
+  let similarEmails: Array<{ emailId: string; similarity: number; email: any }>;
+  if (queryEmbedding.length > 0 && pastEmails.length > 0) {
+    similarEmails = findSimilarEmails(
+      queryEmbedding,
+      pastEmails.map((email) => ({
+        emailId: email.id,
+        embedding: email.embedding,
+        email,
+      })),
+      5 // Top 5 most similar emails
+    );
+    // If no similar emails found, use first few as fallback
+    if (similarEmails.length === 0) {
+      similarEmails = pastEmails.slice(0, 5).map((email) => ({
+        emailId: email.id,
+        email,
+        similarity: 0.5, // Default similarity for fallback
+      }));
+    }
+  } else {
+    // Fallback: use first 5 past emails if embedding generation failed
+    similarEmails = pastEmails.slice(0, 5).map((email) => ({
+      emailId: email.id,
+      email,
+      similarity: 0.5, // Default similarity for fallback
+    }));
+  }
+
+  // Build context from similar emails
+  const styleExamples = similarEmails
+    .map(
+      (item) => `Subject: ${item.email.subject}\nBody: ${item.email.body}`
+    )
+    .join('\n\n---\n\n');
+
+  // Create prompt for Groq, including relevant knowledge
+  const relevantKnowledge = selectKnowledgeForNewEmail(subject, context, knowledgeItems);
+  const prompt = createNewEmailPrompt(recipientEmail, recipientName, subject, context, styleExamples, relevantKnowledge, guardrails);
+
+  // Call Groq API and measure response time
+  const startTime = Date.now();
+  let draft = await callGroqAPI(prompt, groqApiKey);
+  const responseTimeMs = Date.now() - startTime;
+  
+  // Track knowledge items used
+  const knowledgeItemIds = relevantKnowledge.map(k => k.id).filter(Boolean) as string[];
+  
+  // Enforce guardrails and track usage
+  const originalDraft = draft;
+  draft = enforceGuardrailsOutput(draft, guardrails, {
+    userEmail: options?.userEmail,
+    userId: options?.userId,
+    ticketId: options?.ticketId,
+    draftId: options?.draftId,
+  });
+
+  // Log AI usage
+  if (options?.userEmail) {
+    logAIUsage({
+      userEmail: options.userEmail,
+      userId: options.userId || null,
+      ticketId: options.ticketId || null,
+      action: 'new_email_generated',
+      draftId: options.draftId || null,
+      knowledgeItemIds: knowledgeItemIds.length > 0 ? knowledgeItemIds : undefined,
+      guardrailApplied: !!guardrails,
+      guardrailBlocked: draft !== originalDraft,
+      responseTimeMs,
+      draftLength: draft.length,
+      wasEdited: false,
+      wasSent: false,
+    });
+  }
+
+  return draft;
+}
+
+/**
+ * Create prompt for new email generation
+ */
+function createNewEmailPrompt(
+  recipientEmail: string,
+  recipientName: string | null,
+  subject: string,
+  context: string,
+  styleExamples: string,
+  knowledgeItems: KnowledgeItem[] = [],
+  guardrails?: Guardrails | null
+): string {
+  const guardrailTone = guardrails?.toneStyle?.trim() || "Friendly, concise, professional."
+  const guardrailRules = guardrails?.rules?.trim()
+  const banned = guardrails?.bannedWords?.filter(Boolean) || []
+  const topicRules = guardrails?.topicRules || []
+
+  const knowledgeSection = knowledgeItems.length
+    ? `\n\nRELEVANT KNOWLEDGE SNIPPETS:\n${knowledgeItems
+        .map((k, idx) => `[${idx + 1}] ${k.title}: ${k.body}`)
+        .join("\n")}\n`
+    : ""
+
+  const topicRulesSection = topicRules.length
+    ? `\nTopic-specific rules:\n${topicRules
+        .map((r) => `- If tags/intent match "${r.tag}", then: ${r.instruction}`)
+        .join("\n")}`
+    : ""
+
+  const bannedSection = banned.length
+    ? `\nBanned words/phrases: ${banned.join(", ")}`
+    : ""
+
+  const recipientNameText = recipientName ? ` (${recipientName})` : '';
+
+  return `You are an AI assistant helping to draft new emails. Follow the guardrails and knowledge below.
+
+TONE & STYLE:
+${guardrailTone}
+
+GENERAL RULES:
+${guardrailRules || "Keep responses accurate, polite, and helpful."}
+${topicRulesSection}${bannedSection}
+
+NEW EMAIL DETAILS:
+Recipient: ${recipientEmail}${recipientNameText}
+Subject: ${subject}
+Context/Instructions: ${context}
+
+USER'S PAST EMAIL STYLE EXAMPLES (use these to match tone and style):
+${styleExamples || 'No past examples available. Use a professional, friendly tone.'}
+
+${knowledgeSection}
+
+INSTRUCTIONS:
+1. Generate a new email based on the provided context and subject.
+2. Match the tone and style of the user's past emails shown above.
+3. Address the recipient appropriately (use their name if provided).
+4. Make the email professional, clear, and appropriate for the context provided.
+5. Keep it concise but complete.
+6. Output ONLY the email body text (no subject line, no metadata, just the email content).
+7. Do not include placeholders like [Your Name] - write as if the user is writing directly.
+8. Respect all guardrails and avoid banned words/phrases.
+9. Apply topic-specific rules when relevant to the email content or context.
+
+Generate the new email now:`;
+}
+
+/**
+ * Select relevant knowledge for new email generation
+ */
+function selectKnowledgeForNewEmail(subject: string, context: string, items: KnowledgeItem[]): KnowledgeItem[] {
+  if (!items?.length) return []
+  const text = `${subject} ${context}`.toLowerCase()
+  const scored = items.map((item) => {
+    const tags = item.tags || []
+    const tagScore = tags.reduce((acc, tag) => (text.includes(tag.toLowerCase()) ? acc + 2 : acc), 0)
+    const keywordScore =
+      (item.title?.toLowerCase().includes(text) ? 1 : 0) +
+      (item.body?.toLowerCase().includes(subject.toLowerCase()) ? 1 : 0)
+    const score = tagScore + keywordScore
+    return { item, score }
+  })
+  return scored
+    .filter((s) => s.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5)
+    .map((s) => s.item)
 }
 
 /**
@@ -288,6 +486,13 @@ function enforceGuardrailsOutput(
 }
 
 /**
+ * Get Groq API key from environment
+ */
+export function getGroqApiKey(): string | null {
+  return process.env.GROQ_API_KEY || null;
+}
+
+/**
  * Call Groq API to generate draft
  */
 async function callGroqAPI(prompt: string, apiKey: string): Promise<string> {
@@ -412,5 +617,6 @@ async function callGroqAPI(prompt: string, apiKey: string): Promise<string> {
   // If we get here, all models failed
   throw lastError || new Error('All Groq API models failed');
 }
+
 
 

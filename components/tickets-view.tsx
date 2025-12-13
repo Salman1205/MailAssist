@@ -77,9 +77,10 @@ interface TicketsViewProps {
   currentUserId: string | null
   currentUserRole: "admin" | "manager" | "agent" | null
   globalSearchTerm?: string
+  refreshKey?: number
 }
 
-export default function TicketsView({ currentUserId, currentUserRole, globalSearchTerm }: TicketsViewProps) {
+export default function TicketsView({ currentUserId, currentUserRole, globalSearchTerm, refreshKey }: TicketsViewProps) {
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
@@ -128,6 +129,9 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   const [pendingAssignment, setPendingAssignment] = useState<{ticketId: string, assigneeUserId: string | null} | null>(null)
   const [conversationMinimized, setConversationMinimized] = useState(false)
   const [showQuotedMap, setShowQuotedMap] = useState<Record<string, boolean>>({})
+  const [conversationSummary, setConversationSummary] = useState<string>("") 
+  const [summaryExpanded, setSummaryExpanded] = useState(false)
+  const [generatingSummary, setGeneratingSummary] = useState(false)
   // Track last time each ticket was viewed (from Supabase) so we can show "new" badges
   const [lastViewedMap, setLastViewedMap] = useState<Record<string, string>>({})
   // Track previous selected ticket metadata for polling comparison
@@ -326,7 +330,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       fetchTicketViews(),
       ...(currentUserId ? [fetchQuickReplies()] : [])
     ]).catch(err => console.error('Error loading initial data:', err))
-  }, [currentUserId])
+  }, [currentUserId, refreshKey])
   
   // Close quick replies sidebar and refetch when user changes or logs out
   useEffect(() => {
@@ -612,6 +616,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     if (selectedTicket) {
       fetchThread()
       fetchNotes()
+      setConversationSummary("")
+      setSummaryExpanded(false)
       // Start polling for typing indicators when ticket is selected
       fetchTypingIndicator() // Fetch immediately
       const typingInterval = setInterval(() => {
@@ -621,6 +627,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       return () => clearInterval(typingInterval)
     } else {
       setTypingUsers([]) // Clear when no ticket selected
+      setConversationSummary("")
+      setSummaryExpanded(false)
     }
   }, [selectedTicket, users]) // Add users as dependency so we can match names
   
@@ -1533,8 +1541,23 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
               ref={searchInputRef}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="h-9 pl-8 text-sm transition-all duration-300 ease-out focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+              className="h-9 pl-8 pr-8 text-sm transition-all duration-300 ease-out focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  setSearchQuery('')
+                  e.currentTarget.blur()
+                }
+              }}
             />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-md hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+                aria-label="Clear search"
+              >
+                <XCircle className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
           
           {/* Collapsible Filters */}
@@ -1544,11 +1567,28 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                 className="py-1 h-7 text-xs text-muted-foreground hover:no-underline"
                 onClick={() => setFiltersExpanded(!filtersExpanded)}
               >
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 flex-1">
                   <Filter className="w-3 h-3" />
                   <span>Filters</span>
                   {(statusFilter !== "all" || priorityFilter !== "all" || assigneeFilter !== "all" || tagsFilter !== "all" || dateFilter !== "all" || showUnreadOnly) && (
-                    <Badge variant="secondary" className="h-4 px-1 text-[10px]">Active</Badge>
+                    <>
+                      <Badge variant="secondary" className="h-4 px-1 text-[10px]">Active</Badge>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setStatusFilter("all")
+                          setPriorityFilter("all")
+                          setAssigneeFilter("all")
+                          setTagsFilter("all")
+                          setDateFilter("all")
+                          setShowUnreadOnly(false)
+                          setSearchQuery("")
+                        }}
+                        className="ml-auto h-5 px-2 text-[10px] rounded-md bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        Clear all
+                      </button>
+                    </>
                   )}
                 </div>
               </AccordionTrigger>
@@ -2140,19 +2180,82 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                       <MessageSquare className="w-4 h-4" />
                       Conversation
                     </h3>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setConversationMinimized(!conversationMinimized)}
-                      className="h-8 w-8 p-0 transition-all duration-300 ease-out hover:scale-110 hover:bg-muted hover:shadow-sm flex-shrink-0"
-                    >
-                      {conversationMinimized ? (
-                        <ChevronDown className="w-4 h-4 transition-transform duration-300 ease-out" />
-                      ) : (
-                        <ChevronUp className="w-4 h-4 transition-transform duration-300 ease-out" />
+                    <div className="flex items-center gap-2">
+                      {threadMessages.length > 0 && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={async () => {
+                            if (!conversationSummary) {
+                              setGeneratingSummary(true)
+                              try {
+                                const summary = threadMessages.map(m => `${m.from}: ${(m.body || m.subject || "").substring(0, 200)}`).join("\n\n")
+                                const response = await fetch("/api/ai/summarize", {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ conversation: summary })
+                                })
+                                if (response.ok) {
+                                  const data = await response.json()
+                                  setConversationSummary(data.summary)
+                                  setSummaryExpanded(true)
+                                } else {
+                                  setConversationSummary("Unable to generate summary at this time.")
+                                  setSummaryExpanded(true)
+                                }
+                              } catch (err) {
+                                setConversationSummary("Error generating summary.")
+                                setSummaryExpanded(true)
+                              } finally {
+                                setGeneratingSummary(false)
+                              }
+                            } else {
+                              setSummaryExpanded(!summaryExpanded)
+                            }
+                          }}
+                          className="h-8 px-3 text-xs"
+                          disabled={generatingSummary}
+                        >
+                          {generatingSummary ? (
+                            <>
+                              <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                              Summarizing...
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="w-3 h-3 mr-1" />
+                              {conversationSummary ? (summaryExpanded ? "Hide Summary" : "Show Summary") : "Summarize"}
+                            </>
+                          )}
+                        </Button>
                       )}
-                    </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setConversationMinimized(!conversationMinimized)}
+                        className="h-8 w-8 p-0 transition-all duration-300 ease-out hover:scale-110 hover:bg-muted hover:shadow-sm flex-shrink-0"
+                      >
+                        {conversationMinimized ? (
+                          <ChevronDown className="w-4 h-4 transition-transform duration-300 ease-out" />
+                        ) : (
+                          <ChevronUp className="w-4 h-4 transition-transform duration-300 ease-out" />
+                        )}
+                      </Button>
+                    </div>
                   </div>
+                  {summaryExpanded && conversationSummary && (
+                    <div className="mb-4 p-4 bg-primary/5 border border-primary/20 rounded-xl animate-in fade-in slide-in-from-top-2 duration-300">
+                      <div className="flex items-start gap-2">
+                        <Sparkles className="w-4 h-4 mt-0.5 text-primary flex-shrink-0" />
+                        <div className="flex-1">
+                          <h4 className="text-sm font-semibold text-primary mb-2">Conversation Summary</h4>
+                          <p className="text-sm text-foreground/80 leading-relaxed whitespace-pre-wrap">
+                            {conversationSummary}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   {!conversationMinimized && (
                     <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300 w-full max-w-full overflow-hidden">
                       {loadingThread ? (

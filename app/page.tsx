@@ -14,6 +14,7 @@ import TicketsView from "@/components/tickets-view"
 import AISettings from "@/components/ai-settings"
 import QuickRepliesView from "@/components/quick-replies-view"
 import AnalyticsDashboard from "@/components/analytics-dashboard"
+import ComposeView from "@/components/compose-view"
 
 type View = SidebarView
 
@@ -42,6 +43,7 @@ export default function Page() {
   const [checkingAuth, setCheckingAuth] = useState(true)
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
   const [draftsVersion, setDraftsVersion] = useState(0)
+  const [ticketsVersion, setTicketsVersion] = useState(0)
   const [hasAutoSynced, setHasAutoSynced] = useState(false)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [checkingUser, setCheckingUser] = useState(true)
@@ -462,6 +464,8 @@ export default function Page() {
         )
       case "drafts":
         return <DraftsView key={currentUserId || "no-user"} refreshKey={draftsVersion} currentUserId={currentUserId} />
+      case "compose":
+        return <ComposeView key={currentUserId || "no-user"} currentUserId={currentUserId} onEmailSent={() => setTicketsVersion(v => v + 1)} />
       case "quick-replies":
         return <QuickRepliesView key={currentUserId || "no-user"} currentUserId={currentUserId} />
       case "tickets":
@@ -471,6 +475,7 @@ export default function Page() {
             currentUserId={currentUserId}
             currentUserRole={currentUser?.role as "admin" | "manager" | "agent" | null}
             globalSearchTerm={globalSearch}
+            refreshKey={ticketsVersion}
           />
         )
       case "ai-settings":
@@ -598,7 +603,7 @@ export default function Page() {
 
   return (
     <>
-      <div className="flex h-screen bg-background text-foreground">
+      <div className="flex h-screen bg-background text-foreground overflow-x-hidden">
         {isConnected && (
           <Sidebar 
             activeView={activeView} 

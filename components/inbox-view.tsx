@@ -53,16 +53,17 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
   }, [viewType, onSelectEmail])
 
   return (
-    <div className="flex flex-col md:flex-row h-full bg-background">
+    <div className="flex flex-col md:flex-row h-full bg-muted/20 overflow-hidden">
       <div
-        className={`border-b md:border-b-0 md:border-r border-border bg-card overflow-y-auto ${
-          showDetail ? "hidden md:flex md:w-80" : "flex w-full md:w-80"
-        } flex-col`}
+        className={`border-b md:border-b-0 md:border-r border-border bg-background overflow-hidden flex flex-col transition-all duration-300 flex-shrink-0 ${
+          showDetail ? "hidden md:flex md:w-96" : "flex w-full md:w-96"
+        }`}
       >
-        <div className="sticky top-0 z-10 bg-card border-b border-border/50 px-4 py-3 backdrop-blur-sm">
-          <h2 className="text-lg font-semibold capitalize">{viewType || "Inbox"}</h2>
+        <div className="bg-card border-b border-border px-6 py-5 flex-shrink-0">
+          <h2 className="text-xl font-bold capitalize text-foreground">{viewType || "Inbox"}</h2>
+          <p className="text-sm text-muted-foreground mt-1">Manage your messages</p>
         </div>
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto min-h-0">
           <EmailList
             selectedEmail={selectedEmail}
             onSelectEmail={handleSelectEmail}
@@ -72,7 +73,7 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
         </div>
       </div>
 
-      <div className={`flex-1 overflow-y-auto ${showDetail ? "flex" : "hidden md:flex"}`}>
+      <div className={`flex-1 overflow-hidden flex flex-col ${showDetail ? "flex" : "hidden md:flex"}`}>
         {selectedEmail ? (
           <EmailDetail
             emailId={selectedEmail}
@@ -84,25 +85,23 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
             initialEmailData={selectedEmailData || undefined}
           />
         ) : (
-          <div className="flex items-center justify-center md:justify-start h-full px-6 md:pl-48 py-10">
-            <div className="text-center md:text-left space-y-4 max-w-md">
-              <svg
-                className="w-16 h-16 text-muted-foreground/30 mx-auto"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-              >
-                <path d="M22 4H2v16h20V4zm-2 2v3H4V6h16z" />
-              </svg>
-              <p className="text-base font-medium text-foreground">
-                {listLoading ? "Loading your inbox..." : "Select an email to get started"}
-              </p>
-              <p className="text-sm text-muted-foreground">
-                {listLoading
-                  ? "Hang tight while we fetch the latest messages."
-                  : "Drafts will use your style once you reply from here."}
-              </p>
+          <div className="flex items-center justify-center h-full px-8 py-12 bg-muted/10">
+            <div className="text-center space-y-5 max-w-md">
+              <div className="w-24 h-24 rounded-3xl bg-gradient-to-br from-primary/15 via-accent/10 to-primary/5 flex items-center justify-center mx-auto border-2 border-primary/20 shadow-lg">
+                <svg
+                  className="w-12 h-12 text-primary"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+              </div>
+              <div className="space-y-3">
+                <h3 className="text-lg font-bold text-foreground">Select an email to get started</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed">Choose a message from the list to view the conversation and generate AI-powered replies</p>
+              </div>
             </div>
           </div>
         )}

@@ -141,12 +141,19 @@ export default function AnalyticsDashboard({ currentUserRole }: AnalyticsDashboa
 
   if (!canViewAnalytics) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Analytics Dashboard</CardTitle>
-          <CardDescription>Access restricted to admins and managers</CardDescription>
-        </CardHeader>
-      </Card>
+      <div className="h-full w-full flex items-center justify-center bg-background p-8">
+        <Card className="max-w-md w-full p-10 text-center shadow-xl border-2">
+          <div className="flex justify-center mb-6">
+            <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-destructive/20 to-destructive/10 flex items-center justify-center border-2 border-destructive/30">
+              <Shield className="w-10 h-10 text-destructive" />
+            </div>
+          </div>
+          <CardHeader className="p-0 pb-4">
+            <CardTitle className="text-2xl font-bold">Analytics Dashboard</CardTitle>
+            <CardDescription className="text-base mt-3">Access restricted to admins and managers</CardDescription>
+          </CardHeader>
+        </Card>
+      </div>
     )
   }
 
@@ -198,10 +205,10 @@ export default function AnalyticsDashboard({ currentUserRole }: AnalyticsDashboa
 
   // Prepare chart data
   const statusColors: Record<string, string> = {
-    open: "#3b82f6",      // Blue
-    pending: "#f59e0b",   // Orange/Amber
-    on_hold: "#ef4444",   // Red
-    closed: "#10b981",    // Green
+    open: "var(--status-info)",
+    pending: "var(--status-medium)",
+    on_hold: "var(--status-high)",
+    closed: "var(--status-success)",
   }
 
   const ticketStatusData = ticketAnalytics 
@@ -222,9 +229,9 @@ export default function AnalyticsDashboard({ currentUserRole }: AnalyticsDashboa
     }))
 
   const aiWorkflowData = aiUsageStats ? [
-    { name: "Generated", value: aiUsageStats.draftsGenerated, fill: "#3b82f6" },
-    { name: "Sent", value: aiUsageStats.draftsSent, fill: "#10b981" },
-    { name: "Edited", value: aiUsageStats.draftsEdited, fill: "#f59e0b" },
+    { name: "Generated", value: aiUsageStats.draftsGenerated, fill: "var(--ai-gradient-from)" },
+    { name: "Sent", value: aiUsageStats.draftsSent, fill: "var(--status-success)" },
+    { name: "Edited", value: aiUsageStats.draftsEdited, fill: "var(--status-medium)" },
   ] : []
 
   const sendRate = aiUsageStats && aiUsageStats.draftsGenerated > 0
@@ -240,74 +247,86 @@ export default function AnalyticsDashboard({ currentUserRole }: AnalyticsDashboa
     : 0
 
   return (
-    <div className="space-y-6 p-6 max-w-[1600px] mx-auto">
+    <div className="space-y-6 p-6 max-w-[1600px] mx-auto bg-gradient-to-br from-muted/20 via-background to-muted/30 min-h-full">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Analytics Dashboard</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Comprehensive insights into your helpdesk performance
-          </p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-border/50">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-[var(--chart-1)] to-[var(--chart-3)] flex items-center justify-center shadow-md">
+            <BarChart3 className="w-5 h-5 text-white" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Analytics Dashboard</h1>
+            <p className="text-sm text-muted-foreground">
+              Comprehensive insights into your helpdesk performance
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <input
             type="date"
             value={dateRange.startDate}
             onChange={(e) => setDateRange({ ...dateRange, startDate: e.target.value })}
-            className="px-3 py-1.5 border rounded-md text-sm bg-background hover:border-foreground/20 transition-colors"
+            className="px-3 py-1.5 border rounded-md text-sm bg-background hover:border-foreground/20 transition-all shadow-sm"
           />
           <span className="text-sm text-muted-foreground">to</span>
           <input
             type="date"
             value={dateRange.endDate}
             onChange={(e) => setDateRange({ ...dateRange, endDate: e.target.value })}
-            className="px-3 py-1.5 border rounded-md text-sm bg-background hover:border-foreground/20 transition-colors"
+            className="px-3 py-1.5 border rounded-md text-sm bg-background hover:border-foreground/20 transition-all shadow-sm"
           />
           <button
             onClick={handleDateChange}
-            className="px-4 py-1.5 bg-foreground text-background rounded-md text-sm font-medium hover:bg-foreground/90 transition-colors"
+            className="px-4 py-1.5 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90 transition-all shadow-md hover:shadow-lg"
           >
             Update
           </button>
         </div>
       </div>
 
-      {/* Key Metrics Overview - Simplified, Less Color */}
+      {/* Key Metrics Overview - Colorful KPI Cards */}
       {ticketAnalytics && aiUsageStats && (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <Card className="hover:shadow-md transition-shadow">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Total Tickets</CardTitle>
-              <FileText className="h-4 w-4 text-muted-foreground opacity-50" />
+          <Card className="hover:shadow-lg transition-all hover:scale-[1.02] border-[var(--status-info)]/30 bg-gradient-to-br from-[var(--status-info-bg)] to-transparent">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 pt-6 px-6">
+              <CardTitle className="text-sm font-medium">Total Tickets</CardTitle>
+              <div className="w-8 h-8 rounded-lg bg-[var(--status-info)]/20 flex items-center justify-center">
+                <FileText className="h-4 w-4 text-[var(--status-info)]" />
+              </div>
             </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold tracking-tight">{ticketAnalytics.totalTickets}</div>
-              <p className="text-xs text-muted-foreground mt-2">
+            <CardContent className="px-6 pb-6">
+              <div className="text-3xl font-bold tracking-tight text-foreground">{ticketAnalytics.totalTickets}</div>
+              <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
+                <span className="inline-block w-2 h-2 rounded-full bg-[var(--status-success)]" />
                 {closureRate}% closed
               </p>
             </CardContent>
           </Card>
 
-          <Card className="hover:shadow-md transition-shadow">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">AI Send Rate</CardTitle>
-              <Zap className="h-4 w-4 text-muted-foreground opacity-50" />
+          <Card className="hover:shadow-lg transition-all hover:scale-[1.02] border-primary/30 bg-gradient-to-br from-primary/5 to-transparent">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 pt-6 px-6">
+              <CardTitle className="text-sm font-medium">AI Send Rate</CardTitle>
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[var(--ai-gradient-from)] to-[var(--ai-gradient-to)] flex items-center justify-center shadow-sm">
+                <Zap className="h-4 w-4 text-white" />
+              </div>
             </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold tracking-tight">{sendRate}%</div>
+            <CardContent className="px-6 pb-6">
+              <div className="text-3xl font-bold tracking-tight text-foreground">{sendRate}%</div>
               <p className="text-xs text-muted-foreground mt-2">
                 {aiUsageStats.draftsSent} of {aiUsageStats.draftsGenerated} drafts sent
               </p>
             </CardContent>
           </Card>
 
-          <Card className="hover:shadow-md transition-shadow">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Avg Response Time</CardTitle>
-              <Clock className="h-4 w-4 text-muted-foreground opacity-50" />
+          <Card className="hover:shadow-lg transition-all hover:scale-[1.02] border-[var(--status-medium)]/30 bg-gradient-to-br from-[var(--status-medium-bg)] to-transparent">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 pt-6 px-6">
+              <CardTitle className="text-sm font-medium">Avg Response Time</CardTitle>
+              <div className="w-8 h-8 rounded-lg bg-[var(--status-medium)]/20 flex items-center justify-center">
+                <Clock className="h-4 w-4 text-[var(--status-medium)]" />
+              </div>
             </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold tracking-tight">
+            <CardContent className="px-6 pb-6">
+              <div className="text-3xl font-bold tracking-tight text-foreground">
                 {ticketAnalytics.avgResponseTime > 0
                   ? formatMinutes(ticketAnalytics.avgResponseTime)
                   : "N/A"}
@@ -318,14 +337,17 @@ export default function AnalyticsDashboard({ currentUserRole }: AnalyticsDashboa
             </CardContent>
           </Card>
 
-          <Card className="hover:shadow-md transition-shadow">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Active Agents</CardTitle>
-              <Users className="h-4 w-4 text-muted-foreground opacity-50" />
+          <Card className="hover:shadow-lg transition-all hover:scale-[1.02] border-[var(--status-success)]/30 bg-gradient-to-br from-[var(--status-success-bg)] to-transparent">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 pt-6 px-6">
+              <CardTitle className="text-sm font-medium">Active Agents</CardTitle>
+              <div className="w-8 h-8 rounded-lg bg-[var(--status-success)]/20 flex items-center justify-center">
+                <Users className="h-4 w-4 text-[var(--status-success)]" />
+              </div>
             </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold tracking-tight">{agentAnalytics.length}</div>
-              <p className="text-xs text-muted-foreground mt-2">
+            <CardContent className="px-6 pb-6">
+              <div className="text-3xl font-bold tracking-tight text-foreground">{agentAnalytics.length}</div>
+              <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
+                <span className="inline-block w-2 h-2 rounded-full bg-[var(--status-success)]" />
                 {agentAnalytics.filter(a => a.ticketsAssigned > 0).length} with active tickets
               </p>
             </CardContent>
@@ -334,12 +356,37 @@ export default function AnalyticsDashboard({ currentUserRole }: AnalyticsDashboa
       )}
 
       <Tabs defaultValue="overview" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-5">
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="tickets">Tickets</TabsTrigger>
-          <TabsTrigger value="ai">AI Usage</TabsTrigger>
-          <TabsTrigger value="agents">Agents</TabsTrigger>
-          <TabsTrigger value="guardrails">Guardrails</TabsTrigger>
+        <TabsList className="grid w-full grid-cols-5 bg-muted/50 p-1 rounded-xl">
+          <TabsTrigger 
+            value="overview" 
+            className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md font-medium transition-all data-[state=inactive]:text-muted-foreground"
+          >
+            Overview
+          </TabsTrigger>
+          <TabsTrigger 
+            value="tickets" 
+            className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md font-medium transition-all data-[state=inactive]:text-muted-foreground"
+          >
+            Tickets
+          </TabsTrigger>
+          <TabsTrigger 
+            value="ai" 
+            className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md font-medium transition-all data-[state=inactive]:text-muted-foreground"
+          >
+            AI Usage
+          </TabsTrigger>
+          <TabsTrigger 
+            value="agents" 
+            className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md font-medium transition-all data-[state=inactive]:text-muted-foreground"
+          >
+            Agents
+          </TabsTrigger>
+          <TabsTrigger 
+            value="guardrails" 
+            className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md font-medium transition-all data-[state=inactive]:text-muted-foreground"
+          >
+            Guardrails
+          </TabsTrigger>
         </TabsList>
 
         {/* Overview Tab */}

@@ -114,42 +114,86 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
 
   if (loading && !loadingMore) {
     return (
-      <div className="flex items-center justify-center p-8 animate-in fade-in duration-300">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-          <div className="text-sm text-muted-foreground">Loading emails...</div>
-        </div>
+      <div className="p-4 space-y-3 animate-in fade-in duration-300">
+        {[1, 2, 3, 4, 5].map((i) => (
+          <div key={i} className="border border-border/50 rounded-xl p-4 bg-card">
+            <div className="flex gap-4">
+              <div className="w-10 h-10 rounded-full bg-muted animate-pulse" />
+              <div className="flex-1 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="h-5 bg-muted rounded w-1/3 animate-pulse" />
+                  <div className="h-4 bg-muted rounded w-16 animate-pulse" />
+                </div>
+                <div className="space-y-2">
+                  <div className="h-4 bg-muted rounded w-2/3 animate-pulse" />
+                  <div className="h-4 bg-muted rounded w-full animate-pulse" />
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
     )
   }
 
   if (error && !loadingMore) {
     return (
-      <div className="flex flex-col items-center justify-center p-8 space-y-2">
-        <div className="text-sm text-destructive">{error}</div>
-        <button
-          onClick={fetchEmails}
-          className="text-xs text-primary hover:underline"
-        >
-          Retry
-        </button>
+      <div className="flex items-center justify-center p-12 animate-in fade-in duration-300">
+        <div className="text-center space-y-5 max-w-sm">
+          <div className="w-24 h-24 rounded-3xl bg-gradient-to-br from-destructive/15 via-destructive/10 to-destructive/5 flex items-center justify-center mx-auto shadow-lg border-2 border-destructive/20">
+            <svg className="w-12 h-12 text-destructive" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          </div>
+          <div className="space-y-3">
+            <div className="text-base font-bold text-destructive">Failed to load emails</div>
+            <p className="text-sm text-muted-foreground leading-relaxed">{error}</p>
+            <button
+              onClick={() => fetchEmails()}
+              className="text-sm text-primary hover:underline font-semibold mt-2"
+            >
+              Try again
+            </button>
+          </div>
+        </div>
       </div>
     )
   }
 
   if (emails.length === 0 && !loadingMore) {
     return (
-      <div className="flex items-center justify-center p-8 animate-in fade-in duration-300">
-        <div className="text-center space-y-2">
-          <div className="text-sm text-muted-foreground">No emails found</div>
-          <p className="text-xs text-muted-foreground/70">Try checking another folder</p>
+      <div className="flex items-center justify-center p-12 animate-in fade-in duration-300">
+        <div className="text-center space-y-5 max-w-sm">
+          <div className="w-24 h-24 rounded-3xl bg-gradient-to-br from-primary/15 via-accent/10 to-primary/5 flex items-center justify-center mx-auto shadow-lg border-2 border-primary/20">
+            <svg className="w-12 h-12 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+          </div>
+          <div className="space-y-3">
+            <div className="text-base font-bold text-foreground">No emails found</div>
+            <p className="text-sm text-muted-foreground leading-relaxed">Try checking another folder or refresh the page</p>
+          </div>
         </div>
       </div>
     )
   }
 
+  const getInitials = (from: string) => {
+    const name = from.split("<")[0].trim() || from;
+    return name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
+  };
+
+  const getAvatarColor = (from: string) => {
+    const colors = [
+      "bg-blue-500", "bg-purple-500", "bg-pink-500", "bg-green-500",
+      "bg-yellow-500", "bg-red-500", "bg-indigo-500", "bg-teal-500"
+    ];
+    const hash = from.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return colors[hash % colors.length];
+  };
+
   return (
-    <div className="p-2 space-y-2">
+    <div className="p-4 space-y-3 overflow-x-hidden max-w-full">
       {emails.map((email, index) => (
         <button
           key={email.id}
@@ -162,30 +206,54 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
             body: email.body,
             threadId: email.threadId,
           })}
-          className={`w-full p-4 text-left rounded-lg transition-all duration-300 ease-out border-l-4 animate-in fade-in slide-in-from-left-2 ${
+          className={`w-full text-left rounded-xl transition-all duration-200 ease-out border animate-in fade-in slide-in-from-left-2 group relative overflow-hidden ${
             selectedEmail === email.id 
-              ? "border-l-primary bg-primary/10 shadow-md scale-[1.01]" 
-              : "border-l-transparent hover:bg-muted/50 hover:shadow-sm hover:scale-[1.005]"
+              ? "border-primary/50 bg-accent/15 shadow-lg ring-2 ring-primary/30 border-l-4" 
+              : "border-border/50 hover:border-primary/40 hover:bg-accent/5 hover:shadow-md bg-card"
           }`}
-          style={{ animationDelay: `${index * 30}ms` }}
+          style={{ animationDelay: `${index * 20}ms` }}
         >
-          <div className="space-y-2.5">
-            <div className="flex justify-between items-start gap-3">
-              <h3 className="font-semibold text-foreground text-sm truncate flex-1">
-                {email.from.split("<")[0].trim() || email.from}
-              </h3>
-              <span className="text-xs text-muted-foreground flex-shrink-0 whitespace-nowrap">
-                {formatDate(email.date)}
-              </span>
+          <div className="flex gap-4 p-4 relative z-10">
+            {/* Avatar */}
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-sm flex-shrink-0 ${
+              getAvatarColor(email.from)
+            } shadow-md`}>
+              {getInitials(email.from)}
             </div>
-            <p className="text-sm font-medium text-foreground line-clamp-1">
-              {email.subject || "(No subject)"}
-            </p>
-            {email.snippet && (
-              <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
-                {email.snippet}
-              </p>
-            )}
+            
+            {/* Content */}
+            <div className="flex-1 min-w-0 space-y-2">
+              {/* Header row */}
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <h3 className={`font-semibold text-base truncate transition-colors ${
+                    selectedEmail === email.id ? "text-primary" : "text-foreground group-hover:text-primary"
+                  }`}>
+                    {email.from.split("<")[0].trim() || email.from}
+                  </h3>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <span className="text-xs text-muted-foreground font-medium">
+                    {formatDate(email.date)}
+                  </span>
+                  {selectedEmail === email.id && (
+                    <div className="w-2 h-2 bg-primary rounded-full animate-pulse shadow-sm shadow-primary/50" />
+                  )}
+                </div>
+              </div>
+              
+              {/* Subject and snippet */}
+              <div className="space-y-1.5">
+                <p className="text-sm font-semibold text-foreground line-clamp-1 leading-snug">
+                  {email.subject || "(No subject)"}
+                </p>
+                {email.snippet && (
+                  <p className="text-sm text-muted-foreground line-clamp-2 leading-relaxed">
+                    {email.snippet}
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
         </button>
       ))}
@@ -195,9 +263,16 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
           <button
             onClick={handleLoadMore}
             disabled={loadingMore}
-            className="text-xs px-4 py-2 rounded-lg border border-border text-primary hover:bg-secondary hover:shadow-sm transition-all duration-300 ease-out hover:scale-105 disabled:opacity-60 disabled:cursor-not-allowed"
+            className="text-sm px-8 py-3 rounded-xl border-2 border-border/60 bg-card text-primary hover:bg-accent/10 hover:border-primary/60 hover:shadow-lg transition-all duration-200 ease-out hover:scale-105 disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:scale-100 font-semibold"
           >
-            {loadingMore ? "Loading more..." : "Load more"}
+            {loadingMore ? (
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                Loading more...
+              </div>
+            ) : (
+              "Load more emails"
+            )}
           </button>
         </div>
       )}

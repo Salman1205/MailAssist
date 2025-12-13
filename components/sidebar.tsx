@@ -1,6 +1,7 @@
 "use client"
 
-import { Sparkles } from 'lucide-react'
+import { useState } from "react"
+import { Sparkles, ChevronLeft, ChevronRight } from 'lucide-react'
 
 export type SidebarView =
   | "inbox"
@@ -8,6 +9,7 @@ export type SidebarView =
   | "spam"
   | "trash"
   | "drafts"
+  | "compose"
   | "settings"
   | "users"
   | "tickets"
@@ -23,13 +25,14 @@ interface SidebarProps {
 }
 
 const NAV_ITEMS = [
+  { id: "tickets", label: "Tickets", icon: TicketIcon },
   { id: "inbox", label: "Inbox", icon: InboxIcon },
+  { id: "compose", label: "Compose", icon: ComposeIcon },
+  { id: "quick-replies", label: "Quick Replies", icon: QuickRepliesIcon },
   { id: "sent", label: "Sent", icon: SentIcon },
+  { id: "drafts", label: "Drafts", icon: DraftIcon },
   { id: "spam", label: "Spam", icon: SpamIcon },
   { id: "trash", label: "Trash", icon: TrashIcon },
-  { id: "tickets", label: "Tickets", icon: TicketIcon },
-  { id: "drafts", label: "Drafts", icon: DraftIcon },
-  { id: "quick-replies", label: "Quick Replies", icon: QuickRepliesIcon },
   { id: "settings", label: "Settings", icon: SettingsIcon },
 ] as const
 
@@ -45,50 +48,92 @@ const ANALYTICS_NAV_ITEMS = [
   { id: "analytics", label: "Analytics", icon: AnalyticsIcon },
 ] as const
 
+/**
+ * Collapsible sidebar inspired by Gorgias and Linear.
+ * - Collapsed by default: shows only icons
+ * - Expanded: shows icons + labels
+ * - Smooth 300ms transition animation
+ * - Tooltips on hover when collapsed
+ */
 export default function Sidebar({ activeView, setActiveView, onLogout, currentUser }: SidebarProps) {
+  const [isCollapsed, setIsCollapsed] = useState(true)
   const isAdmin = currentUser?.role === "admin"
   const isManager = currentUser?.role === "manager"
+
   return (
-    <aside className="hidden md:flex w-60 bg-card border-r border-border flex-col">
-      <nav className="flex-1 px-3 py-6 space-y-1">
+    <aside
+      className={`
+        hidden md:flex flex-col h-screen bg-card border-r border-border
+        transition-all duration-300 ease-out shadow-md
+        ${isCollapsed ? "w-20" : "w-64"}
+      `}
+    >
+      {/* Collapse/Expand Toggle at Top */}
+      <div
+        className={`
+          flex-shrink-0 h-16 flex items-center border-b border-border
+          transition-all duration-300 bg-card
+          ${isCollapsed ? "justify-center px-2" : "px-5 justify-between"}
+        `}
+      >
+        {!isCollapsed && (
+          <div className="flex items-center gap-2">
+            <span className="text-base font-bold text-foreground tracking-tight">MailAssist</span>
+          </div>
+        )}
+        <button
+          onClick={() => setIsCollapsed(!isCollapsed)}
+          className={`
+            h-10 w-10 flex items-center justify-center rounded-xl
+            text-muted-foreground hover:bg-accent/10 hover:text-foreground
+            transition-all duration-200 ease-out hover:shadow-md
+            focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary
+          `}
+          title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          {isCollapsed ? (
+            <ChevronRight className="w-5 h-5" />
+          ) : (
+            <ChevronLeft className="w-5 h-5" />
+          )}
+        </button>
+      </div>
+
+      {/* Navigation */}
+      <nav className={`flex-1 ${isCollapsed ? "px-2 py-4" : "px-3 py-6"} space-y-1`}>
         {NAV_ITEMS.map((item) => {
           const isActive = activeView === item.id
           const Icon = item.icon
 
           return (
-            <button
+            <NavButton
               key={item.id}
+              isActive={isActive}
+              isCollapsed={isCollapsed}
+              icon={<Icon className="w-5 h-5 flex-shrink-0" />}
+              label={item.label}
               onClick={() => setActiveView(item.id)}
-              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-left font-medium transition-all duration-300 ease-out ${
-                isActive 
-                  ? "bg-primary text-primary-foreground shadow-md scale-[1.02]" 
-                  : "text-foreground hover:bg-secondary hover:scale-[1.01] hover:shadow-sm"
-              }`}
-            >
-              <Icon className="w-5 h-5 flex-shrink-0 transition-transform duration-300 ease-out group-hover:scale-110" />
-              <span className="text-sm">{item.label}</span>
-            </button>
+            />
           )
         })}
-        
+
         {isAdmin && (
           <>
-            <div className="h-px bg-border my-2" />
+            <Divider isCollapsed={isCollapsed} />
             {ADMIN_NAV_ITEMS.map((item) => {
               const isActive = activeView === item.id
               const Icon = item.icon
 
               return (
-                <button
+                <NavButton
                   key={item.id}
+                  isActive={isActive}
+                  isCollapsed={isCollapsed}
+                  icon={<Icon className="w-5 h-5 flex-shrink-0" />}
+                  label={item.label}
                   onClick={() => setActiveView(item.id)}
-                  className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-left font-medium transition-all ${
-                    isActive ? "bg-primary text-primary-foreground shadow-sm" : "text-foreground hover:bg-secondary"
-                  }`}
-                >
-                  <Icon className="w-5 h-5 flex-shrink-0" />
-                  <span className="text-sm">{item.label}</span>
-                </button>
+                />
               )
             })}
           </>
@@ -96,22 +141,20 @@ export default function Sidebar({ activeView, setActiveView, onLogout, currentUs
 
         {(isAdmin || isManager) && (
           <>
-            <div className="h-px bg-border my-2" />
+            <Divider isCollapsed={isCollapsed} />
             {AI_NAV_ITEMS.map((item) => {
               const isActive = activeView === item.id
               const Icon = item.icon
 
               return (
-                <button
+                <NavButton
                   key={item.id}
+                  isActive={isActive}
+                  isCollapsed={isCollapsed}
+                  icon={<Icon className="w-5 h-5 flex-shrink-0" />}
+                  label={item.label}
                   onClick={() => setActiveView(item.id)}
-                  className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-left font-medium transition-all ${
-                    isActive ? "bg-primary text-primary-foreground shadow-sm" : "text-foreground hover:bg-secondary"
-                  }`}
-                >
-                  <Icon className="w-5 h-5 flex-shrink-0" />
-                  <span className="text-sm">{item.label}</span>
-                </button>
+                />
               )
             })}
             {ANALYTICS_NAV_ITEMS.map((item) => {
@@ -119,32 +162,97 @@ export default function Sidebar({ activeView, setActiveView, onLogout, currentUs
               const Icon = item.icon
 
               return (
-                <button
+                <NavButton
                   key={item.id}
+                  isActive={isActive}
+                  isCollapsed={isCollapsed}
+                  icon={<Icon className="w-5 h-5 flex-shrink-0" />}
+                  label={item.label}
                   onClick={() => setActiveView(item.id)}
-                  className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-left font-medium transition-all ${
-                    isActive ? "bg-primary text-primary-foreground shadow-sm" : "text-foreground hover:bg-secondary"
-                  }`}
-                >
-                  <Icon className="w-5 h-5 flex-shrink-0" />
-                  <span className="text-sm">{item.label}</span>
-                </button>
+                />
               )
             })}
           </>
         )}
       </nav>
 
-      <div className="p-3 border-t border-border">
-        <button
+      {/* Logout button */}
+      <div className={`flex-shrink-0 border-t border-border ${isCollapsed ? "p-2" : "p-3"}`}>
+        <NavButton
+          isActive={false}
+          isCollapsed={isCollapsed}
+          icon={<LogoutIcon className="w-5 h-5 flex-shrink-0" />}
+          label="Logout"
           onClick={onLogout}
-          className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-foreground hover:bg-secondary transition-all font-medium"
-        >
-          <LogoutIcon className="w-5 h-5 flex-shrink-0" />
-          <span className="text-sm">Logout</span>
-        </button>
+        />
       </div>
     </aside>
+  )
+}
+
+interface NavButtonProps {
+  isActive: boolean
+  isCollapsed: boolean
+  icon: React.ReactNode
+  label: string
+  onClick?: () => void
+}
+
+function NavButton({ isActive, isCollapsed, icon, label, onClick }: NavButtonProps) {
+  return (
+    <button
+      onClick={onClick}
+      className={`
+        group relative w-full flex items-center justify-center rounded-lg
+        transition-all duration-200 ease-out
+        ${isCollapsed ? "h-11 px-2" : "h-10 px-3 gap-3"}
+        ${
+          isActive
+            ? "bg-primary text-primary-foreground shadow-sm"
+            : "text-foreground hover:bg-secondary/80 hover:text-primary"
+        }
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
+      `}
+      title={isCollapsed ? label : undefined}
+    >
+      <div className="flex-shrink-0">
+        {icon}
+      </div>
+      {!isCollapsed && (
+        <span className="text-sm font-medium flex-1 text-left truncate">{label}</span>
+      )}
+      
+      {/* Tooltip for collapsed state */}
+      {isCollapsed && (
+        <div
+          className="
+            absolute left-full ml-3 px-3 py-1.5
+            bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900
+            text-xs font-semibold rounded-lg whitespace-nowrap
+            pointer-events-none opacity-0 invisible
+            group-hover:opacity-100 group-hover:visible
+            transition-all duration-200
+            shadow-lg border border-gray-800 dark:border-gray-200
+            z-50
+          "
+          style={{
+            transform: 'translateX(0)',
+          }}
+        >
+          {label}
+          {/* Tooltip arrow */}
+          <div className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-gray-900 dark:border-r-gray-100" />
+        </div>
+      )}
+    </button>
+  )
+}
+
+function Divider({ isCollapsed }: { isCollapsed: boolean }) {
+  return (
+    <div className={`my-2 ${isCollapsed ? "mx-1" : "mx-2"}`}>
+      <div className="h-px bg-border/50" />
+    </div>
   )
 }
 
@@ -192,6 +300,15 @@ function DraftIcon(props: React.SVGProps<SVGSVGElement>) {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" {...props}>
       <path d="M12 20h9" />
       <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+    </svg>
+  )
+}
+
+function ComposeIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" {...props}>
+      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
     </svg>
   )
 }

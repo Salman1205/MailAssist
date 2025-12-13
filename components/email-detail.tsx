@@ -3,8 +3,9 @@
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/components/ui/use-toast"
-import { ArrowLeft, ChevronDown, ChevronUp } from "lucide-react"
+import { ArrowLeft, ChevronDown, ChevronUp, Sparkles, Loader2, Mail } from "lucide-react"
 
 interface EmailDetailProps {
   emailId: string
@@ -83,6 +84,10 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
 
   useEffect(() => {
     if (emailId) {
+      // CRITICAL UX FIX: Clear previous email content immediately
+      setThreadMessages([])
+      setEmailSummary(null)
+      
       // Reset draft/UI state whenever user selects a new email
       setShowDraft(false)
       setDraftMinimized(false)
@@ -347,10 +352,30 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full w-full">
-        <div className="flex flex-col items-center gap-3 text-center">
-          <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-          <div className="text-sm text-muted-foreground">Loading email...</div>
+      <div className="flex flex-col h-full overflow-hidden animate-in fade-in duration-300">
+        {/* Header skeleton */}
+        <div className="border-b border-border px-6 py-5 bg-card">
+          <div className="h-6 bg-muted rounded w-1/3 animate-pulse mb-3" />
+          <div className="h-4 bg-muted rounded w-1/4 animate-pulse" />
+        </div>
+        
+        {/* Messages skeleton */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          {[1, 2].map((i) => (
+            <div key={i} className="border border-border rounded-xl p-5 bg-card">
+              <div className="space-y-3">
+                <div className="flex items-start justify-between">
+                  <div className="h-5 bg-muted rounded w-1/3 animate-pulse" />
+                  <div className="h-4 bg-muted rounded w-20 animate-pulse" />
+                </div>
+                <div className="space-y-2">
+                  <div className="h-4 bg-muted rounded w-full animate-pulse" />
+                  <div className="h-4 bg-muted rounded w-5/6 animate-pulse" />
+                  <div className="h-4 bg-muted rounded w-4/5 animate-pulse" />
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     )
@@ -358,7 +383,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
 
   if (error && threadMessages.length === 0) {
     return (
-      <div className="p-6 flex flex-col items-center justify-center space-y-2">
+      <div className="p-6 flex flex-col items-center justify-center space-y-3">
         {onBack && (
           <Button
             onClick={onBack}
@@ -367,24 +392,30 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
             className="md:hidden self-start -mt-2 -ml-2"
           >
             <ArrowLeft className="w-4 h-4 mr-1" />
-            Back to inbox
+            Back
           </Button>
         )}
-        <div className="text-sm text-destructive">{error}</div>
-        <button
+        <div className="text-sm font-medium text-destructive">{error}</div>
+        <Button
           onClick={fetchThread}
-          className="text-xs text-primary hover:underline"
+          variant="outline"
+          size="sm"
+          className="text-xs"
         >
           Retry
-        </button>
+        </Button>
       </div>
     )
   }
 
   if (threadMessages.length === 0 && !emailSummary) {
     return (
-      <div className="p-6 flex items-center justify-center">
-        <div className="text-sm text-muted-foreground">No email selected</div>
+      <div className="p-6 flex items-center justify-center h-full">
+        <div className="text-center space-y-2">
+          <Mail className="w-12 h-12 mx-auto text-muted-foreground/40" />
+          <div className="text-sm font-medium text-muted-foreground">No email selected</div>
+          <p className="text-xs text-muted-foreground/70">Select an email to view the conversation</p>
+        </div>
       </div>
     )
   }
@@ -398,179 +429,221 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
   }
 
   return (
-    <div className="p-4 md:p-6 space-y-4 h-full overflow-y-auto">
+    <div className="h-full flex flex-col bg-muted/20 overflow-hidden">
       {onBack && (
-        <div className="md:hidden mb-2">
+        <div className="md:hidden px-4 pt-3 pb-2 flex-shrink-0 bg-background border-b border-border">
           <Button
             onClick={onBack}
             variant="ghost"
             size="sm"
-            className="h-8 text-xs -ml-2 text-muted-foreground"
+            className="h-8 text-xs -ml-2"
           >
             <ArrowLeft className="w-4 h-4 mr-1" />
             Back
           </Button>
         </div>
       )}
-      <Card className="border border-border p-4 md:p-5 space-y-3 overflow-hidden">
-        <div className="pb-2 border-b border-border/50">
-          <h2 className="text-lg md:text-xl font-semibold text-foreground line-clamp-2">
-            {threadMessages[threadMessages.length - 1]?.subject || emailSummary?.subject || "(No subject)"}
-          </h2>
-        </div>
+      
+      <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+        <Card className="mx-4 md:mx-6 mt-4 mb-3 flex-1 flex flex-col overflow-hidden max-w-full shadow-lg">
+          <div className="px-6 py-5 border-b border-border flex-shrink-0 overflow-hidden bg-card">
+            <h2 className="text-xl font-bold text-foreground line-clamp-2 break-words">
+              {threadMessages[threadMessages.length - 1]?.subject || emailSummary?.subject || "(No subject)"}
+            </h2>
+          </div>
 
-        <div className="space-y-2 text-sm flex-1 overflow-y-auto pr-1">
-          {threadMessages.length > 0 ? (
-            threadMessages.map((msg, index) => (
-              <div
-                key={msg.id}
-                className="pb-3 border-b border-border/50 last:border-b-0 last:pb-0 animate-in fade-in slide-in-from-left-2"
-                style={{ animationDelay: `${index * 30}ms` }}
-              >
-                <div className="flex justify-between items-start gap-3 mb-2">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <div className="text-xs font-medium text-muted-foreground">
-                        {index === 0 ? "Started" : "Message"}
+          <div className="flex-1 overflow-y-auto overflow-x-hidden min-h-0 px-6 py-4">
+            <div className="space-y-6 max-w-full">
+              {threadMessages.length > 0 ? (
+                threadMessages.map((msg, index) => (
+                  <div
+                    key={msg.id}
+                    className="pb-6 border-b border-border last:border-b-0 last:pb-0 overflow-hidden"
+                  >
+                    <div className="flex justify-between items-start gap-4 mb-3 min-w-0">
+                      <div className="flex-1 min-w-0 overflow-hidden">
+                        <div className="flex items-center gap-2 mb-1.5 min-w-0">
+                          <div className="text-sm font-semibold text-foreground truncate">
+                            {msg.from.split("<")[0].trim() || msg.from}
+                          </div>
+                          {index === 0 && (
+                            <Badge variant="outline" className="text-xs flex-shrink-0">Original</Badge>
+                          )}
+                        </div>
+                        <div className="text-xs text-muted-foreground truncate">
+                          To: {msg.to.split("<")[0].trim() || msg.to}
+                        </div>
                       </div>
-                      <div className="text-xs font-semibold text-foreground truncate">
-                        {msg.from.split("<")[0].trim() || msg.from}
-                      </div>
-                    </div>
-                    <div className="text-xs text-muted-foreground truncate">
-                      To: {msg.to.split("<")[0].trim() || msg.to}
-                    </div>
-                  </div>
-                  <div className="text-xs text-muted-foreground flex-shrink-0 whitespace-nowrap">
-                    {formatDate(msg.date)}
-                  </div>
-                </div>
-                <div className="text-sm text-foreground whitespace-pre-wrap break-words leading-relaxed">
-                  {msg.body || msg.snippet || "No content"}
-                </div>
-              </div>
-            ))
-          ) : (
-            // Fallback: show emailSummary if we have it but no thread messages yet
-            emailSummary ? (
-              <div className="pb-3 border-b border-border/50 last:border-b-0">
-                <div className="flex justify-between items-start gap-3 mb-2">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <div className="text-xs font-medium text-muted-foreground">Message</div>
-                      <div className="text-xs font-semibold text-foreground truncate">
-                        {emailSummary.from.split("<")[0].trim() || emailSummary.from}
+                      <div className="text-xs text-muted-foreground flex-shrink-0 whitespace-nowrap">
+                        {formatDate(msg.date)}
                       </div>
                     </div>
-                    <div className="text-xs text-muted-foreground truncate">
-                      To: {emailSummary.to.split("<")[0].trim() || emailSummary.to}
+                    <div className="text-sm text-foreground/90 leading-relaxed overflow-hidden break-words">
+                      {msg.body && msg.body.trim() ? (
+                        // Check if it looks like HTML (more comprehensive check)
+                        /<[^>]*(div|p|span|html|table|tr|td|br|img|a|b|i|em|strong|blockquote|pre|code|ul|ol|li|h[1-6])[\s>]/i.test(msg.body) ? (
+                          <div 
+                            className="prose prose-sm max-w-none 
+                              prose-headings:font-semibold prose-headings:text-foreground
+                              prose-p:text-foreground prose-p:leading-relaxed
+                              prose-a:text-primary prose-a:no-underline hover:prose-a:underline
+                              prose-ul:text-foreground prose-ol:text-foreground
+                              prose-li:text-foreground prose-li:leading-relaxed
+                              prose-code:text-foreground prose-code:bg-muted prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded
+                              prose-pre:bg-muted prose-pre:text-foreground
+                              prose-blockquote:text-muted-foreground prose-blockquote:border-primary
+                              prose-img:rounded-lg overflow-hidden break-words"
+                            dangerouslySetInnerHTML={{ __html: msg.body }}
+                          />
+                        ) : (
+                          <div className="whitespace-pre-wrap break-words">
+                            {msg.body}
+                          </div>
+                        )
+                      ) : (
+                        <div className="text-muted-foreground italic">
+                          No content
+                        </div>
+                      )}
                     </div>
                   </div>
-                  <div className="text-xs text-muted-foreground flex-shrink-0 whitespace-nowrap">
-                    {formatDate(emailSummary.date)}
+                ))
+              ) : (
+                // Fallback: show emailSummary if we have it but no thread messages yet
+                emailSummary ? (
+                  <div className="pb-4 border-b border-border/50 last:border-b-0">
+                    <div className="flex justify-between items-start gap-3 mb-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <div className="text-xs font-medium text-muted-foreground">Message</div>
+                          <div className="text-xs font-semibold text-foreground truncate">
+                            {emailSummary.from.split("<")[0].trim() || emailSummary.from}
+                          </div>
+                        </div>
+                        <div className="text-xs text-muted-foreground truncate">
+                          To: {emailSummary.to.split("<")[0].trim() || emailSummary.to}
+                        </div>
+                      </div>
+                      <div className="text-xs text-muted-foreground flex-shrink-0 whitespace-nowrap">
+                        {formatDate(emailSummary.date)}
+                      </div>
+                    </div>
+                    <div className="text-sm text-foreground whitespace-pre-wrap break-words leading-relaxed overflow-hidden" style={{ wordBreak: 'break-word', overflowWrap: 'break-word' }}>
+                      {emailSummary.body || emailSummary.snippet || "Loading content..."}
+                    </div>
                   </div>
-                </div>
-                <div className="text-sm text-foreground whitespace-pre-wrap break-words leading-relaxed">
-                  {emailSummary.body || emailSummary.snippet || "Loading content..."}
-                </div>
-              </div>
-            ) : (
-              <div className="text-sm text-muted-foreground">Loading content...</div>
-            )
-          )}
-        </div>
-      </Card>
-
-      {error && (
-        <div className="text-sm text-destructive bg-destructive/10 p-3 rounded-lg">
-          {error}
-        </div>
-      )}
-
-      <Card className="border border-border p-4 md:p-5 space-y-3">
-        <Button
-          onClick={handleGenerateDraft}
-          disabled={generating || showDraft}
-          className="w-full bg-primary hover:bg-primary/95 text-primary-foreground font-medium rounded-lg h-10 transition-all duration-300 ease-out hover:scale-105 hover:shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
-        >
-          {generating ? "Generating..." : showDraft ? "Draft Generated" : "Generate AI Draft"}
-        </Button>
-
-        {showDraft && (
-          <div className="space-y-3 pt-3 border-t border-border animate-in fade-in slide-in-from-bottom-2 duration-300">
-            <div className="flex items-center justify-between gap-3">
-              <h3 className="text-sm font-medium text-foreground">Suggested Draft</h3>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setDraftMinimized(!draftMinimized)}
-                className="h-8 px-3 transition-all duration-300 ease-out hover:scale-105 hover:shadow-sm flex items-center gap-1.5"
-                title={draftMinimized ? "Expand draft" : "Minimize draft"}
-              >
-                {draftMinimized ? (
-                  <>
-                    <ChevronDown className="w-4 h-4 transition-transform duration-300 ease-out" />
-                    <span className="text-xs">Expand</span>
-                  </>
                 ) : (
-                  <>
-                    <ChevronUp className="w-4 h-4 transition-transform duration-300 ease-out" />
-                    <span className="text-xs">Minimize</span>
-                  </>
-                )}
-              </Button>
+                  <div className="text-sm text-muted-foreground">Loading content...</div>
+                )
+              )}
             </div>
-            {draftMinimized ? (
-              <div className="text-xs text-muted-foreground italic py-2 animate-in fade-in duration-300">
-                Draft minimized - click expand button above to view
-              </div>
-            ) : (
-              <div className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-300">
-                <textarea
-                  value={draftText}
-                  onChange={(e) => setDraftText(e.target.value)}
-                  className="w-full h-40 p-3 border border-border rounded-lg bg-input text-foreground placeholder:text-muted-foreground text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary transition-all duration-300"
-                />
-              </div>
-            )}
+          </div>
+        </Card>
 
-            {!draftMinimized && (
-              <div className="flex flex-col gap-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                <Button
-                  onClick={handleSendReply}
-                  disabled={sending || sendSuccess}
-                  className={`rounded-lg h-9 transition-all duration-300 ease-out hover:scale-105 hover:shadow-md disabled:cursor-not-allowed text-sm ${
-                    sendSuccess 
-                      ? "bg-green-600 text-white hover:bg-green-600" 
-                      : "bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-                  }`}
-                >
-                  {sendSuccess ? "✓ Reply sent!" : sending ? "Sending..." : "Send Reply"}
-                </Button>
-                <div className="flex gap-2">
+        {error && (
+          <div className="mx-4 md:mx-6 mb-3 px-4 py-3 text-sm font-medium text-destructive bg-destructive/10 rounded-lg border border-destructive/20">
+            {error}
+          </div>
+        )}
+
+        <Card className="mx-4 md:mx-6 mb-4 flex-shrink-0 overflow-hidden">
+          <div className="p-6 space-y-4">
+            <Button
+              onClick={handleGenerateDraft}
+              disabled={generating || showDraft}
+              className="w-full h-11 text-base font-semibold shadow-md hover:shadow-lg"
+            >
+              {generating ? (
+                <>
+                  <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                  Generating draft...
+                </>
+              ) : showDraft ? (
+                <>
+                  <Sparkles className="w-5 h-5 mr-2" />
+                  Draft generated
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-5 h-5 mr-2" />
+                  Generate AI draft
+                </>
+              )}
+            </Button>
+
+            {showDraft && (
+              <div className="space-y-4 pt-4 border-t border-border animate-in fade-in slide-in-from-bottom-2 duration-300">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-primary" />
+                    AI-Generated Draft
+                  </h3>
                   <Button
-                    onClick={handleCopy}
-                    variant="outline"
+                    variant="ghost"
                     size="sm"
-                    className="flex-1 rounded-lg h-9 border-border text-foreground hover:bg-secondary bg-transparent transition-all duration-300 ease-out hover:scale-105 hover:shadow-sm text-xs"
+                    onClick={() => setDraftMinimized(!draftMinimized)}
+                    className="h-9 px-3 hover:bg-accent/10"
+                    title={draftMinimized ? "Expand draft" : "Minimize draft"}
                   >
-                    {copied ? "✓ Copied!" : "Copy Draft"}
-                  </Button>
-                  <Button
-                    onClick={handleRegenerate}
-                    variant="outline"
-                    size="sm"
-                    disabled={generating}
-                    className="flex-1 rounded-lg h-9 border-border text-foreground hover:bg-secondary bg-transparent transition-all duration-300 ease-out hover:scale-105 hover:shadow-sm disabled:opacity-50 disabled:cursor-not-allowed text-xs"
-                  >
-                    {generating ? "Regenerating..." : "Regenerate"}
+                    {draftMinimized ? (
+                      <ChevronDown className="w-4 h-4" />
+                    ) : (
+                      <ChevronUp className="w-4 h-4" />
+                    )}
                   </Button>
                 </div>
+                {draftMinimized ? (
+                  <div className="text-sm text-muted-foreground italic py-3 px-4 bg-muted/30 rounded-lg">
+                    Draft minimized - click to expand
+                  </div>
+                ) : (
+                  <div className="space-y-3 animate-in fade-in slide-in-from-top-2 duration-300">
+                    <textarea
+                      value={draftText}
+                      onChange={(e) => setDraftText(e.target.value)}
+                      className="w-full min-h-[200px] p-4 border-2 border-border rounded-xl bg-background text-foreground placeholder:text-muted-foreground text-sm resize-y focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all duration-200"
+                      placeholder="Edit your draft here..."
+                    />
+                  </div>
+                )}
+
+                {!draftMinimized && (
+                  <div className="space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                    <Button
+                      onClick={handleSendReply}
+                      disabled={sending || sendSuccess}
+                      className={`w-full h-11 text-base font-semibold shadow-md transition-all duration-300 ease-out hover:shadow-lg disabled:cursor-not-allowed ${
+                        sendSuccess 
+                          ? "bg-green-600 text-white hover:bg-green-600" 
+                          : "disabled:opacity-50"
+                      }`}
+                    >
+                      {sendSuccess ? "✓ Reply sent!" : sending ? "Sending..." : "Send Reply"}
+                    </Button>
+                    <div className="grid grid-cols-2 gap-3">
+                      <Button
+                        onClick={handleCopy}
+                        variant="outline"
+                        className="h-10 text-sm font-medium hover:bg-accent/10 hover:border-primary/50 transition-all duration-200"
+                      >
+                        {copied ? "✓ Copied!" : "Copy Draft"}
+                      </Button>
+                      <Button
+                        onClick={handleRegenerate}
+                        variant="outline"
+                        disabled={generating}
+                        className="h-10 text-sm font-medium hover:bg-accent/10 hover:border-primary/50 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {generating ? "Regenerating..." : "Regenerate"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
-        )}
-      </Card>
+        </Card>
+      </div>
     </div>
   )
 }

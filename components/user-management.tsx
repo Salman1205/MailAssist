@@ -179,13 +179,13 @@ export default function UserManagement({ currentUserId }: UserManagementProps) {
   const getRoleColor = (role: string) => {
     switch (role) {
       case "admin":
-        return "bg-red-500/10 text-red-600 dark:text-red-400"
+        return "bg-[var(--status-urgent-bg)] text-[var(--status-urgent)] border border-[var(--status-urgent)]/30"
       case "manager":
-        return "bg-blue-500/10 text-blue-600 dark:text-blue-400"
+        return "bg-primary/10 text-primary border border-primary/30"
       case "agent":
-        return "bg-green-500/10 text-green-600 dark:text-green-400"
+        return "bg-[var(--status-info-bg)] text-[var(--status-info)] border border-[var(--status-info)]/30"
       default:
-        return "bg-gray-500/10 text-gray-600 dark:text-gray-400"
+        return "bg-muted text-muted-foreground border border-border/50"
     }
   }
 
@@ -194,133 +194,176 @@ export default function UserManagement({ currentUserId }: UserManagementProps) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center p-6">
-        <div className="text-sm text-muted-foreground">Loading users...</div>
+      <div className="bg-background h-full">
+        <div className="max-w-6xl mx-auto p-6 lg:p-10">
+          <div className="mb-10 space-y-3">
+            <h1 className="text-4xl font-bold text-foreground tracking-tight">Team Management</h1>
+            <p className="text-base text-muted-foreground">Manage team members, roles, and permissions</p>
+          </div>
+          <div className="flex items-center justify-center py-32">
+            <div className="flex flex-col items-center gap-5">
+              <div className="w-16 h-16 border-4 border-primary/20 border-t-primary rounded-full animate-spin" />
+              <div className="text-base font-semibold text-muted-foreground">Loading team members...</div>
+            </div>
+          </div>
+        </div>
       </div>
     )
   }
 
   return (
-    <>
-      <Card className="border border-border">
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>Team Members</CardTitle>
-              <CardDescription>
-                {isAdmin 
-                  ? "Manage team members and their roles"
-                  : "You need admin access to manage users"}
-              </CardDescription>
-            </div>
-            {isAdmin ? (
-              <>
-                <Button onClick={() => {
-                  setEditingUser(null)
-                  resetForm()
-                  setError(null)
-                  setShowCreateDialog(true)
-                }}>Add User</Button>
-                <Dialog open={showCreateDialog || editingUser !== null} onOpenChange={(open) => {
-                  if (!open) {
-                    closeDialog()
-                  }
-                }}>
-                  <DialogContent>
-              <DialogHeader>
-                <DialogTitle>{editingUser ? "Edit User" : "Create New User"}</DialogTitle>
-                <DialogDescription>
-                  {editingUser 
-                    ? "Update user information and role"
-                    : "Add a new team member to your account"}
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4">
-                {error && (
-                  <div className="p-3 bg-destructive/10 text-destructive text-sm rounded-md">
-                    {error}
-                  </div>
-                )}
-                <div>
-                  <Label htmlFor="name">Name *</Label>
-                  <Input
-                    id="name"
-                    value={formName}
-                    onChange={(e) => setFormName(e.target.value)}
-                    placeholder="e.g., Azzam"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="email">Email (optional)</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    value={formEmail}
-                    onChange={(e) => setFormEmail(e.target.value)}
-                    placeholder="personal@example.com"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="role">Role *</Label>
-                  <Select value={formRole} onValueChange={(v: any) => setFormRole(v)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="admin">Admin</SelectItem>
-                      <SelectItem value="manager">Manager</SelectItem>
-                      <SelectItem value="agent">Agent</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <Button 
-                  onClick={editingUser ? handleUpdate : handleCreate} 
-                  disabled={saving || !formName.trim()}
-                  className="w-full"
-                >
-                  {saving ? "Saving..." : editingUser ? "Update User" : "Create User"}
-                </Button>
+    <div className="bg-background h-full overflow-y-auto">
+      <div className="max-w-6xl mx-auto p-6 lg:p-10">
+        {/* Header Section */}
+        <div className="mb-10 space-y-3">
+          <h1 className="text-4xl font-bold text-foreground tracking-tight">Team Management</h1>
+          <p className="text-base text-muted-foreground max-w-3xl">
+            {isAdmin 
+              ? "Add team members, assign roles, and manage who can access what in your account."
+              : "View your team members and their assigned roles."}
+          </p>
+        </div>
+      
+        <Card className="border-2 shadow-xl">
+          <CardHeader className="pb-6 pt-8 px-8">
+            <div className="flex items-center justify-between gap-6">
+              <div className="space-y-2">
+                <CardTitle className="text-2xl font-bold">Team Members</CardTitle>
+                <CardDescription className="text-base">
+                  {isAdmin ? `${users.length} member${users.length !== 1 ? 's' : ''} in your team` : `${users.length} team member${users.length !== 1 ? 's' : ''}`}
+                </CardDescription>
               </div>
-            </DialogContent>
-          </Dialog>
-              </>
-            ) : null}
-          </div>
-        </CardHeader>
-      <CardContent>
-        {error && !showCreateDialog && !editingUser && (
-          <div className="mb-4 p-3 bg-destructive/10 text-destructive text-sm rounded-md">
-            {error}
-          </div>
-        )}
-        {users.length === 0 ? (
-          <div className="text-center py-8 text-muted-foreground">
-            No users found. Create the first team member.
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {users.map((user) => (
-              <div
-                key={user.id}
-                className="flex items-center justify-between p-4 border border-border rounded-lg hover:bg-secondary/50 transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="flex flex-col">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium">{user.name}</span>
-                      {user.id === currentUserId && (
-                        <Badge variant="outline" className="text-xs">You</Badge>
+              {isAdmin ? (
+                <>
+                  <Button onClick={() => {
+                    setEditingUser(null)
+                    resetForm()
+                    setError(null)
+                    setShowCreateDialog(true)
+                  }} size="lg" className="shadow-lg hover:shadow-xl transition-all">
+                    Add Team Member
+                  </Button>
+                  <Dialog open={showCreateDialog || editingUser !== null} onOpenChange={(open) => {
+                    if (!open) {
+                      closeDialog()
+                    }
+                  }}>
+                  <DialogContent className="max-w-md">
+                    <DialogHeader>
+                      <DialogTitle className="flex items-center gap-2 text-lg">
+                        <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                          {editingUser ? (
+                            <svg className="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                          ) : (
+                            <svg className="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                          )}
+                        </div>
+                        {editingUser ? "Edit Team Member" : "Add Team Member"}
+                      </DialogTitle>
+                      <DialogDescription>
+                        {editingUser 
+                          ? "Update team member information and role"
+                          : "Add a new team member to your account"}
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 pt-4">
+                      {error && (
+                        <div className="p-3 bg-[var(--status-urgent-bg)] text-[var(--status-urgent)] text-sm rounded-lg border border-[var(--status-urgent)]/30">
+                          {error}
+                        </div>
                       )}
+                      <div className="space-y-2">
+                        <Label htmlFor="name" className="text-sm font-medium">Name *</Label>
+                        <Input
+                          id="name"
+                          value={formName}
+                          onChange={(e) => setFormName(e.target.value)}
+                          placeholder="e.g., Azzam"
+                          className="shadow-sm"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="email" className="text-sm font-medium">Email (optional)</Label>
+                        <Input
+                          id="email"
+                          type="email"
+                          value={formEmail}
+                          onChange={(e) => setFormEmail(e.target.value)}
+                          placeholder="personal@example.com"
+                          className="shadow-sm"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="role" className="text-sm font-medium">Role *</Label>
+                        <Select value={formRole} onValueChange={(v: any) => setFormRole(v)}>
+                          <SelectTrigger className="shadow-sm">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="admin">Admin - Full access</SelectItem>
+                            <SelectItem value="manager">Manager - Can manage team</SelectItem>
+                            <SelectItem value="agent">Agent - Limited access</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <Button 
+                        onClick={editingUser ? handleUpdate : handleCreate} 
+                        disabled={saving || !formName.trim()}
+                        className="w-full shadow-sm"
+                        size="lg"
+                      >
+                        {saving ? "Saving..." : editingUser ? "Update Member" : "Add Member"}
+                      </Button>
                     </div>
-                    {user.email && (
-                      <span className="text-xs text-muted-foreground">{user.email}</span>
-                    )}
-                  </div>
+                  </DialogContent>
+                </Dialog>
+                </>
+              ) : null}
+            </div>
+          </CardHeader>
+          <CardContent className="pt-2 px-6 pb-6">
+            {error && !showCreateDialog && !editingUser && (
+              <div className="mb-6 p-3 bg-[var(--status-urgent-bg)] text-[var(--status-urgent)] text-xs rounded-lg border border-[var(--status-urgent)]/30">
+                {error}
+              </div>
+            )}
+            {users.length === 0 ? (
+              <div className="text-center py-12 space-y-4">
+                <div className="w-12 h-12 bg-primary/10 rounded-2xl flex items-center justify-center mx-auto">
+                  <svg className="w-6 h-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-2a6 6 0 0112 0v2zm0 0h6v-2a6 6 0 00-9-5.697" /></svg>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Badge className={getRoleColor(user.role)}>
-                    {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
-                  </Badge>
+                <div>
+                  <p className="text-foreground font-semibold">No team members yet</p>
+                  <p className="text-muted-foreground text-sm mt-1">Create your first team member to get started</p>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {users.map((user) => (
+                  <div
+                    key={user.id}
+                    className="flex items-center justify-between p-4 border border-border/50 rounded-lg hover:border-primary/30 hover:bg-muted/30 transition-all duration-200 group"
+                  >
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0 group-hover:bg-primary/20 transition-colors">
+                        <svg className="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-foreground text-sm">{user.name}</span>
+                          {user.id === currentUserId && (
+                            <Badge variant="outline" className="text-xs bg-primary/10 text-primary border-primary/30">You</Badge>
+                          )}
+                        </div>
+                        {user.email && (
+                          <span className="text-xs text-muted-foreground truncate">{user.email}</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <Badge className={`text-xs font-semibold capitalize ${getRoleColor(user.role)}`}>
+                        {user.role}
+                      </Badge>
                   <Button
                     variant="ghost"
                     size="sm"
@@ -345,32 +388,35 @@ export default function UserManagement({ currentUserId }: UserManagementProps) {
           </div>
         )}
       </CardContent>
-    </Card>
-
-    {!isAdmin && !hasAdmin && (
-      <Card className="border border-border mt-4">
-        <CardHeader>
-          <CardTitle>Need Admin Access?</CardTitle>
-          <CardDescription>
-            No admin user exists. Promote the first user to admin to manage team members.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Button onClick={() => setShowPromoteDialog(true)}>
-            Promote First User to Admin
-          </Button>
-        </CardContent>
       </Card>
-    )}
 
-    <PromoteAdminDialog
-      open={showPromoteDialog}
-      onOpenChange={setShowPromoteDialog}
-      onPromoted={() => {
-        fetchUsers()
-      }}
-    />
-  </>
+      {!isAdmin && !hasAdmin && (
+        <div className="mt-16 pt-8 border-t border-border/40">
+          <Card className="border-[var(--status-medium)]/30 bg-[var(--status-medium-bg)] shadow-md">
+            <CardHeader>
+              <CardTitle className="text-lg text-[var(--status-medium)]">⚠️ Admin access required</CardTitle>
+              <CardDescription className="text-[var(--status-medium)]/80 mt-2">
+                No admin user exists. You need to promote the first user to admin to manage team members and settings.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button onClick={() => setShowPromoteDialog(true)} variant="outline" className="border-[var(--status-medium)]/30 hover:bg-[var(--status-medium)]/10">
+                Promote First User to Admin
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+      </div>
+
+      <PromoteAdminDialog
+        open={showPromoteDialog}
+        onOpenChange={setShowPromoteDialog}
+        onPromoted={() => {
+          fetchUsers()
+        }}
+      />
+    </div>
   )
 }
 

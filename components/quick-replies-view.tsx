@@ -49,6 +49,25 @@ export default function QuickRepliesView({ currentUserId }: QuickRepliesViewProp
   
   const { toast } = useToast()
 
+  // Category color mapping
+  const getCategoryColor = (category: string) => {
+    const cat = category.toLowerCase()
+    if (cat.includes('billing') || cat.includes('payment')) return 'bg-[var(--category-billing)] text-white'
+    if (cat.includes('support') || cat.includes('help')) return 'bg-[var(--category-support)] text-white'
+    if (cat.includes('technical') || cat.includes('tech')) return 'bg-[var(--category-technical)] text-white'
+    if (cat.includes('sales') || cat.includes('product')) return 'bg-[var(--category-sales)] text-white'
+    return 'bg-primary text-primary-foreground'
+  }
+
+  const getCategoryBgColor = (category: string) => {
+    const cat = category.toLowerCase()
+    if (cat.includes('billing') || cat.includes('payment')) return 'bg-[var(--category-billing-bg)] border-[var(--category-billing)]/30'
+    if (cat.includes('support') || cat.includes('help')) return 'bg-[var(--category-support-bg)] border-[var(--category-support)]/30'
+    if (cat.includes('technical') || cat.includes('tech')) return 'bg-[var(--category-technical-bg)] border-[var(--category-technical)]/30'
+    if (cat.includes('sales') || cat.includes('product')) return 'bg-[var(--category-sales-bg)] border-[var(--category-sales)]/30'
+    return 'bg-primary/10 border-primary/30'
+  }
+
   useEffect(() => {
     // Delay showing skeleton to prevent flash
     const timer = setTimeout(() => setShowSkeleton(true), 100)
@@ -214,20 +233,24 @@ export default function QuickRepliesView({ currentUserId }: QuickRepliesViewProp
   return (
     <div className="h-full w-full bg-background overflow-hidden flex flex-col">
       {/* Header */}
-      <div className="p-6 border-b border-border/50 bg-card/50 backdrop-blur-sm flex-shrink-0">
+      <div className="p-6 lg:p-8 border-b border-border bg-card flex-shrink-0 shadow-sm">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold flex items-center gap-2">
-              <MessageSquare className="w-6 h-6 text-primary" />
-              Quick Replies
-            </h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              Create and manage reusable response templates
-            </p>
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary to-accent flex items-center justify-center shadow-lg">
+                <MessageSquare className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h1 className="text-3xl font-bold text-foreground tracking-tight">Quick Replies</h1>
+                <p className="text-base text-muted-foreground mt-1">
+                  {quickReplies.length} reusable response templates
+                </p>
+              </div>
+            </div>
           </div>
           <Button
             onClick={handleCreate}
-            className="transition-all duration-300 ease-out hover:scale-110 hover:shadow-lg shadow-md"
+            className="transition-all duration-300 ease-out hover:scale-105 hover:shadow-lg shadow-md"
           >
             <Plus className="w-4 h-4 mr-2 transition-transform duration-300 group-hover:rotate-90" />
             New Quick Reply
@@ -235,19 +258,19 @@ export default function QuickRepliesView({ currentUserId }: QuickRepliesViewProp
         </div>
         
         {/* Search and Filters */}
-        <div className="flex gap-3">
+        <div className="flex flex-col sm:flex-row gap-4">
           <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
             <Input
               placeholder="Search quick replies..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 h-10"
+              className="pl-12 h-11 text-base"
             />
           </div>
           <Select value={selectedCategory} onValueChange={setSelectedCategory}>
-            <SelectTrigger className="w-48 h-10">
-              <FolderOpen className="w-4 h-4 mr-2" />
+            <SelectTrigger className="w-full sm:w-56 h-11">
+              <FolderOpen className="w-5 h-5 mr-2" />
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -261,31 +284,31 @@ export default function QuickRepliesView({ currentUserId }: QuickRepliesViewProp
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto p-6 lg:p-8">
         {loading && showSkeleton ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {[1, 2, 3, 4, 5, 6].map(i => (
-              <Skeleton key={i} className="h-48 w-full rounded-lg bg-muted/30" />
+              <Skeleton key={i} className="h-56 w-full rounded-2xl bg-muted" />
             ))}
           </div>
         ) : !loading && filteredReplies.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center p-12">
-            <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center mb-6">
-              <MessageSquare className="w-10 h-10 text-primary" />
+            <div className="w-24 h-24 rounded-3xl bg-gradient-to-br from-primary/15 via-accent/10 to-primary/5 flex items-center justify-center mb-8 border-2 border-primary/20 shadow-lg">
+              <MessageSquare className="w-12 h-12 text-primary" />
             </div>
-            <h3 className="text-xl font-semibold mb-2">
+            <h3 className="text-2xl font-bold mb-3 text-foreground">
               {searchQuery || selectedCategory !== "all" 
                 ? "No quick replies match your filters" 
                 : "No quick replies yet"}
             </h3>
-            <p className="text-muted-foreground mb-6 max-w-md">
+            <p className="text-base text-muted-foreground mb-8 max-w-md">
               {searchQuery || selectedCategory !== "all"
                 ? "Try adjusting your search or category filter"
                 : "Create your first quick reply to save time on common responses"}
             </p>
             {!searchQuery && selectedCategory === "all" && (
-              <Button onClick={handleCreate} size="lg" className="transition-all duration-200 hover:scale-105">
-                <Plus className="w-4 h-4 mr-2" />
+              <Button onClick={handleCreate} size="lg" className="shadow-lg hover:shadow-xl transition-all">
+                <Plus className="w-5 h-5 mr-2" />
                 Create Your First Quick Reply
               </Button>
             )}
@@ -295,22 +318,22 @@ export default function QuickRepliesView({ currentUserId }: QuickRepliesViewProp
             {Object.entries(groupedReplies).map(([category, replies]) => (
               <div key={category} className="space-y-4">
                 <div className="flex items-center gap-3 mb-4">
-                  <div className="flex items-center gap-2">
-                    <FolderOpen className="w-5 h-5 text-muted-foreground" />
+                  <div className={`flex items-center gap-2 px-4 py-2 rounded-lg shadow-sm ${getCategoryBgColor(category)} border`}>
+                    <FolderOpen className="w-5 h-5" />
                     <h2 className="text-lg font-semibold">{category}</h2>
+                    <Badge className={`h-5 px-2 text-xs ml-2 ${getCategoryColor(category)}`}>
+                      {replies.length}
+                    </Badge>
                   </div>
-                  <Badge variant="secondary" className="h-5 px-2 text-xs">
-                    {replies.length} {replies.length === 1 ? 'reply' : 'replies'}
-                  </Badge>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                   {replies.map((reply, idx) => (
                     <Card
                       key={reply.id}
-                      className="group hover:shadow-xl transition-all duration-300 ease-out border-border/50 hover:border-primary/30 relative overflow-hidden hover:scale-[1.02] animate-in fade-in slide-in-from-bottom-2"
+                      className={`group hover:shadow-2xl transition-all duration-300 ease-out hover:scale-[1.03] animate-in fade-in slide-in-from-bottom-3 ${getCategoryBgColor(reply.category || 'General')}`}
                       style={{ animationDelay: `${idx * 50}ms` }}
                     >
-                      <CardContent className="p-5">
+                      <CardContent className="p-6">
                         {/* Header */}
                         <div className="flex items-start justify-between gap-3 mb-3">
                           <h3 className="font-semibold text-base flex-1 line-clamp-1 group-hover:text-primary transition-colors">
@@ -367,13 +390,13 @@ export default function QuickRepliesView({ currentUserId }: QuickRepliesViewProp
                         {reply.tags && reply.tags.length > 0 && (
                           <div className="flex flex-wrap gap-1.5 mb-3">
                             {reply.tags.slice(0, 3).map((tag, idx) => (
-                              <Badge key={idx} variant="outline" className="h-5 px-2 text-xs">
+                              <Badge key={idx} className={`h-5 px-2 text-xs shadow-sm ${getCategoryColor(reply.category || 'General')}`}>
                                 <Tag className="w-3 h-3 mr-1" />
                                 {tag}
                               </Badge>
                             ))}
                             {reply.tags.length > 3 && (
-                              <Badge variant="outline" className="h-5 px-2 text-xs">
+                              <Badge className={`h-5 px-2 text-xs shadow-sm ${getCategoryColor(reply.category || 'General')}`}>
                                 +{reply.tags.length - 3}
                               </Badge>
                             )}

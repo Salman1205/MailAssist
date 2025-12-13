@@ -441,14 +441,8 @@ export async function storeSentEmail(email: {
       isReply: isReply,
     };
 
-    // Update existing or add new
-    if (existing) {
-      Object.assign(existing, storedEmail);
-    } else {
-      storedEmails.push(storedEmail);
-    }
-
-    await saveStoredEmails(storedEmails);
+    // Save the email (upsert will handle existing)
+    await saveStoredEmails([storedEmail]);
     return storedEmail;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -466,13 +460,8 @@ export async function storeSentEmail(email: {
       isReply: isReply,
     };
     
-    if (existing) {
-      Object.assign(existing, storedEmail);
-    } else {
-      storedEmails.push(storedEmail);
-    }
-    
-    await saveStoredEmails(storedEmails);
+    // Save the email (upsert will handle existing)
+    await saveStoredEmails([storedEmail]);
     return storedEmail;
   }
 }
