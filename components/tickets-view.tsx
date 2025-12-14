@@ -479,7 +479,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [])
+  }, [toast])
   
   const fetchQuickReplies = async () => {
     try {
