@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { useToast } from "@/components/ui/use-toast"
 import { Loader2, Sparkles, Send, CheckCircle, RotateCcw } from "lucide-react"
 
 interface ComposeViewProps {
@@ -15,6 +16,7 @@ interface ComposeViewProps {
 }
 
 export default function ComposeView({ currentUserId, onEmailSent }: ComposeViewProps) {
+  const { toast } = useToast()
   const [recipient, setRecipient] = useState("")
   const [recipientName, setRecipientName] = useState("")
   const [subject, setSubject] = useState("")
@@ -63,13 +65,21 @@ export default function ComposeView({ currentUserId, onEmailSent }: ComposeViewP
       })
 
       if (!response.ok) {
-        throw new Error("Failed to generate draft")
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+        const errorMessage = errorData.error || errorData.details || "Failed to generate draft"
+        throw new Error(errorMessage)
       }
 
       const data = await response.json()
       setGeneratedDraft(data.draft)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to generate draft")
+      const errorMessage = err instanceof Error ? err.message : "Failed to generate draft"
+      setError(errorMessage)
+      toast({ 
+        title: "Draft Generation Failed", 
+        description: errorMessage, 
+        variant: "destructive" 
+      })
     } finally {
       setIsGenerating(false)
     }
@@ -123,7 +133,13 @@ export default function ComposeView({ currentUserId, onEmailSent }: ComposeViewP
 
       onEmailSent?.()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to send email")
+      const errorMessage = err instanceof Error ? err.message : "Failed to send email"
+      setError(errorMessage)
+      toast({ 
+        title: "Send Failed", 
+        description: errorMessage, 
+        variant: "destructive" 
+      })
     } finally {
       setIsSending(false)
     }
@@ -164,16 +180,16 @@ export default function ComposeView({ currentUserId, onEmailSent }: ComposeViewP
         ) : (
           <>
             <div className="space-y-3">
-              <div className="flex items-center gap-4">
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary to-accent flex items-center justify-center shadow-lg">
-                  <Sparkles className="w-7 h-7 text-white" />
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-xl bg-primary/10 text-primary flex items-center justify-center shadow-sm border border-primary/20">
+                  <Sparkles className="w-6 h-6" />
                 </div>
                 <div>
-                  <h1 className="text-4xl font-bold text-foreground tracking-tight">
+                  <h1 className="text-3xl font-bold text-foreground tracking-tight">
                     Compose email
                   </h1>
-                  <p className="text-base text-muted-foreground mt-1">
-                    Create a professional email with AI assistance
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Draft with focus, then polish. No glitter.
                   </p>
                 </div>
               </div>
@@ -195,7 +211,7 @@ export default function ComposeView({ currentUserId, onEmailSent }: ComposeViewP
               </Alert>
             )}
 
-            <Card className="p-8 space-y-6 shadow-xl border-2">
+            <Card className="p-8 space-y-6 shadow-lg border border-border/60 bg-card/90 backdrop-blur-sm">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div className="space-y-2">
                   <Label htmlFor="recipient" className="text-sm font-medium flex items-center gap-1.5">

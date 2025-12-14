@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
         // Update assignee if provided
         if (assigneeUserId !== undefined) {
           const assigneeId = assigneeUserId === null || assigneeUserId === '' ? null : assigneeUserId;
-          updatedTicket = await assignTicket(ticketId, assigneeId, userEmail);
+          updatedTicket = await assignTicket(ticketId, assigneeId, userEmail, userId);
         }
 
         // Update tags if provided

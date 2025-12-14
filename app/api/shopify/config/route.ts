@@ -104,9 +104,23 @@ export async function POST(request: NextRequest) {
       false
     );
 
+    if (!body.shopDomain || !body.shopDomain.trim()) {
+      return NextResponse.json(
+        { error: 'Shop domain is required' },
+        { status: 400 }
+      );
+    }
+
+    if (!body.accessToken || !body.accessToken.trim()) {
+      return NextResponse.json(
+        { error: 'Access token is required' },
+        { status: 400 }
+      );
+    }
+
     if (domainError || tokenError || !shopDomain || !accessToken) {
       return NextResponse.json(
-        { error: 'Invalid shop domain or access token' },
+        { error: domainError || tokenError || 'Invalid shop domain or access token' },
         { status: 400 }
       );
     }

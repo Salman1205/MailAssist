@@ -52,6 +52,7 @@ interface TicketNote {
   userId: string
   userName: string
   content: string
+  mentions?: string[]
   createdAt: string
   updatedAt: string
 }
@@ -78,15 +79,16 @@ interface TicketsViewProps {
   currentUserRole: "admin" | "manager" | "agent" | null
   globalSearchTerm?: string
   refreshKey?: number
+  initialTicketId?: string
 }
 
-export default function TicketsView({ currentUserId, currentUserRole, globalSearchTerm, refreshKey }: TicketsViewProps) {
+export default function TicketsView({ currentUserId, currentUserRole, globalSearchTerm, refreshKey, initialTicketId }: TicketsViewProps) {
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null)
-  const [activeTab, setActiveTab] = useState<"assigned" | "unassigned" | "all">("unassigned")
+  const [activeTab, setActiveTab] = useState<"assigned" | "unassigned" | "open" | "closed">("unassigned")
   
   // Filters
   const [statusFilter, setStatusFilter] = useState<string>("all")
@@ -120,9 +122,12 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   const [showDraft, setShowDraft] = useState(false)
   const [generatingDraft, setGeneratingDraft] = useState(false)
   const [sendingReply, setSendingReply] = useState(false)
+  const [sendingAction, setSendingAction] = useState<'send' | 'send-close' | null>(null)
   const [newNote, setNewNote] = useState("")
+  const [selectedMentions, setSelectedMentions] = useState<string[]>([])
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null)
   const [editingNoteContent, setEditingNoteContent] = useState("")
+  const [editingMentions, setEditingMentions] = useState<string[]>([])
   const [newTag, setNewTag] = useState("")
   const [assignPriority, setAssignPriority] = useState<string>("medium")
   const [showAssignDialog, setShowAssignDialog] = useState(false)
@@ -143,6 +148,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   const [selectedTicketIds, setSelectedTicketIds] = useState<Set<string>>(new Set())
   const [isSelectMode, setIsSelectMode] = useState(false)
   const [bulkUpdating, setBulkUpdating] = useState(false)
+  const [bulkProgress, setBulkProgress] = useState<{ id: string; status: 'pending' | 'success' | 'error'; message?: string }[]>([])
+  const [lastBulkUpdates, setLastBulkUpdates] = useState<{ status?: Ticket["status"]; assigneeUserId?: string | null; tags?: string[] } | null>(null)
   const [showShortcutsModal, setShowShortcutsModal] = useState(false)
 
   // Refs to hold latest values for keyboard handler (avoid re-attaching listener each render)
@@ -158,6 +165,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>([])
   const [showQuickReplies, setShowQuickReplies] = useState(false)
   const [showQuickRepliesSidebar, setShowQuickRepliesSidebar] = useState(false)
+  const initialSelectHandledRef = useRef(false)
   const [showShopifySidebar, setShowShopifySidebar] = useState(false)
   
   // Ref for conversation scroll container to preserve scroll position
@@ -246,13 +254,14 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }, [loadingThread, threadMessages.length])
   
-  // Auto-filter closed tickets
+  // Auto-filter closed tickets - default ON
   const [autoFilterClosed, setAutoFilterClosed] = useState(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('auto-filter-closed')
-      return saved === 'true'
+      // Default to true if not explicitly set
+      return saved === null ? true : saved === 'true'
     }
-    return false
+    return true
   })
   
   // Updating states
@@ -331,6 +340,18 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       ...(currentUserId ? [fetchQuickReplies()] : [])
     ]).catch(err => console.error('Error loading initial data:', err))
   }, [currentUserId, refreshKey])
+
+  // Apply deep-linked ticket selection once tickets are loaded
+  useEffect(() => {
+    if (!initialTicketId || initialSelectHandledRef.current) return
+    if (!tickets.length) return
+    const match = tickets.find(t => t.id === initialTicketId)
+    if (match) {
+      setSelectedTicket(match)
+      setSelectedTicketIds(new Set([match.id]))
+      initialSelectHandledRef.current = true
+    }
+  }, [tickets, initialTicketId])
   
   // Close quick replies sidebar and refetch when user changes or logs out
   useEffect(() => {
@@ -399,13 +420,20 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         replyTextareaRef.current?.focus()
       }
 
-      // Assign dialog
+      // Assign dialog (block agents from opening for others)
       if (e.key.toLowerCase() === 'a') {
         e.preventDefault()
-        if (selected) {
-          setPendingAssignment({ ticketId: selected.id, assigneeUserId: selected.assigneeUserId || null })
-          setShowAssignDialog(true)
+        if (!selected) return
+        if (currentUserRole === 'agent' && selected.assigneeUserId && selected.assigneeUserId !== currentUserId) {
+          toast({
+            title: "Permission denied",
+            description: "Agents can only assign tickets to themselves.",
+            variant: "destructive"
+          })
+          return
         }
+        setPendingAssignment({ ticketId: selected.id, assigneeUserId: selected.assigneeUserId || null })
+        setShowAssignDialog(true)
       }
 
       // Close ticket
@@ -456,9 +484,15 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   const fetchQuickReplies = async () => {
     try {
       const response = await fetch("/api/quick-replies")
-      if (response.ok) {
-        const data = await response.json()
-        setQuickReplies(data.quickReplies || [])
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+        const errorMessage = errorData.error || errorData.details || "Failed to assign ticket"
+        toast({
+          title: "Assignment failed",
+          description: errorMessage,
+          variant: "destructive"
+        })
+        throw new Error(errorMessage)
       }
     } catch (err) {
       console.error("Error fetching quick replies:", err)
@@ -779,36 +813,84 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   }
 
   const handleAssign = async (ticketId: string, assigneeUserId: string | null, priority?: string) => {
+    if (assigning === ticketId) return // Prevent double-click
+    
+    // Client-side guard for agent permissions to give immediate feedback
+    if (currentUserRole === 'agent') {
+      const attemptingSelfAssign = assigneeUserId === currentUserId
+      const attemptingUnassign = assigneeUserId === null
+      const attemptingAssignOther = assigneeUserId !== null && assigneeUserId !== currentUserId
+      if (attemptingUnassign || attemptingAssignOther) {
+        toast({
+          title: "Permission denied",
+          description: "Agents can only assign tickets to themselves.",
+          variant: "destructive"
+        })
+        return
+      }
+      if (!attemptingSelfAssign) {
+        toast({
+          title: "Permission denied",
+          description: "Agents can only assign tickets to themselves.",
+          variant: "destructive"
+        })
+        return
+      }
+    }
+    
+    // Optimistic update
+    const targetTicket = tickets.find(t => t.id === ticketId)
+    if (!targetTicket) return
+    
+    const previousAssignee = targetTicket.assigneeUserId
+    const previousAssigneeName = targetTicket.assigneeName
+    const previousPriority = targetTicket.priority
+    
+    const newAssigneeName = assigneeUserId ? users.find(u => u.id === assigneeUserId)?.name : null
+    const optimisticTicket = { 
+      ...targetTicket, 
+      assigneeUserId,
+      assigneeName: newAssigneeName,
+      priority: priority || targetTicket.priority,
+      updatedAt: new Date().toISOString()
+    }
+    
+    // Update UI immediately
+    setTickets(prev => prev.map(t => t.id === ticketId ? optimisticTicket : t))
+    if (selectedTicket?.id === ticketId) {
+      setSelectedTicket(optimisticTicket)
+    }
+
     try {
       setAssigning(ticketId)
       console.log('[Assign Ticket] Starting assignment:', { ticketId, assigneeUserId, priority })
       
-      // If assigning and priority is provided, update priority first
-      if (assigneeUserId && priority) {
-        console.log('[Assign Ticket] Setting priority:', priority)
-        const priorityResponse = await fetch(`/api/tickets/${ticketId}/priority`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ priority }),
-        })
-        if (!priorityResponse.ok) {
-          const errorData = await priorityResponse.json().catch(() => ({}))
-          console.error('[Assign Ticket] Priority update failed:', errorData)
-          throw new Error(errorData.error || "Failed to set priority")
-        }
-        console.log('[Assign Ticket] Priority set successfully')
-      }
-      
-      console.log('[Assign Ticket] Assigning ticket to:', assigneeUserId)
+      // Send assignment and priority in single request
+      console.log('[Assign Ticket] Assigning ticket to:', assigneeUserId, priority ? `with priority: ${priority}` : '')
       const response = await fetch(`/api/tickets/${ticketId}/assign`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assigneeUserId }),
+        body: JSON.stringify({ assigneeUserId, priority }),
       })
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
         console.error('[Assign Ticket] Assignment failed:', errorData)
+        // Rollback optimistic update
+        setTickets(prev => prev.map(t => t.id === ticketId ? { 
+          ...t, 
+          assigneeUserId: previousAssignee,
+          assigneeName: previousAssigneeName,
+          priority: previousPriority
+        } : t))
+        if (selectedTicket?.id === ticketId) {
+          setSelectedTicket(prev => prev ? { 
+            ...prev, 
+            assigneeUserId: previousAssignee,
+            assigneeName: previousAssigneeName,
+            priority: previousPriority
+          } : null)
+        }
         throw new Error(errorData.error || "Failed to assign ticket")
       }
       
@@ -816,7 +898,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
       const data = await response.json()
       
-      // Update tickets list
+      // Update with server response (confirms optimistic update)
       setTickets((prev) => prev.map((t) => (t.id === ticketId ? data.ticket : t)))
       
       // Update selected ticket if it's the one being assigned
@@ -829,14 +911,11 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       setPendingAssignment(null)
       
       toast({ title: "Ticket assigned successfully" })
-      
-      // Refresh tickets silently to ensure UI is up to date (no page refresh)
-      await fetchTickets({ silent: true })
     } catch (err) {
       console.error('[Assign Ticket] Error:', err)
       setError(err instanceof Error ? err.message : "Failed to assign ticket")
       toast({ 
-        title: "Error", 
+        title: "Assignment failed", 
         description: err instanceof Error ? err.message : "Failed to assign ticket", 
         variant: "destructive" 
       })
@@ -864,6 +943,19 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     const targetTicketId = ticketId || selectedTicket?.id
     if (!targetTicketId) return
     
+    // Optimistic update
+    const targetTicket = tickets.find(t => t.id === targetTicketId)
+    if (!targetTicket) return
+    
+    const previousStatus = targetTicket.status
+    const optimisticTicket = { ...targetTicket, status, updatedAt: new Date().toISOString() }
+    
+    // Update UI immediately
+    setTickets(prev => prev.map(t => t.id === targetTicketId ? optimisticTicket : t))
+    if (selectedTicket?.id === targetTicketId) {
+      setSelectedTicket(optimisticTicket)
+    }
+    
     try {
       setUpdatingStatus(true)
       const response = await fetch(`/api/tickets/${targetTicketId}/status`, {
@@ -872,7 +964,15 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         body: JSON.stringify({ status }),
       })
 
-      if (!response.ok) throw new Error("Failed to update status")
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+        // Rollback on error
+        setTickets(prev => prev.map(t => t.id === targetTicketId ? { ...t, status: previousStatus } : t))
+        if (selectedTicket?.id === targetTicketId) {
+          setSelectedTicket(prev => prev ? { ...prev, status: previousStatus } : null)
+        }
+        throw new Error(errorData.error || errorData.details || "Failed to update status")
+      }
       const data = await response.json()
       
       // Update selected ticket if it's the one being updated
@@ -881,11 +981,9 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         
         // Auto-navigate to next ticket if closing
         if (status === "closed") {
-          // Wait for tickets to refresh before finding next ticket
-          await fetchTickets({ silent: true })
-          const refreshedFiltered = getFilteredTickets()
-          const currentIndex = refreshedFiltered.findIndex(t => t.id === targetTicketId)
-          const nextTicket = refreshedFiltered[currentIndex + 1] || refreshedFiltered[0]
+          // Find next ticket from current filtered list
+          const currentIndex = filteredTickets.findIndex(t => t.id === targetTicketId)
+          const nextTicket = filteredTickets[currentIndex + 1] || filteredTickets[0]
           
           if (nextTicket && nextTicket.id !== targetTicketId) {
             setSelectedTicket(nextTicket)
@@ -900,9 +998,6 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       
       setTickets((prev) => prev.map((t) => (t.id === targetTicketId ? data.ticket : t)))
       toast({ title: "Status updated" })
-      
-      // Refresh tickets to update counts
-      await fetchTickets({ silent: true })
     } catch (err) {
       toast({ title: "Error", description: "Failed to update status", variant: "destructive" })
     } finally {
@@ -910,30 +1005,66 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }
   
-  const handleBulkUpdate = async (updates: { status?: Ticket["status"], assigneeUserId?: string | null, tags?: string[] }) => {
-    if (selectedTicketIds.size === 0) return
+  const handleBulkUpdate = async (updates: { status?: Ticket["status"], assigneeUserId?: string | null, tags?: string[] }, specificIds?: string[]) => {
+    const targetIds = specificIds && specificIds.length > 0 ? specificIds : Array.from(selectedTicketIds)
+    if (targetIds.length === 0) return
+
+    // Pre-flight: agent permission guard for bulk assign/unassign
+    if (currentUserRole === 'agent' && updates.assigneeUserId !== undefined) {
+      const attemptingUnassign = updates.assigneeUserId === null
+      const attemptingAssignOther = updates.assigneeUserId !== null && updates.assigneeUserId !== currentUserId
+      if (attemptingUnassign || attemptingAssignOther) {
+        toast({
+          title: "Permission denied",
+          description: "Agents can only bulk-assign tickets to themselves.",
+          variant: "destructive"
+        })
+        return
+      }
+    }
     
     try {
       setBulkUpdating(true)
+      setLastBulkUpdates(updates)
+      setBulkProgress(targetIds.map(id => ({ id, status: 'pending' as const })))
       const response = await fetch("/api/tickets/bulk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ticketIds: Array.from(selectedTicketIds),
+          ticketIds: targetIds,
           ...updates,
         }),
       })
       
-      if (!response.ok) throw new Error("Failed to update tickets")
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Failed to update tickets' }))
+        throw new Error(errorData.error || "Failed to update tickets")
+      }
       const data = await response.json()
       
-      // Update tickets in state
-      const updatedMap = new Map(data.results.map((r: any) => [r.ticketId, r.ticket as Ticket]))
+      // Update tickets in state for successes
+      const updatedMap = new Map((data.results || []).map((r: any) => [r.ticketId, r.ticket as Ticket]))
       setTickets((prev) => prev.map((t) => (updatedMap.get(t.id) as Ticket) || t))
-      
-      // Clear selection
-      setSelectedTicketIds(new Set())
-      setIsSelectMode(false)
+
+      const failedErrors: Record<string, string> = {}
+      ;(data.errors || []).forEach((e: any) => { failedErrors[e.ticketId] = e.error || 'Unknown error' })
+
+      setBulkProgress(targetIds.map(id => {
+        const err = failedErrors[id]
+        return err ? { id, status: 'error', message: err } : { id, status: 'success' as const }
+      }))
+
+      const successCount = (data.results || []).length
+      const failedCount = (data.errors || []).length
+
+      if (failedCount === 0) {
+        // Clear selection on full success
+        setSelectedTicketIds(new Set())
+        setIsSelectMode(false)
+      } else {
+        // Keep only failed ones selected for retry
+        setSelectedTicketIds(new Set(targetIds.filter(id => failedErrors[id])))
+      }
       
       // If closing tickets, auto-filter them out if preference is set
       if (updates.status === "closed" && autoFilterClosed) {
@@ -941,8 +1072,9 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       }
       
       toast({ 
-        title: "Bulk update successful", 
-        description: `Updated ${data.updated} ticket(s)` 
+        title: failedCount ? "Bulk update partially succeeded" : "Bulk update successful", 
+        description: failedCount ? `Updated ${successCount}, failed ${failedCount}` : `Updated ${successCount} ticket(s)`,
+        variant: failedCount ? "destructive" : "default"
       })
       
       await fetchTickets({ silent: true })
@@ -967,6 +1099,12 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       }
       return next
     })
+  }
+
+  const retryBulkFailures = () => {
+    const failedIds = bulkProgress.filter(p => p.status === 'error').map(p => p.id)
+    if (!failedIds.length || !lastBulkUpdates) return
+    handleBulkUpdate(lastBulkUpdates, failedIds)
   }
   
   const toggleSelectAll = () => {
@@ -1065,13 +1203,14 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       const response = await fetch(`/api/tickets/${selectedTicket.id}/notes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: newNote.trim() }),
+        body: JSON.stringify({ content: newNote.trim(), mentions: selectedMentions }),
       })
 
       if (!response.ok) throw new Error("Failed to add note")
       const data = await response.json()
       setNotes((prev) => [data.note, ...prev])
       setNewNote("")
+      setSelectedMentions([])
       toast({ title: "Note added" })
     } catch (err) {
       toast({ title: "Error", description: "Failed to add note", variant: "destructive" })
@@ -1083,6 +1222,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   const handleStartEditNote = (note: TicketNote) => {
     setEditingNoteId(note.id)
     setEditingNoteContent(note.content)
+    const m = (note as any).mentions
+    setEditingMentions(Array.isArray(m) ? m : [])
   }
 
   const handleCancelEditNote = () => {
@@ -1113,7 +1254,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           noteId: editingNoteId,
-          content: editingNoteContent.trim() 
+          content: editingNoteContent.trim(),
+          mentions: editingMentions
         }),
       })
 
@@ -1132,6 +1274,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       })
       setEditingNoteId(null)
       setEditingNoteContent("")
+      setEditingMentions([])
       toast({ title: "Note updated" })
     } catch (err) {
       console.error('[Update Note] Exception:', err)
@@ -1173,8 +1316,9 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }
 
-  const handleSendReply = async () => {
+  const handleSendReply = async (opts?: { closeTicket?: boolean }) => {
     if (!selectedTicket || !replyText.trim() || !threadMessages.length) return
+    const targetTicketId = selectedTicket.id
     
     // Clear typing status when sending
     if (typingTimeout) {
@@ -1185,6 +1329,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     
     try {
       setSendingReply(true)
+      setSendingAction(opts?.closeTicket ? 'send-close' : 'send')
       // Use the first message ID from thread (the original email) to send reply
       const emailId = threadMessages[0].id
       const response = await fetch(`/api/emails/${emailId}/reply`, {
@@ -1208,10 +1353,15 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       await fetchTickets({ silent: true })
       
       toast({ title: "Reply sent successfully" })
+
+      if (opts?.closeTicket) {
+        await handleUpdateStatus("closed", targetTicketId)
+      }
     } catch (err) {
       toast({ title: "Error", description: err instanceof Error ? err.message : "Failed to send reply", variant: "destructive" })
     } finally {
       setSendingReply(false)
+      setSendingAction(null)
     }
   }
 
@@ -1285,16 +1435,21 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     // Tab-based filtering
     console.log('[Filter] After tab filter (' + activeTab + '):', filtered.length)
     if (activeTab === "assigned") {
-      filtered = filtered.filter(t => t.assigneeUserId === currentUserId)
+      filtered = filtered.filter(t => t.assigneeUserId === currentUserId && t.status !== "closed")
       console.log('[Filter] Assigned filter:', filtered.length)
     } else if (activeTab === "unassigned") {
-      filtered = filtered.filter(t => t.assigneeUserId === null)
+      filtered = filtered.filter(t => t.assigneeUserId === null && t.status !== "closed")
       console.log('[Filter] Unassigned filter:', filtered.length)
+    } else if (activeTab === "open") {
+      filtered = filtered.filter(t => t.status !== "closed")
+      console.log('[Filter] Open filter:', filtered.length)
+    } else if (activeTab === "closed") {
+      filtered = filtered.filter(t => t.status === "closed")
+      console.log('[Filter] Closed filter:', filtered.length)
     }
-    // "all" tab shows all tickets (no filter)
 
-    // Auto-filter closed tickets if preference is set
-    if (autoFilterClosed && statusFilter === "all") {
+    // Auto-filter closed tickets if preference is set (only applies when not on closed tab)
+    if (autoFilterClosed && statusFilter === "all" && activeTab !== "closed") {
       filtered = filtered.filter(t => t.status !== "closed")
     }
     
@@ -1493,41 +1648,57 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
           
           {/* Tabs with counts */}
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
-            <TabsList className="grid w-full grid-cols-3 h-8 text-xs">
-              <TabsTrigger value="assigned" className="relative pr-1">
-                <span className="flex items-center gap-1.5">
-                  Assigned
+            <TabsList className="grid w-full grid-cols-4 h-8 text-[11px] gap-0.5">
+              <TabsTrigger value="assigned" className="relative px-1 min-w-0">
+                <span className="flex items-center gap-1 truncate">
+                  <span className="truncate">Assigned</span>
                   {(() => {
-                    const count = tickets.filter(t => t.assigneeUserId === currentUserId).length
+                    const count = tickets.filter(t => t.assigneeUserId === currentUserId && t.status !== 'closed').length
                     return count > 0 && (
-                      <Badge variant="secondary" className="h-4 px-1.5 text-[10px] flex-shrink-0">
+                      <Badge variant="secondary" className="h-4 px-1 text-[9px] flex-shrink-0">
                         {count}
                       </Badge>
                     )
                   })()}
                 </span>
               </TabsTrigger>
-              <TabsTrigger value="unassigned" className="relative pr-1">
-                <span className="flex items-center gap-1.5">
-                  Unassigned
+              <TabsTrigger value="unassigned" className="relative px-1 min-w-0">
+                <span className="flex items-center gap-1 truncate">
+                  <span className="truncate">Unassigned</span>
                   {(() => {
-                    const count = tickets.filter(t => t.assigneeUserId === null).length
+                    const count = tickets.filter(t => t.assigneeUserId === null && t.status !== 'closed').length
                     return count > 0 && (
-                      <Badge variant="secondary" className="h-4 px-1.5 text-[10px] flex-shrink-0">
+                      <Badge variant="secondary" className="h-4 px-1 text-[9px] flex-shrink-0">
                         {count}
                       </Badge>
                     )
                   })()}
                 </span>
               </TabsTrigger>
-              <TabsTrigger value="all" className="relative pr-1">
-                <span className="flex items-center gap-1.5">
-                  All
-                  {tickets.length > 0 && (
-                    <Badge variant="secondary" className="h-4 px-1.5 text-[10px] flex-shrink-0">
-                      {tickets.length}
-                    </Badge>
-                  )}
+              <TabsTrigger value="open" className="relative px-1 min-w-0">
+                <span className="flex items-center gap-1 truncate">
+                  <span className="truncate">Open</span>
+                  {(() => {
+                    const count = tickets.filter(t => t.status !== 'closed').length
+                    return count > 0 && (
+                      <Badge variant="secondary" className="h-4 px-1 text-[9px] flex-shrink-0">
+                        {count}
+                      </Badge>
+                    )
+                  })()}
+                </span>
+              </TabsTrigger>
+              <TabsTrigger value="closed" className="relative px-1 min-w-0">
+                <span className="flex items-center gap-1 truncate">
+                  <span className="truncate">Closed</span>
+                  {(() => {
+                    const count = tickets.filter(t => t.status === 'closed').length
+                    return count > 0 && (
+                      <Badge variant="secondary" className="h-4 px-1 text-[9px] flex-shrink-0">
+                        {count}
+                      </Badge>
+                    )
+                  })()}
                 </span>
               </TabsTrigger>
             </TabsList>
@@ -1573,7 +1744,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                   {(statusFilter !== "all" || priorityFilter !== "all" || assigneeFilter !== "all" || tagsFilter !== "all" || dateFilter !== "all" || showUnreadOnly) && (
                     <>
                       <Badge variant="secondary" className="h-4 px-1 text-[10px]">Active</Badge>
-                      <button
+                      <span
                         onClick={(e) => {
                           e.stopPropagation()
                           setStatusFilter("all")
@@ -1584,10 +1755,10 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                           setShowUnreadOnly(false)
                           setSearchQuery("")
                         }}
-                        className="ml-auto h-5 px-2 text-[10px] rounded-md bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+                        className="ml-auto h-5 px-2 text-[10px] rounded-md bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors cursor-pointer inline-flex items-center"
                       >
                         Clear all
-                      </button>
+                      </span>
                     </>
                   )}
                 </div>
@@ -1783,7 +1954,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                 variant="outline"
                 onClick={() => handleBulkUpdate({ status: "closed" })}
                 disabled={bulkUpdating}
-                className="h-7 text-xs transition-all duration-200 hover:scale-105"
+                className="h-7 text-xs transition-colors duration-200"
               >
                 Close Selected
               </Button>
@@ -1804,17 +1975,61 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                   ))}
                 </SelectContent>
               </Select>
+              {bulkProgress.length > 0 && (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span>
+                    {bulkProgress.filter(p => p.status === 'success').length} ok / {bulkProgress.filter(p => p.status === 'error').length} failed
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={retryBulkFailures}
+                    disabled={bulkUpdating || bulkProgress.every(p => p.status !== 'error')}
+                    className="h-7 text-[11px] px-2"
+                  >
+                    Retry failed
+                  </Button>
+                </div>
+              )}
             </div>
               </div>
         )}
 
         <div className="flex-1 overflow-y-auto overflow-x-hidden min-w-0 w-full">
           {filteredTickets.length === 0 ? (
-            <div className="p-4 text-center text-muted-foreground space-y-2 animate-in fade-in duration-300">
-              <p className="text-sm">No tickets found</p>
-              {tickets.length > 0 && (
-                <p className="text-xs">Total tickets: {tickets.length} (filtered out)</p>
-              )}
+            <div className="flex-1 flex items-center justify-center p-8">
+              <div className="text-center space-y-4 max-w-md">
+                <div className="w-20 h-20 rounded-full bg-muted/50 flex items-center justify-center mx-auto">
+                  <Inbox className="w-10 h-10 text-muted-foreground/50" />
+                </div>
+                {searchQuery || statusFilter !== "all" || priorityFilter !== "all" || assigneeFilter !== "all" || tagsFilter !== "all" || dateFilter !== "all" || showUnreadOnly ? (
+                  <>
+                    <h3 className="text-lg font-semibold text-foreground">No tickets match your filters</h3>
+                    <p className="text-sm text-muted-foreground">Try adjusting your search or filter criteria</p>
+                    <Button
+                      onClick={() => {
+                        setSearchQuery("")
+                        setStatusFilter("all")
+                        setPriorityFilter("all")
+                        setAssigneeFilter("all")
+                        setTagsFilter("all")
+                        setDateFilter("all")
+                        setShowUnreadOnly(false)
+                      }}
+                      variant="outline"
+                      size="sm"
+                      className="mt-2"
+                    >
+                      Clear all filters
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <h3 className="text-lg font-semibold text-foreground">No tickets yet</h3>
+                    <p className="text-sm text-muted-foreground">Tickets will appear here when customers send emails</p>
+                  </>
+                )}
+              </div>
             </div>
           ) : (
             <>
@@ -1988,7 +2203,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                       handleTakeTicket()
                     }}
                     disabled={assigning === selectedTicket.id}
-                    className="h-8 text-xs transition-all duration-300 ease-out hover:scale-110 hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="h-8 text-xs transition-colors duration-200 ease-out hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {assigning === selectedTicket.id ? <Loader2 className="w-3 h-3 animate-spin" /> : "Take Ticket"}
                   </Button>
@@ -1997,6 +2212,21 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                   value={selectedTicket.assigneeUserId || "unassigned"}
                   onValueChange={(value) => {
                     const assigneeId = value === "unassigned" ? null : value
+
+                    // Prevent agents from assigning to others or unassigning
+                    if (currentUserRole === 'agent') {
+                      const attemptingUnassign = assigneeId === null
+                      const attemptingAssignOther = assigneeId !== null && assigneeId !== currentUserId
+                      if (attemptingUnassign || attemptingAssignOther) {
+                        toast({
+                          title: "Permission denied",
+                          description: "Agents can only assign tickets to themselves.",
+                          variant: "destructive"
+                        })
+                        return
+                      }
+                    }
+
                     if (assigneeId && !selectedTicket.assigneeUserId) {
                       setPendingAssignment({ ticketId: selectedTicket.id, assigneeUserId: assigneeId })
                       setShowAssignDialog(true)
@@ -2012,8 +2242,13 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                   <SelectContent>
                     <SelectItem value="unassigned">Unassigned</SelectItem>
                     {users.map((user) => (
-                      <SelectItem key={user.id} value={user.id}>
+                      <SelectItem
+                        key={user.id}
+                        value={user.id}
+                        disabled={currentUserRole === 'agent' && user.id !== currentUserId}
+                      >
                         {user.name}
+                        {currentUserRole === 'agent' && user.id !== currentUserId ? ' (Not allowed)' : ''}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -2330,12 +2565,11 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
               <Card className="animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out w-full max-w-full border-border/50 shadow-sm hover:shadow-md transition-all duration-300" style={{ animationDelay: '150ms' }}>
                 <CardContent className="p-4 w-full max-w-full overflow-hidden">
                   <h3 className="font-semibold mb-4">Internal Notes</h3>
-                  <div className="space-y-3 mb-4 w-full max-w-full overflow-hidden">
+                  <div className="space-y-3 mb-4 w-full overflow-x-hidden">
                     {notes.map((note, idx) => (
                       <div 
                         key={note.id} 
-                        className="border-l-2 border-primary pl-4 py-2 bg-muted/50 rounded transition-all duration-300 ease-out hover:bg-muted/70 hover:shadow-md hover:scale-[1.01] animate-in fade-in slide-in-from-left-4 w-full max-w-full overflow-hidden"
-                        style={{ animationDelay: `${idx * 50}ms` }}
+                        className="border-l-2 border-primary pl-4 py-2 bg-muted/50 rounded transition-colors duration-200 hover:bg-muted/70 w-full overflow-hidden"
                       >
                         <div className="flex items-center justify-between mb-1">
                           <span className="text-sm font-medium">{note.userName}</span>
@@ -2388,20 +2622,108 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                             className="min-h-20 text-sm w-full"
                             autoFocus
                           />
+                          ) : null}
+                        {editingNoteId === note.id ? (
+                          <div className="mt-2 flex items-center gap-2">
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <Button variant="outline" size="sm" className="h-7 text-xs">@ Mentions</Button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-64 p-2" align="start">
+                                <div className="space-y-2">
+                                  <div className="text-xs text-muted-foreground">Update tagged users</div>
+                                  <div className="max-h-40 overflow-auto space-y-1">
+                                    {users.map(u => (
+                                      <label key={u.id} className="flex items-center gap-2 text-sm">
+                                        <Checkbox 
+                                          checked={editingMentions.includes(u.id)} 
+                                          onCheckedChange={(val) => {
+                                            setEditingMentions(prev => {
+                                              const has = prev.includes(u.id)
+                                              if (val && !has) return [...prev, u.id]
+                                              if (!val && has) return prev.filter(x => x !== u.id)
+                                              return prev
+                                            })
+                                          }}
+                                        />
+                                        <Avatar className="h-6 w-6"><AvatarFallback>{(u.name||"U").slice(0,1).toUpperCase()}</AvatarFallback></Avatar>
+                                        <span className="truncate">{u.name}</span>
+                                      </label>
+                                    ))}
+                                  </div>
+                                </div>
+                              </PopoverContent>
+                            </Popover>
+                            {editingMentions.length > 0 && (
+                              <div className="flex flex-wrap gap-1">
+                                {editingMentions.map(uid => {
+                                  const u = users.find(x => x.id === uid)
+                                  const label = u ? u.name : uid.slice(0, 8)
+                                  return <Badge key={uid} variant="secondary" className="text-[10px]">@{label}</Badge>
+                                })}
+                              </div>
+                            )}
+                          </div>
                         ) : (
-                          <p className="text-sm whitespace-pre-wrap break-words overflow-wrap-anywhere">{note.content}</p>
+                          <div className="space-y-2 break-words">
+                            <p className="text-sm whitespace-pre-wrap break-words overflow-wrap-anywhere">{note.content}</p>
+                            {!!(note as any).mentions && (note as any).mentions.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                {(note as any).mentions.map((uid: string) => {
+                                  const u = users.find(x => x.id === uid)
+                                  const label = u ? u.name : uid.slice(0, 8)
+                                  return (
+                                    <Badge key={uid} variant="secondary" className="text-[10px]">
+                                      @{label}
+                                    </Badge>
+                                  )
+                                })}
+                              </div>
+                            )}
+                          </div>
                         )}
                       </div>
                     ))}
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 items-start">
                     <Textarea
                       placeholder="Add internal note..."
                       value={newNote}
                       onChange={(e) => setNewNote(e.target.value)}
                       className="min-h-20"
                     />
-                    <Button onClick={handleAddNote} disabled={!newNote.trim() || addingNote}>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" className="h-[40px]" title="Mention teammates">
+                          @ Mention
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-64 p-2">
+                        <div className="space-y-2">
+                          <div className="text-xs text-muted-foreground">Tag users to notify without assigning</div>
+                          <div className="max-h-40 overflow-auto space-y-1">
+                            {users.map(u => (
+                              <label key={u.id} className="flex items-center gap-2 text-sm">
+                                <Checkbox 
+                                  checked={selectedMentions.includes(u.id)} 
+                                  onCheckedChange={(val) => {
+                                    setSelectedMentions(prev => {
+                                      const has = prev.includes(u.id)
+                                      if (val && !has) return [...prev, u.id]
+                                      if (!val && has) return prev.filter(x => x !== u.id)
+                                      return prev
+                                    })
+                                  }}
+                                />
+                                <Avatar className="h-6 w-6"><AvatarFallback>{(u.name||"U").slice(0,1).toUpperCase()}</AvatarFallback></Avatar>
+                                <span className="truncate">{u.name}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                    <Button onClick={handleAddNote} disabled={!newNote.trim() || addingNote} className="min-w-[60px]">
                       {addingNote ? <Loader2 className="w-4 h-4 animate-spin" /> : "Add"}
                     </Button>
                   </div>
@@ -2557,20 +2879,37 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                     }}
                     className="min-h-32 mb-3 text-sm w-full max-w-full resize-none break-words overflow-x-hidden transition-all duration-300 ease-out focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
                   />
-                  <Button 
-                    onClick={handleSendReply} 
-                    disabled={!replyText.trim() || sendingReply}
-                    className="h-8 text-xs transition-all duration-300 ease-out hover:scale-105 hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {sendingReply ? (
-                      <>
-                        <Loader2 className="w-3 h-3 animate-spin mr-2" />
-                        Sending...
-                      </>
-                    ) : (
-                      "Send Reply"
-                    )}
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button 
+                      onClick={() => handleSendReply()}
+                      disabled={!replyText.trim() || sendingReply || updatingStatus}
+                      className="h-8 text-xs transition-all duration-300 ease-out hover:scale-105 hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {sendingAction === 'send' ? (
+                        <>
+                          <Loader2 className="w-3 h-3 animate-spin mr-2" />
+                          Sending...
+                        </>
+                      ) : (
+                        "Send Reply"
+                      )}
+                    </Button>
+                    <Button 
+                      variant="secondary"
+                      onClick={() => handleSendReply({ closeTicket: true })}
+                      disabled={!replyText.trim() || sendingReply || updatingStatus}
+                      className="h-8 text-xs transition-all duration-300 ease-out hover:scale-105 hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {sendingAction === 'send-close' ? (
+                        <>
+                          <Loader2 className="w-3 h-3 animate-spin mr-2" />
+                          {updatingStatus ? 'Closing...' : 'Sending...'}
+                        </>
+                      ) : (
+                        "Send & Close"
+                      )}
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             </div>

@@ -9,6 +9,8 @@ import { fetchInboxEmails, fetchSentEmails } from '@/lib/gmail';
 import { storeSentEmail, storeReceivedEmail } from '@/lib/storage';
 import { ensureTicketForEmail } from '@/lib/tickets';
 
+// Force dynamic rendering for this route
+export const dynamic = 'force-dynamic';
 // Cache configuration: revalidate every 30 seconds
 export const revalidate = 30;
 

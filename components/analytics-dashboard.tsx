@@ -142,10 +142,10 @@ export default function AnalyticsDashboard({ currentUserRole }: AnalyticsDashboa
   if (!canViewAnalytics) {
     return (
       <div className="h-full w-full flex items-center justify-center bg-background p-8">
-        <Card className="max-w-md w-full p-10 text-center shadow-xl border-2">
+        <Card className="max-w-md w-full p-10 text-center shadow-xl border border-border/60">
           <div className="flex justify-center mb-6">
-            <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-destructive/20 to-destructive/10 flex items-center justify-center border-2 border-destructive/30">
-              <Shield className="w-10 h-10 text-destructive" />
+            <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center border border-primary/20 text-primary">
+              <BarChart3 className="w-8 h-8" />
             </div>
           </div>
           <CardHeader className="p-0 pb-4">

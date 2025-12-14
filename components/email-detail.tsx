@@ -1,16 +1,19 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { useToast } from "@/components/ui/use-toast"
-import { ArrowLeft, ChevronDown, ChevronUp, Sparkles, Loader2, Mail } from "lucide-react"
+import { ArrowLeft, ChevronDown, ChevronUp, Sparkles, Loader2, Mail, ShoppingBag } from "lucide-react"
 
 interface EmailDetailProps {
   emailId: string
   onDraftGenerated?: () => void
   onBack?: () => void
+  onToggleShopify?: (email: string) => void
+  showShopifySidebar?: boolean
   // Optional initial email data for instant display
   initialEmailData?: {
     subject?: string
@@ -46,7 +49,7 @@ interface EmailSummary {
   snippet?: string
 }
 
-export default function EmailDetail({ emailId, onDraftGenerated, onBack, initialEmailData }: EmailDetailProps) {
+export default function EmailDetail({ emailId, onDraftGenerated, onBack, initialEmailData, onToggleShopify, showShopifySidebar }: EmailDetailProps) {
   const [threadMessages, setThreadMessages] = useState<EmailMessage[]>([])
   const [emailSummary, setEmailSummary] = useState<EmailSummary | null>(
     initialEmailData ? {
@@ -73,14 +76,47 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
   const [error, setError] = useState<string | null>(null)
   const { toast } = useToast()
   const [sendResetTimer, setSendResetTimer] = useState<NodeJS.Timeout | null>(null)
+  const [conversationSummary, setConversationSummary] = useState<string>("")
+  const [summaryExpanded, setSummaryExpanded] = useState(false)
+  const [generatingSummary, setGeneratingSummary] = useState(false)
+  const [autoSaving, setAutoSaving] = useState(false)
+  const draftAutoSaveTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
     return () => {
       if (sendResetTimer) {
         clearTimeout(sendResetTimer)
       }
+      if (draftAutoSaveTimerRef.current) {
+        clearTimeout(draftAutoSaveTimerRef.current)
+      }
     }
   }, [sendResetTimer])
+
+  // Autosave draft text to localStorage
+  useEffect(() => {
+    if (!emailId || !draftText || !showDraft) return
+    
+    if (draftAutoSaveTimerRef.current) {
+      clearTimeout(draftAutoSaveTimerRef.current)
+    }
+    
+    draftAutoSaveTimerRef.current = setTimeout(() => {
+      try {
+        setAutoSaving(true)
+        localStorage.setItem(`draft_${emailId}`, draftText)
+        setTimeout(() => setAutoSaving(false), 500)
+      } catch {
+        // Ignore localStorage errors
+      }
+    }, 1000)
+    
+    return () => {
+      if (draftAutoSaveTimerRef.current) {
+        clearTimeout(draftAutoSaveTimerRef.current)
+      }
+    }
+  }, [draftText, emailId, showDraft])
 
   useEffect(() => {
     if (emailId) {
@@ -96,6 +132,18 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       setCopied(false)
       setGenerating(false)
       setError(null)
+      setConversationSummary("")
+      setSummaryExpanded(false)
+      
+      // Try to load autosaved draft from localStorage
+      try {
+        const saved = localStorage.getItem(`draft_${emailId}`)
+        if (saved && !draftText) {
+          setDraftText(saved)
+        }
+      } catch {
+        // Ignore localStorage errors
+      }
       
       // Set initial email data immediately if provided
       if (initialEmailData) {
@@ -290,6 +338,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
 
   const handleSendReply = async () => {
     if (!emailId) return
+    if (sending) return // Prevent double-submit
 
     if (!draftText.trim()) {
       setError("Draft is empty. Please edit it before sending.")
@@ -317,7 +366,12 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
 
       setSendSuccess(true)
       
-      // Clear draft UI after successful send
+      // Clear draft UI and autosaved data after successful send
+      try {
+        localStorage.removeItem(`draft_${emailId}`)
+      } catch {
+        // Ignore localStorage errors
+      }
       setDraftText("")
       setDraftId(null)
       setShowDraft(false)
@@ -447,9 +501,69 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       <div className="flex-1 overflow-hidden flex flex-col min-h-0">
         <Card className="mx-4 md:mx-6 mt-4 mb-3 flex-1 flex flex-col overflow-hidden max-w-full shadow-lg">
           <div className="px-6 py-5 border-b border-border flex-shrink-0 overflow-hidden bg-card">
-            <h2 className="text-xl font-bold text-foreground line-clamp-2 break-words">
-              {threadMessages[threadMessages.length - 1]?.subject || emailSummary?.subject || "(No subject)"}
-            </h2>
+            <div className="flex items-start justify-between gap-4 mb-2">
+              <h2 className="text-xl font-bold text-foreground line-clamp-2 break-words flex-1">
+                {threadMessages[threadMessages.length - 1]?.subject || emailSummary?.subject || "(No subject)"}
+              </h2>
+              {threadMessages.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    if (!conversationSummary) {
+                      setGeneratingSummary(true)
+                      try {
+                        const summary = threadMessages.map(m => `${m.from}: ${(m.body || m.subject || "").substring(0, 200)}`).join("\n\n")
+                        const response = await fetch("/api/ai/summarize", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ conversation: summary })
+                        })
+                        if (response.ok) {
+                          const data = await response.json()
+                          setConversationSummary(data.summary)
+                          setSummaryExpanded(true)
+                        } else {
+                          setConversationSummary("Unable to generate summary at this time.")
+                          setSummaryExpanded(true)
+                        }
+                      } catch (err) {
+                        setConversationSummary("Error generating summary.")
+                        setSummaryExpanded(true)
+                      } finally {
+                        setGeneratingSummary(false)
+                      }
+                    } else {
+                      setSummaryExpanded(!summaryExpanded)
+                    }
+                  }}
+                  className="h-8 px-3 text-xs flex-shrink-0"
+                  disabled={generatingSummary}
+                >
+                  {generatingSummary ? (
+                    <>
+                      <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                      Summarizing...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-3 h-3 mr-1" />
+                      {conversationSummary ? (summaryExpanded ? "Hide Summary" : "Show Summary") : "Summarize"}
+                    </>
+                  )}
+                </Button>
+              )}
+            </div>
+            {conversationSummary && summaryExpanded && (
+              <div className="mt-3 p-3 bg-primary/5 border border-primary/20 rounded-md">
+                <div className="flex items-start gap-2">
+                  <Sparkles className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+                  <div className="text-sm text-foreground/90 leading-relaxed">
+                    {conversationSummary}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="flex-1 overflow-y-auto overflow-x-hidden min-h-0 px-6 py-4">
@@ -461,17 +575,40 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
                     className="pb-6 border-b border-border last:border-b-0 last:pb-0 overflow-hidden"
                   >
                     <div className="flex justify-between items-start gap-4 mb-3 min-w-0">
-                      <div className="flex-1 min-w-0 overflow-hidden">
-                        <div className="flex items-center gap-2 mb-1.5 min-w-0">
-                          <div className="text-sm font-semibold text-foreground truncate">
-                            {msg.from.split("<")[0].trim() || msg.from}
+                      <div className="flex items-center gap-3 flex-1 min-w-0 overflow-hidden">
+                        {/* Clickable Avatar for Shopify */}
+                        {onToggleShopify && (
+                          <button
+                            onClick={() => onToggleShopify(msg.from)}
+                            className="flex-shrink-0 transition-colors duration-200 cursor-pointer group"
+                            title="View Shopify customer info"
+                          >
+                            <Avatar className="h-10 w-10 border-2 border-border group-hover:border-primary transition-colors">
+                              <AvatarFallback className="bg-primary/10 text-primary font-semibold text-xs">
+                                {msg.from.split("<")[0].trim()
+                                  ? msg.from.split("<")[0].trim()
+                                      .split(" ")
+                                      .map((n) => n[0])
+                                      .join("")
+                                      .slice(0, 2)
+                                      .toUpperCase()
+                                  : msg.from.slice(0, 2).toUpperCase()}
+                              </AvatarFallback>
+                            </Avatar>
+                          </button>
+                        )}
+                        <div className="flex-1 min-w-0 overflow-hidden">
+                          <div className="flex items-center gap-2 mb-1.5 min-w-0">
+                            <div className="text-sm font-semibold text-foreground truncate">
+                              {msg.from.split("<")[0].trim() || msg.from}
+                            </div>
+                            {index === 0 && (
+                              <Badge variant="outline" className="text-xs flex-shrink-0">Original</Badge>
+                            )}
                           </div>
-                          {index === 0 && (
-                            <Badge variant="outline" className="text-xs flex-shrink-0">Original</Badge>
-                          )}
-                        </div>
-                        <div className="text-xs text-muted-foreground truncate">
-                          To: {msg.to.split("<")[0].trim() || msg.to}
+                          <div className="text-xs text-muted-foreground truncate">
+                            To: {msg.to.split("<")[0].trim() || msg.to}
+                          </div>
                         </div>
                       </div>
                       <div className="text-xs text-muted-foreground flex-shrink-0 whitespace-nowrap">
@@ -548,6 +685,17 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
 
         <Card className="mx-4 md:mx-6 mb-4 flex-shrink-0 overflow-hidden">
           <div className="p-6 space-y-4">
+            {onToggleShopify && emailSummary && (
+              <Button
+                variant={showShopifySidebar ? "default" : "outline"}
+                size="sm"
+                onClick={() => onToggleShopify(emailSummary.from)}
+                className="w-full gap-2"
+              >
+                <ShoppingBag className="w-4 h-4" />
+                {showShopifySidebar ? "Hide" : "Show"} Shopify Info
+              </Button>
+            )}
             <Button
               onClick={handleGenerateDraft}
               disabled={generating || showDraft}
@@ -598,12 +746,32 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
                   </div>
                 ) : (
                   <div className="space-y-3 animate-in fade-in slide-in-from-top-2 duration-300">
-                    <textarea
-                      value={draftText}
-                      onChange={(e) => setDraftText(e.target.value)}
-                      className="w-full min-h-[200px] p-4 border-2 border-border rounded-xl bg-background text-foreground placeholder:text-muted-foreground text-sm resize-y focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all duration-200"
-                      placeholder="Edit your draft here..."
-                    />
+                    <div className="relative">
+                      <textarea
+                        value={draftText}
+                        onChange={(e) => setDraftText(e.target.value)}
+                        onKeyDown={(e) => {
+                          // Escape to minimize
+                          if (e.key === 'Escape') {
+                            setDraftMinimized(true)
+                            e.preventDefault()
+                          }
+                          // Ctrl/Cmd+Enter to send
+                          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                            handleSendReply()
+                            e.preventDefault()
+                          }
+                        }}
+                        className="w-full min-h-[200px] p-4 border-2 border-border rounded-xl bg-background text-foreground placeholder:text-muted-foreground text-sm resize-y focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all duration-200"
+                        placeholder="Edit your draft here... (Esc to minimize, Ctrl+Enter to send)"
+                        aria-label="Email draft editor"
+                      />
+                      {autoSaving && (
+                        <div className="absolute top-2 right-2 text-xs text-muted-foreground bg-background/80 px-2 py-1 rounded">
+                          Saving...
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
 

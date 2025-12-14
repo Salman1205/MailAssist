@@ -12,6 +12,7 @@ export interface TicketNote {
   userId: string;
   userName: string;
   content: string;
+  mentions?: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -49,6 +50,7 @@ export async function getTicketNotes(ticketId: string): Promise<TicketNote[]> {
     userId: row.user_id,
     userName: row.user?.name || 'Unknown',
     content: row.content,
+    mentions: Array.isArray(row.mentions) ? row.mentions : [],
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }));
@@ -63,7 +65,8 @@ export async function getTicketNotes(ticketId: string): Promise<TicketNote[]> {
 export async function createTicketNote(
   ticketId: string,
   content: string,
-  userId: string
+  userId: string,
+  mentions?: string[]
 ): Promise<TicketNote | null> {
   if (!supabase) return null;
 
@@ -81,6 +84,7 @@ export async function createTicketNote(
       ticket_id: ticketId,
       user_id: userId,
       content: content.trim(),
+      mentions: (Array.isArray(mentions) ? mentions : []).map((m) => String(m)),
       created_at: nowIso,
       updated_at: nowIso,
     })
@@ -97,15 +101,26 @@ export async function createTicketNote(
 
   if (!data) return null;
 
-  return {
+  const note: TicketNote = {
     id: data.id,
     ticketId: data.ticket_id,
     userId: data.user_id,
     userName: data.user?.name || 'Unknown',
     content: data.content,
+    mentions: Array.isArray(data.mentions) ? data.mentions : [],
     createdAt: data.created_at,
     updatedAt: data.updated_at,
   };
+
+  // Create notifications for mentioned users (excluding author)
+  try {
+    const { createMentionNotifications } = await import('./notifications')
+    await createMentionNotifications(note.id, ticketId, userId, note.mentions || [], note.userName)
+  } catch (err) {
+    console.warn('Non-fatal: failed to create mention notifications', err)
+  }
+
+  return note;
 }
 
 /**
@@ -117,7 +132,8 @@ export async function createTicketNote(
 export async function updateTicketNote(
   noteId: string,
   content: string,
-  userId: string
+  userId: string,
+  mentions?: string[]
 ): Promise<TicketNote | null> {
   if (!supabase) return null;
 
@@ -162,6 +178,7 @@ export async function updateTicketNote(
     .from('ticket_notes')
     .update({
       content: content.trim(),
+      mentions: (Array.isArray(mentions) ? mentions : []).map((m) => String(m)),
       updated_at: nowIso,
     })
     .eq('id', noteId)
@@ -185,6 +202,7 @@ export async function updateTicketNote(
     userId: data.user_id,
     userName: data.user?.name || 'Unknown',
     content: data.content,
+    mentions: Array.isArray(data.mentions) ? data.mentions : [],
     createdAt: data.created_at,
     updatedAt: data.updated_at,
   };

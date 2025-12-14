@@ -86,15 +86,26 @@ export default function UserManagement({ currentUserId }: UserManagementProps) {
       })
 
       if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || "Failed to create user")
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+        const errorMessage = errorData.error || errorData.details || "Failed to create user"
+        throw new Error(errorMessage)
       }
 
       setShowCreateDialog(false)
       resetForm()
       await fetchUsers()
+      toast({ 
+        title: "Success", 
+        description: "User created successfully" 
+      })
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create user")
+      const errorMessage = err instanceof Error ? err.message : "Failed to create user"
+      setError(errorMessage)
+      toast({ 
+        title: "Creation Failed", 
+        description: errorMessage, 
+        variant: "destructive" 
+      })
     } finally {
       setSaving(false)
     }
@@ -121,15 +132,26 @@ export default function UserManagement({ currentUserId }: UserManagementProps) {
       })
 
       if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || "Failed to update user")
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+        const errorMessage = errorData.error || errorData.details || "Failed to update user"
+        throw new Error(errorMessage)
       }
 
       setEditingUser(null)
       resetForm()
       await fetchUsers()
+      toast({ 
+        title: "Success", 
+        description: "User updated successfully" 
+      })
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update user")
+      const errorMessage = err instanceof Error ? err.message : "Failed to update user"
+      setError(errorMessage)
+      toast({ 
+        title: "Update Failed", 
+        description: errorMessage, 
+        variant: "destructive" 
+      })
     } finally {
       setSaving(false)
     }
@@ -146,13 +168,24 @@ export default function UserManagement({ currentUserId }: UserManagementProps) {
       })
 
       if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || "Failed to delete user")
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+        const errorMessage = errorData.error || errorData.details || "Failed to delete user"
+        throw new Error(errorMessage)
       }
 
       await fetchUsers()
+      toast({ 
+        title: "Success", 
+        description: "User deactivated successfully" 
+      })
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete user")
+      const errorMessage = err instanceof Error ? err.message : "Failed to delete user"
+      setError(errorMessage)
+      toast({ 
+        title: "Deletion Failed", 
+        description: errorMessage, 
+        variant: "destructive" 
+      })
     }
   }
 

@@ -52,10 +52,26 @@ export default function ShopifySettings() {
   }
 
   const handleSave = async () => {
-    if (!shopDomain.trim() || !accessToken.trim()) {
+    // Clear previous errors
+    setError(null)
+
+    if (!shopDomain.trim()) {
+      const errorMsg = "Shop domain is required"
+      setError(errorMsg)
       toast({
-        title: "Error",
-        description: "Please fill in both shop domain and access token",
+        title: "Missing Shop Domain",
+        description: errorMsg,
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (!accessToken.trim()) {
+      const errorMsg = "Access token is required"
+      setError(errorMsg)
+      toast({
+        title: "Missing Access Token",
+        description: errorMsg,
         variant: "destructive",
       })
       return
@@ -64,9 +80,11 @@ export default function ShopifySettings() {
     // Validate shop domain format
     const domainPattern = /^[a-zA-Z0-9-]+\.myshopify\.com$/
     if (!domainPattern.test(shopDomain.trim())) {
+      const errorMsg = "Shop domain must be in format: your-shop.myshopify.com"
+      setError(errorMsg)
       toast({
-        title: "Invalid Domain",
-        description: "Shop domain must be in format: your-shop.myshopify.com",
+        title: "Invalid Domain Format",
+        description: errorMsg,
         variant: "destructive",
       })
       return
@@ -88,8 +106,9 @@ export default function ShopifySettings() {
       })
 
       if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || "Failed to save configuration")
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+        const errorMessage = errorData.error || errorData.details || "Failed to save configuration"
+        throw new Error(errorMessage)
       }
 
       setIsConfigured(true)

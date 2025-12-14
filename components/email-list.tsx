@@ -263,7 +263,7 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
           <button
             onClick={handleLoadMore}
             disabled={loadingMore}
-            className="text-sm px-8 py-3 rounded-xl border-2 border-border/60 bg-card text-primary hover:bg-accent/10 hover:border-primary/60 hover:shadow-lg transition-all duration-200 ease-out hover:scale-105 disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:scale-100 font-semibold"
+            className="text-sm px-8 py-3 rounded-xl border-2 border-border/60 bg-card text-primary hover:bg-accent/10 hover:border-primary/60 hover:shadow-lg transition-colors duration-200 ease-out disabled:opacity-60 disabled:cursor-not-allowed font-semibold"
           >
             {loadingMore ? (
               <div className="flex items-center gap-2">

@@ -49,7 +49,7 @@ export async function PATCH(
 
     // Parse request body
     const body = await request.json();
-    const { assigneeUserId } = body; // null to unassign, or UUID to assign
+    const { assigneeUserId, priority } = body; // null to unassign, or UUID to assign
 
     // Check permissions
     const canReassign = await canReassignTickets(userId);
@@ -82,14 +82,24 @@ export async function PATCH(
       }
     }
 
-    // Assign the ticket
-    const ticket = await assignTicket(ticketId, assigneeUserId || null, userEmail);
+    // Assign the ticket (and update priority if provided)
+    const ticket = await assignTicket(ticketId, assigneeUserId || null, userEmail, userId);
 
     if (!ticket) {
       return NextResponse.json(
         { error: 'Ticket not found or assignment failed' },
         { status: 404 }
       );
+    }
+    
+    // Update priority if provided (done after assignment for simplicity)
+    if (priority && assigneeUserId) {
+      const { updateTicketPriority } = await import('@/lib/tickets');
+      await updateTicketPriority(ticketId, priority, userEmail);
+      // Fetch updated ticket to return
+      const { getTicketById } = await import('@/lib/tickets');
+      const updatedTicket = await getTicketById(ticketId, userEmail);
+      return NextResponse.json({ ticket: updatedTicket });
     }
 
     return NextResponse.json({ ticket });

@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS public.ticket_notes (
   ticket_id UUID NOT NULL REFERENCES public.tickets(id) ON DELETE CASCADE,
   user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
   content TEXT NOT NULL,
+  mentions JSONB NOT NULL DEFAULT '[]',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -14,6 +15,7 @@ CREATE TABLE IF NOT EXISTS public.ticket_notes (
 CREATE INDEX IF NOT EXISTS idx_ticket_notes_ticket_id ON public.ticket_notes(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_ticket_notes_user_id ON public.ticket_notes(user_id);
 CREATE INDEX IF NOT EXISTS idx_ticket_notes_created_at ON public.ticket_notes(created_at);
+CREATE INDEX IF NOT EXISTS idx_ticket_notes_mentions_gin ON public.ticket_notes USING GIN (mentions);
 
 -- Create trigger to update updated_at
 CREATE TRIGGER update_ticket_notes_updated_at 

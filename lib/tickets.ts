@@ -457,7 +457,8 @@ export async function getTicketById(
 export async function assignTicket(
   ticketId: string,
   assigneeUserId: string | null,
-  userEmail: string | null
+  userEmail: string | null,
+  assignerUserId?: string | null
 ): Promise<Ticket | null> {
   if (!supabase) return null;
 
@@ -487,6 +488,35 @@ export async function assignTicket(
   if (!data) return null;
 
   const ticket = mapRowToTicket(data);
+  // Create assignment notification if assigned to a user
+  try {
+    if (assigneeUserId) {
+      let assignerName: string | undefined = undefined
+
+      // Best-effort lookup of the assigning user's name when provided
+      if (assignerUserId && supabase) {
+        try {
+          const { data: assigner } = await supabase
+            .from('users')
+            .select('name')
+            .eq('id', assignerUserId)
+            .limit(1)
+            .maybeSingle()
+
+          if (assigner?.name) {
+            assignerName = assigner.name
+          }
+        } catch (lookupErr) {
+          console.warn('Non-fatal: failed to fetch assigner name', lookupErr)
+        }
+      }
+
+      const { createAssignmentNotification } = await import('./notifications')
+      await createAssignmentNotification(ticketId, assigneeUserId, assignerName)
+    }
+  } catch (err) {
+    console.warn('Non-fatal: failed to create assignment notification', err)
+  }
   
   // Fetch assignee name if ticket is assigned
   if (data.assignee_user_id && supabase) {

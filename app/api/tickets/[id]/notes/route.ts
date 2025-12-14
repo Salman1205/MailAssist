@@ -79,7 +79,7 @@ export async function POST(
     }
 
     const body = await request.json();
-    const { content } = body;
+    const { content, mentions } = body;
 
     // Validate and sanitize note content
     const contentValidation = validateTextInput(content, 5000, true);
@@ -90,7 +90,8 @@ export async function POST(
       );
     }
 
-    const note = await createTicketNote(ticketId, contentValidation.sanitized, userId);
+    const normalizedMentions = Array.isArray(mentions) ? mentions.filter((m: any) => typeof m === 'string') : [];
+    const note = await createTicketNote(ticketId, contentValidation.sanitized, userId, normalizedMentions);
 
     if (!note) {
       return NextResponse.json(
@@ -133,7 +134,7 @@ export async function PATCH(
     }
 
     const body = await request.json();
-    const { noteId, content } = body;
+    const { noteId, content, mentions } = body;
 
     if (!noteId || !isValidUUID(noteId)) {
       return NextResponse.json(
@@ -152,7 +153,8 @@ export async function PATCH(
     }
 
     console.log('[Update Note API] Request:', { ticketId, noteId, userId, contentLength: contentValidation.sanitized.length });
-    const note = await updateTicketNote(noteId, contentValidation.sanitized, userId);
+    const normalizedMentions = Array.isArray(mentions) ? mentions.filter((m: any) => typeof m === 'string') : [];
+    const note = await updateTicketNote(noteId, contentValidation.sanitized, userId, normalizedMentions);
 
     if (!note) {
       return NextResponse.json(

@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import EmailList from "@/components/email-list"
 import EmailDetail from "@/components/email-detail"
+import ShopifySidebar from "@/components/shopify-sidebar"
 
 interface InboxViewProps {
   selectedEmail: string | null
@@ -30,6 +31,7 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
     body?: string
     threadId?: string
   } | null>(null)
+  const [showShopifySidebar, setShowShopifySidebar] = useState(false)
   const showDetail = Boolean(selectedEmail)
   
   // Handle email selection with data
@@ -83,6 +85,10 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
               onSelectEmail(null)
             }}
             initialEmailData={selectedEmailData || undefined}
+            onToggleShopify={(email) => {
+              setShowShopifySidebar(!showShopifySidebar)
+            }}
+            showShopifySidebar={showShopifySidebar}
           />
         ) : (
           <div className="flex items-center justify-center h-full px-8 py-12 bg-muted/10">
@@ -106,6 +112,16 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
           </div>
         )}
       </div>
+
+      {/* Shopify Sidebar */}
+      {showShopifySidebar && selectedEmailData && (
+        <div className="w-80 border-l border-border bg-background overflow-hidden flex-shrink-0">
+          <ShopifySidebar
+            customerEmail={selectedEmailData.from || ''}
+            onClose={() => setShowShopifySidebar(false)}
+          />
+        </div>
+      )}
     </div>
   )
 }

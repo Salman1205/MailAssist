@@ -597,7 +597,7 @@ export async function sendNewEmail(
     try {
       const { assignTicket } = await import('./tickets');
       const userEmail = await getCurrentUserEmail();
-      const assignedTicket = await assignTicket(ticket.id, userId, userEmail);
+      const assignedTicket = await assignTicket(ticket.id, userId, userEmail, userId);
       if (!assignedTicket) {
         console.warn(`Failed to assign ticket ${ticket.id} to user ${userId}, but ticket was created`);
       }

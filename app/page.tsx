@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, Suspense } from "react"
+import { useSearchParams } from "next/navigation"
 import TopNav from "@/components/top-nav"
 import Sidebar, { type SidebarView } from "@/components/sidebar"
 import GmailConnect from "@/components/gmail-connect"
@@ -36,7 +37,7 @@ interface SyncStats {
   errors?: number
 }
 
-export default function Page() {
+function PageContent() {
   const [isConnected, setIsConnected] = useState(false)
   const [activeView, setActiveView] = useState<View>("inbox")
   const [selectedEmail, setSelectedEmail] = useState<string | null>(null)
@@ -60,6 +61,8 @@ export default function Page() {
   const LOCAL_STORAGE_KEY = "gmail_connected"
   const [loggingOut, setLoggingOut] = useState(false)
   const [globalSearch, setGlobalSearch] = useState<string>("")
+  const [deepLinkTicketId, setDeepLinkTicketId] = useState<string | null>(null)
+  const searchParams = useSearchParams()
 
   useEffect(() => {
     checkAuthStatus()
@@ -78,6 +81,15 @@ export default function Page() {
       checkUserSelection()
     }
   }, [])
+
+  // Listen to ticketId in the URL to deep-link into a specific ticket from notifications
+  useEffect(() => {
+    const ticketId = searchParams.get("ticketId")
+    if (ticketId) {
+      setActiveView("tickets")
+      setDeepLinkTicketId(ticketId)
+    }
+  }, [searchParams])
 
   // Update browser tab title to show current user
   useEffect(() => {
@@ -476,6 +488,7 @@ export default function Page() {
             currentUserRole={currentUser?.role as "admin" | "manager" | "agent" | null}
             globalSearchTerm={globalSearch}
             refreshKey={ticketsVersion}
+            initialTicketId={deepLinkTicketId || undefined}
           />
         )
       case "ai-settings":
@@ -681,5 +694,13 @@ export default function Page() {
         />
       )}
     </>
+  )
+}
+
+export default function Page() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center h-screen"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div></div>}>
+      <PageContent />
+    </Suspense>
   )
 }
