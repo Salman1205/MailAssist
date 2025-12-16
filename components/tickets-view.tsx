@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { Loader2, User, Mail, Clock, Tag, MessageSquare, Sparkles, X, Plus, ChevronDown, ChevronUp, Edit2, Check, XCircle, MoreVertical, Filter, ChevronRight, Search, ShoppingBag, Inbox } from "lucide-react"
+import { Loader2, User, Mail, Clock, Tag, MessageSquare, Sparkles, X, Plus, ChevronDown, ChevronUp, Edit2, Check, XCircle, MoreVertical, Filter, ChevronRight, Search, ShoppingBag, Inbox, RefreshCw, Paperclip } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -22,6 +22,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import QuickRepliesSidebar from "@/components/quick-replies-sidebar"
 import ShopifySidebar from "@/components/shopify-sidebar"
+import RichTextEditor from "@/components/rich-text-editor"
 
 interface Ticket {
   id: string
@@ -80,12 +81,14 @@ interface TicketsViewProps {
   globalSearchTerm?: string
   refreshKey?: number
   initialTicketId?: string
+  ticketNavKey?: number
 }
 
-export default function TicketsView({ currentUserId, currentUserRole, globalSearchTerm, refreshKey, initialTicketId }: TicketsViewProps) {
+export default function TicketsView({ currentUserId, currentUserRole, globalSearchTerm, refreshKey, initialTicketId, ticketNavKey }: TicketsViewProps) {
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null)
   const [activeTab, setActiveTab] = useState<"assigned" | "unassigned" | "open" | "closed">("unassigned")
@@ -117,6 +120,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   const [loadingThread, setLoadingThread] = useState(false)
   const [notes, setNotes] = useState<TicketNote[]>([])
   const [replyText, setReplyText] = useState("")
+  const [replyHtml, setReplyHtml] = useState("")
+  const [replyAttachments, setReplyAttachments] = useState<{ id: string; name: string; type: string; size: number; data: string }[]>([])
   const [draftText, setDraftText] = useState("")
   const [draftId, setDraftId] = useState<string | null>(null)
   const [showDraft, setShowDraft] = useState(false)
@@ -166,6 +171,13 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   const [showQuickReplies, setShowQuickReplies] = useState(false)
   const [showQuickRepliesSidebar, setShowQuickRepliesSidebar] = useState(false)
   const initialSelectHandledRef = useRef(false)
+
+  // Reset deep-link selection guard when ticketNavKey changes (on each navigation)
+  useEffect(() => {
+    console.log('🔄 Resetting guard due to ticketNavKey change:', ticketNavKey)
+    initialSelectHandledRef.current = false
+  }, [ticketNavKey])
+  
   const [showShopifySidebar, setShowShopifySidebar] = useState(false)
   
   // Ref for conversation scroll container to preserve scroll position
@@ -330,6 +342,46 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }, [autoFilterClosed])
 
+  // Define fetchTickets before it's used in effects
+  const fetchTickets = useCallback(async (options?: { silent?: boolean, returnData?: boolean }) => {
+    const { silent = false, returnData = false } = options || {}
+    try {
+      if (!silent) setLoading(true)
+      setError(null)
+      console.log('[Tickets] Fetching tickets...')
+      const timestamp = Date.now()
+      const response = await fetch(`/api/tickets?_=${timestamp}`, { 
+        cache: "no-store",
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        }
+      })
+      if (!response.ok) {
+        throw new Error("Failed to fetch tickets")
+      }
+      const data = await response.json()
+      console.log('[Tickets] Received tickets:', data.tickets?.length || 0)
+      if (data.tickets && data.tickets.length > 0) {
+        console.log('[Tickets] Sample ticket dates:', data.tickets.slice(0, 3).map((t: Ticket) => ({
+          id: t.id,
+          subject: t.subject,
+          lastCustomerReplyAt: t.lastCustomerReplyAt,
+          createdAt: t.createdAt,
+          date: t.lastCustomerReplyAt || t.createdAt
+        })))
+      }
+      const list = data.tickets || []
+      setTickets(list)
+      if (returnData) return list
+    } catch (err) {
+      console.error('[Tickets] Error fetching tickets:', err)
+      setError(err instanceof Error ? err.message : "Failed to load tickets")
+    } finally {
+      if (!silent) setLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     // OPTIMIZED: Fetch all data in parallel instead of sequentially
     // This makes initial page load much faster
@@ -339,19 +391,127 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       fetchTicketViews(),
       ...(currentUserId ? [fetchQuickReplies()] : [])
     ]).catch(err => console.error('Error loading initial data:', err))
-  }, [currentUserId, refreshKey])
+  }, [currentUserId, refreshKey, fetchTickets])
+
+  // Refresh tickets when window gains focus (to catch updates from inbox)
+  useEffect(() => {
+    console.log('🎧 Setting up event listeners in tickets-view')
+    
+    const handleFocus = () => {
+      console.log('Window focused - refreshing tickets')
+      fetchTickets({ silent: true })
+    }
+    
+    const handleTicketUpdate = (e: Event) => {
+      console.log('🔔 Ticket update event received:', e.type)
+      if (e instanceof CustomEvent && e.detail) {
+        console.log('📦 Event detail:', e.detail)
+        const detail = e.detail as { ticketId?: string; status?: Ticket['status']; assigneeUserId?: string | null }
+        if (detail?.ticketId) {
+          console.log('⚡ Optimistically updating ticket:', detail.ticketId, 'status:', detail.status, 'assignee:', detail.assigneeUserId)
+          setTickets(prev => {
+            const updated = prev.map(t => 
+              t.id === detail.ticketId
+                ? { ...t, status: detail.status ?? t.status, assigneeUserId: detail.assigneeUserId ?? t.assigneeUserId }
+                : t
+            )
+            console.log('✨ Tickets updated, new count:', updated.length)
+            return updated
+          })
+        }
+      }
+      console.log('🔄 Fetching fresh tickets...')
+      fetchTickets({ silent: true })
+    }
+    
+    window.addEventListener('focus', handleFocus)
+    window.addEventListener('ticketUpdated', handleTicketUpdate as EventListener)
+    window.addEventListener('ticketsForceRefresh', handleTicketUpdate as EventListener)
+    console.log('✅ Event listeners attached')
+    
+    return () => {
+      console.log('🔇 Removing event listeners')
+      window.removeEventListener('focus', handleFocus)
+      window.removeEventListener('ticketUpdated', handleTicketUpdate as EventListener)
+      window.removeEventListener('ticketsForceRefresh', handleTicketUpdate as EventListener)
+    }
+  }, [fetchTickets])
+
+  // Auto-poll for ticket updates every 30 seconds (silent refresh)
+  useEffect(() => {
+    const pollInterval = setInterval(() => {
+      console.log('Auto-polling for ticket updates...')
+      fetchTickets({ silent: true })
+    }, 30000) // 30 seconds
+
+    return () => clearInterval(pollInterval)
+  }, [])
 
   // Apply deep-linked ticket selection once tickets are loaded
   useEffect(() => {
-    if (!initialTicketId || initialSelectHandledRef.current) return
-    if (!tickets.length) return
-    const match = tickets.find(t => t.id === initialTicketId)
-    if (match) {
-      setSelectedTicket(match)
-      setSelectedTicketIds(new Set([match.id]))
-      initialSelectHandledRef.current = true
+    console.log('🔗 Deep-link effect running:', { 
+      initialTicketId, 
+      ticketNavKey,
+      guardHandled: initialSelectHandledRef.current, 
+      ticketsCount: tickets.length,
+      currentUserId 
+    })
+    
+    if (!initialTicketId) {
+      console.log('❌ No initialTicketId, skipping')
+      return
     }
-  }, [tickets, initialTicketId])
+    
+    if (!tickets.length) {
+      console.log('❌ No tickets loaded yet, skipping')
+      return
+    }
+    
+    // Check if we already handled this navigation
+    if (initialSelectHandledRef.current) {
+      console.log('❌ Already handled this navigation, skipping')
+      return
+    }
+    
+    console.log('🔍 Looking for ticket with ID:', initialTicketId)
+    console.log('📋 First 5 ticket IDs:', tickets.slice(0, 5).map(t => ({ id: t.id, subject: t.subject })))
+    
+    const match = tickets.find(t => t.id === initialTicketId)
+    
+    if (match) {
+      console.log('✅ FOUND ticket:', match.id, 'Subject:', match.subject)
+      console.log('📊 Ticket details:', { 
+        status: match.status, 
+        assigneeUserId: match.assigneeUserId, 
+        currentUserId 
+      })
+      
+      // Auto-switch to the correct tab based on ticket properties
+      let targetTab: typeof activeTab = 'open'
+      if (match.status === 'closed') {
+        targetTab = 'closed'
+      } else if (match.assigneeUserId === currentUserId) {
+        targetTab = 'assigned'
+      } else if (!match.assigneeUserId) {
+        targetTab = 'unassigned'
+      }
+      
+      console.log('🎯 Switching to tab:', targetTab)
+      setActiveTab(targetTab)
+      
+      // Use setTimeout to ensure tab switch completes before selecting ticket
+      setTimeout(() => {
+        console.log('📍 Now selecting ticket after tab switch:', match.id)
+        setSelectedTicket(match)
+        setSelectedTicketIds(new Set([match.id]))
+        console.log('✅ Deep-link selection complete!')
+        initialSelectHandledRef.current = true
+      }, 150)
+    } else {
+      console.error('❌ TICKET NOT FOUND with ID:', initialTicketId)
+      console.log('Available ticket IDs:', tickets.map(t => t.id))
+    }
+  }, [tickets, initialTicketId, currentUserId, ticketNavKey])
   
   // Close quick replies sidebar and refetch when user changes or logs out
   useEffect(() => {
@@ -711,38 +871,6 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       }
     }
   }, [selectedTicket, currentUserId])
-
-  const fetchTickets = async (options?: { silent?: boolean, returnData?: boolean }) => {
-    const { silent = false, returnData = false } = options || {}
-    try {
-      if (!silent) setLoading(true)
-      setError(null)
-      console.log('[Tickets] Fetching tickets...')
-      const response = await fetch("/api/tickets")
-      if (!response.ok) {
-        throw new Error("Failed to fetch tickets")
-      }
-      const data = await response.json()
-      console.log('[Tickets] Received tickets:', data.tickets?.length || 0)
-      if (data.tickets && data.tickets.length > 0) {
-        console.log('[Tickets] Sample ticket dates:', data.tickets.slice(0, 3).map((t: Ticket) => ({
-          id: t.id,
-          subject: t.subject,
-          lastCustomerReplyAt: t.lastCustomerReplyAt,
-          createdAt: t.createdAt,
-          date: t.lastCustomerReplyAt || t.createdAt
-        })))
-      }
-      const list = data.tickets || []
-      setTickets(list)
-      if (returnData) return list
-    } catch (err) {
-      console.error('[Tickets] Error fetching tickets:', err)
-      setError(err instanceof Error ? err.message : "Failed to load tickets")
-    } finally {
-      if (!silent) setLoading(false)
-    }
-  }
 
   const fetchUsers = async () => {
     try {
@@ -1317,7 +1445,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   }
 
   const handleSendReply = async (opts?: { closeTicket?: boolean }) => {
-    if (!selectedTicket || !replyText.trim() || !threadMessages.length) return
+    if (!selectedTicket || !replyHtml.trim() || !threadMessages.length) return
     const targetTicketId = selectedTicket.id
     
     // Clear typing status when sending
@@ -1335,7 +1463,11 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       const response = await fetch(`/api/emails/${emailId}/reply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ draftText: replyText.trim(), draftId: draftId || null }),
+        body: JSON.stringify({ 
+          draftText: replyHtml.trim(), 
+          draftId: draftId || null,
+          attachments: replyAttachments 
+        }),
       })
 
       if (!response.ok) {
@@ -1343,6 +1475,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         throw new Error(errorData.error || "Failed to send reply")
       }
 
+      setReplyHtml("")
+      setReplyAttachments([])
       setReplyText("")
       setDraftText("")
       setDraftId(null)
@@ -1705,30 +1839,48 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
           </Tabs>
 
           {/* Search */}
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground transition-colors duration-300" />
-            <Input
-              placeholder="Search tickets..."
-              ref={searchInputRef}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="h-9 pl-8 pr-8 text-sm transition-all duration-300 ease-out focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') {
-                  setSearchQuery('')
-                  e.currentTarget.blur()
-                }
+          <div className="relative flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground transition-colors duration-300" />
+              <Input
+                placeholder="Search tickets..."
+                ref={searchInputRef}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="h-9 pl-8 pr-8 text-sm transition-all duration-300 ease-out focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    setSearchQuery('')
+                    e.currentTarget.blur()
+                  }
+                }}
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-md hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+                  aria-label="Clear search"
+                >
+                  <XCircle className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={(e) => {
+                e.preventDefault()
+                setRefreshing(true)
+                fetchTickets({ silent: true })
+                setTimeout(() => setRefreshing(false), 1000)
               }}
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-md hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
-                aria-label="Clear search"
-              >
-                <XCircle className="w-3.5 h-3.5" />
-              </button>
-            )}
+              disabled={refreshing}
+              className="h-9 w-9 p-0 flex-shrink-0"
+              title="Refresh tickets"
+            >
+              <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+            </Button>
           </div>
           
           {/* Collapsible Filters */}
@@ -2869,17 +3021,37 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                       </span>
                     </div>
                   )}
-                  <Textarea
-                    placeholder="Type your reply..."
-                    ref={replyTextareaRef}
-                    value={replyText}
-                    onChange={(e) => {
-                      setReplyText(e.target.value)
+                  <RichTextEditor
+                    value={replyHtml}
+                    onChange={(html, text) => {
+                      setReplyHtml(html)
+                      setReplyText(text)
                       handleTyping()
                     }}
-                    className="min-h-32 mb-3 text-sm w-full max-w-full resize-none break-words overflow-x-hidden transition-all duration-300 ease-out focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
+                    placeholder="Type your reply..."
+                    minHeight="150px"
+                    onAttachments={(files) => setReplyAttachments(files)}
                   />
-                  <div className="flex items-center gap-2">
+                  {replyAttachments.length > 0 && (
+                    <div className="flex flex-wrap gap-2 pt-2">
+                      {replyAttachments.map(att => (
+                        <div key={att.id} className="flex items-center gap-2 px-3 py-1.5 bg-muted rounded-md text-sm border">
+                          <Paperclip className="w-3 h-3 text-muted-foreground" />
+                          <span className="text-muted-foreground truncate max-w-[200px]">{att.name}</span>
+                          <span className="text-xs text-muted-foreground">({(att.size / 1024).toFixed(1)}KB)</span>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-5 w-5 p-0 hover:bg-destructive/10"
+                            onClick={() => setReplyAttachments(prev => prev.filter(a => a.id !== att.id))}
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2 mt-3">
                     <Button 
                       onClick={() => handleSendReply()}
                       disabled={!replyText.trim() || sendingReply || updatingStatus}

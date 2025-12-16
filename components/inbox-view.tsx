@@ -1,9 +1,11 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import EmailList from "@/components/email-list"
 import EmailDetail from "@/components/email-detail"
 import ShopifySidebar from "@/components/shopify-sidebar"
+import { Button } from "@/components/ui/button"
+import { RefreshCw } from "lucide-react"
 
 interface InboxViewProps {
   selectedEmail: string | null
@@ -32,7 +34,57 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
     threadId?: string
   } | null>(null)
   const [showShopifySidebar, setShowShopifySidebar] = useState(false)
+  const [ticketId, setTicketId] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const [emailListRefresh, setEmailListRefresh] = useState<(() => void) | null>(null)
   const showDetail = Boolean(selectedEmail)
+  
+  // Fetch ticket for the selected email
+  useEffect(() => {
+    const fetchTicket = async () => {
+      if (!selectedEmailData?.threadId) {
+        setTicketId(null)
+        return
+      }
+      
+      try {
+        console.log('Fetching ticket for threadId:', selectedEmailData.threadId)
+        const response = await fetch(`/api/tickets?threadId=${encodeURIComponent(selectedEmailData.threadId)}`)
+        if (response.ok) {
+          const data = await response.json()
+          const ticket = data.tickets?.[0]
+          console.log('Found ticket:', ticket?.id, 'status:', ticket?.status)
+          setTicketId(ticket?.id || null)
+        } else {
+          console.log('No ticket found or error response')
+          setTicketId(null)
+        }
+      } catch (error) {
+        console.error('Error fetching ticket:', error)
+        setTicketId(null)
+      }
+    }
+    
+    fetchTicket()
+  }, [selectedEmailData?.threadId])
+  
+  // Listen for ticket updates from Send & Close
+  useEffect(() => {
+    const handleTicketUpdate = () => {
+      console.log('📨 Inbox received ticket update, silently refreshing list...')
+      if (emailListRefresh) {
+        emailListRefresh()
+      }
+    }
+    
+    window.addEventListener('ticketUpdated', handleTicketUpdate)
+    window.addEventListener('ticketsForceRefresh', handleTicketUpdate)
+    
+    return () => {
+      window.removeEventListener('ticketUpdated', handleTicketUpdate)
+      window.removeEventListener('ticketsForceRefresh', handleTicketUpdate)
+    }
+  }, [emailListRefresh])
   
   // Handle email selection with data
   const handleSelectEmail = (id: string | null, emailData?: {
@@ -54,6 +106,11 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
     onSelectEmail(null)
   }, [viewType, onSelectEmail])
 
+  // Memoized callback to prevent infinite loops
+  const handleRefreshReady = useCallback((refreshFn: () => void) => {
+    setEmailListRefresh(() => refreshFn)
+  }, [])
+
   return (
     <div className="flex flex-col md:flex-row h-full bg-muted/20 overflow-hidden">
       <div
@@ -62,8 +119,28 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
         }`}
       >
         <div className="bg-card border-b border-border px-6 py-5 flex-shrink-0">
-          <h2 className="text-xl font-bold capitalize text-foreground">{viewType || "Inbox"}</h2>
-          <p className="text-sm text-muted-foreground mt-1">Manage your messages</p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-bold capitalize text-foreground">{viewType || "Inbox"}</h2>
+              <p className="text-sm text-muted-foreground mt-1">Manage your messages</p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setRefreshing(true)
+                if (emailListRefresh) {
+                  emailListRefresh()
+                }
+                setTimeout(() => setRefreshing(false), 1000)
+              }}
+              disabled={refreshing}
+              className="h-8 w-8 p-0"
+              title="Refresh emails"
+            >
+              <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+            </Button>
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto min-h-0">
           <EmailList
@@ -71,6 +148,7 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
             onSelectEmail={handleSelectEmail}
             onLoadingChange={setListLoading}
             viewType={viewType}
+            onRefreshReady={handleRefreshReady}
           />
         </div>
       </div>
@@ -79,6 +157,7 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
         {selectedEmail ? (
           <EmailDetail
             emailId={selectedEmail}
+            ticketId={ticketId}
             onDraftGenerated={onDraftGenerated}
             onBack={() => {
               setSelectedEmailData(null)
@@ -89,6 +168,7 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
               setShowShopifySidebar(!showShopifySidebar)
             }}
             showShopifySidebar={showShopifySidebar}
+            hideCloseButton={true}
           />
         ) : (
           <div className="flex items-center justify-center h-full px-8 py-12 bg-muted/10">

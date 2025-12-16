@@ -1,12 +1,34 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import React, { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Input } from "@/components/ui/input"
 import { useToast } from "@/components/ui/use-toast"
-import { ArrowLeft, ChevronDown, ChevronUp, Sparkles, Loader2, Mail, ShoppingBag } from "lucide-react"
+import { ArrowLeft, ChevronDown, ChevronUp, Sparkles, Loader2, Mail, ShoppingBag, Link as LinkIcon, Image as ImageIcon, Paperclip, Code, Bold, Italic, Underline, Strikethrough, List, ListOrdered, Quote, AlignLeft, AlignCenter, AlignRight, Highlighter, Type } from "lucide-react"
+
+const toPlainText = (html: string) => {
+  if (!html) return ""
+  const tmp = typeof window !== "undefined" ? document.createElement("div") : null
+  if (!tmp) return html
+  tmp.innerHTML = html
+  return tmp.textContent || tmp.innerText || ""
+}
+
+const textToHtml = (text: string) => {
+  if (!text) return ""
+  return text
+    .split(/\n{2,}/)
+    .map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`)
+    .join("")
+}
+
+const applyCommand = (command: string, value?: string) => {
+  if (typeof document === "undefined") return
+  document.execCommand(command, false, value)
+}
 
 interface EmailDetailProps {
   emailId: string
@@ -14,6 +36,8 @@ interface EmailDetailProps {
   onBack?: () => void
   onToggleShopify?: (email: string) => void
   showShopifySidebar?: boolean
+  ticketId?: string | null
+  hideCloseButton?: boolean // Hide Send & Close button (for inbox view)
   // Optional initial email data for instant display
   initialEmailData?: {
     subject?: string
@@ -49,7 +73,7 @@ interface EmailSummary {
   snippet?: string
 }
 
-export default function EmailDetail({ emailId, onDraftGenerated, onBack, initialEmailData, onToggleShopify, showShopifySidebar }: EmailDetailProps) {
+export default function EmailDetail({ emailId, onDraftGenerated, onBack, initialEmailData, onToggleShopify, showShopifySidebar, ticketId, hideCloseButton }: EmailDetailProps) {
   const [threadMessages, setThreadMessages] = useState<EmailMessage[]>([])
   const [emailSummary, setEmailSummary] = useState<EmailSummary | null>(
     initialEmailData ? {
@@ -71,6 +95,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
   const [draftId, setDraftId] = useState<string | null>(null)
   const [generating, setGenerating] = useState(false)
   const [sending, setSending] = useState(false)
+  const [sendingAction, setSendingAction] = useState<'send' | 'send-close' | null>(null)
   const [copied, setCopied] = useState(false)
   const [sendSuccess, setSendSuccess] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -80,7 +105,27 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
   const [summaryExpanded, setSummaryExpanded] = useState(false)
   const [generatingSummary, setGeneratingSummary] = useState(false)
   const [autoSaving, setAutoSaving] = useState(false)
+  const [draftHtml, setDraftHtml] = useState("")
+  const editorRef = useRef<HTMLDivElement | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const imageInputRef = useRef<HTMLInputElement | null>(null)
+  const [attachments, setAttachments] = useState<{ id: string; name: string; type: string; size: number; data: string }[]>([])
+  const [linkInputOpen, setLinkInputOpen] = useState(false)
+  const [linkInputValue, setLinkInputValue] = useState("")
+  const [linkTextValue, setLinkTextValue] = useState("")
+  const [linkHasSelection, setLinkHasSelection] = useState(false)
+  const [linkDialogPosition, setLinkDialogPosition] = useState<{ top: number; left: number } | null>(null)
+  const linkDialogRef = useRef<HTMLDivElement | null>(null)
   const draftAutoSaveTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+
+  // Get current user ID for auto-assignment
+  useEffect(() => {
+    fetch('/api/users/me')
+      .then(r => r.json())
+      .then(data => setCurrentUserId(data?.id || null))
+      .catch(() => setCurrentUserId(null))
+  }, [])
 
   useEffect(() => {
     return () => {
@@ -93,9 +138,26 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
     }
   }, [sendResetTimer])
 
-  // Autosave draft text to localStorage
+  // Close link dialog on outside click
   useEffect(() => {
-    if (!emailId || !draftText || !showDraft) return
+    if (!linkInputOpen) return
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (linkDialogRef.current && !linkDialogRef.current.contains(e.target as Node)) {
+        setLinkInputOpen(false)
+        setLinkInputValue("")
+        setLinkTextValue("")
+        setLinkDialogPosition(null)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [linkInputOpen])
+
+  // Autosave draft HTML to localStorage
+  useEffect(() => {
+    if (!emailId || !draftHtml || !showDraft) return
     
     if (draftAutoSaveTimerRef.current) {
       clearTimeout(draftAutoSaveTimerRef.current)
@@ -104,7 +166,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
     draftAutoSaveTimerRef.current = setTimeout(() => {
       try {
         setAutoSaving(true)
-        localStorage.setItem(`draft_${emailId}`, draftText)
+        localStorage.setItem(`draft_${emailId}`, JSON.stringify({ html: draftHtml }))
         setTimeout(() => setAutoSaving(false), 500)
       } catch {
         // Ignore localStorage errors
@@ -116,7 +178,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
         clearTimeout(draftAutoSaveTimerRef.current)
       }
     }
-  }, [draftText, emailId, showDraft])
+  }, [draftHtml, emailId, showDraft])
 
   useEffect(() => {
     if (emailId) {
@@ -128,6 +190,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       setShowDraft(false)
       setDraftMinimized(false)
       setDraftText("")
+      setDraftHtml("")
       setDraftId(null)
       setCopied(false)
       setGenerating(false)
@@ -138,8 +201,12 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       // Try to load autosaved draft from localStorage
       try {
         const saved = localStorage.getItem(`draft_${emailId}`)
-        if (saved && !draftText) {
-          setDraftText(saved)
+        if (saved && !draftHtml) {
+          const parsed = JSON.parse(saved)
+          if (parsed?.html) {
+            setDraftHtml(parsed.html)
+            setDraftText(toPlainText(parsed.html))
+          }
         }
       } catch {
         // Ignore localStorage errors
@@ -290,7 +357,9 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       }
 
       const data = await response.json()
-      setDraftText(data.draft || '')
+      const regenerated = data.draft || ''
+      setDraftText(regenerated)
+      setDraftHtml(textToHtml(regenerated))
       setDraftId(data.draftId || null)
       setShowDraft(true)
       onDraftGenerated?.()
@@ -303,7 +372,8 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
   }
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(draftText)
+    const text = draftHtml ? toPlainText(draftHtml) : draftText
+    navigator.clipboard.writeText(text)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
@@ -324,7 +394,10 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       }
 
       const data = await response.json()
-      setDraftText(data.draft || '')
+      const regenerated = data.draft || ''
+      // Replace entire draft: both text and HTML, regardless of current edits
+      setDraftHtml(textToHtml(regenerated))
+      setDraftText(regenerated)
       setDraftId(data.draftId || null)
       setShowDraft(true)
       onDraftGenerated?.()
@@ -336,11 +409,14 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
     }
   }
 
-  const handleSendReply = async () => {
+  const handleSendReply = async (opts?: { closeTicket?: boolean }) => {
     if (!emailId) return
     if (sending) return // Prevent double-submit
 
-    if (!draftText.trim()) {
+    const htmlValue = draftHtml || editorRef.current?.innerHTML || ""
+    const textValue = draftText || toPlainText(htmlValue)
+
+    if (!textValue.trim() && !htmlValue.trim()) {
       setError("Draft is empty. Please edit it before sending.")
       return
     }
@@ -349,13 +425,20 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
 
     try {
       setSending(true)
+      setSendingAction(opts?.closeTicket ? 'send-close' : 'send')
       setError(null)
+
       const response = await fetch(`/api/emails/${emailId}/reply`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ draftText, draftId: draftId || null }),
+        body: JSON.stringify({
+          draftText: textValue,
+          draftHtml: htmlValue,
+          draftId: draftId || null,
+          attachments: attachments.map(att => ({ filename: att.name, mimeType: att.type, data: att.data })),
+        }),
       })
 
       const data = await response.json().catch(() => ({}))
@@ -366,6 +449,21 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
 
       setSendSuccess(true)
       
+      // Add sent message to thread immediately (optimistic UI update)
+      // Get the user's email from the first message's 'to' field (since it was sent to us)
+      const userEmail = threadMessages[0]?.to || emailSummary?.to || 'You'
+      const newMessage: EmailMessage = {
+        id: `sent-${Date.now()}`,
+        threadId: emailSummary?.threadId,
+        subject: emailSummary?.subject || '(No subject)',
+        from: userEmail, // Your email
+        to: emailSummary?.from || '', // Recipient
+        date: new Date().toISOString(),
+        body: htmlValue,
+        snippet: textValue.substring(0, 100)
+      }
+      setThreadMessages(prev => [...prev, newMessage])
+      
       // Clear draft UI and autosaved data after successful send
       try {
         localStorage.removeItem(`draft_${emailId}`)
@@ -373,6 +471,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
         // Ignore localStorage errors
       }
       setDraftText("")
+      setDraftHtml("")
       setDraftId(null)
       setShowDraft(false)
       setDraftMinimized(false)
@@ -386,10 +485,82 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
           setSendResetTimer(null)
         }, 5000) // Show success for 5 seconds instead of 3
       )
+      
       toast({
         title: "Reply sent",
-        description: "Your draft was delivered via Gmail.",
+        description: "Your reply was delivered via Gmail.",
       })
+      
+      // If closeTicket option is set and we have a ticketId, assign and close it
+      if (opts?.closeTicket && ticketId && currentUserId) {
+        console.log('🎫 Starting Send & Close for ticket:', ticketId, 'user:', currentUserId)
+        
+          // Execute assign and close sequentially - wait for completion
+          try {
+            // Step 1: Assign the ticket
+            console.log('📝 Step 1: Assigning ticket to user...')
+            const assignResponse = await fetch(`/api/tickets/${ticketId}/assign`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ assigneeUserId: currentUserId }),
+            })
+            
+            console.log('📝 Assign response status:', assignResponse.status)
+            
+            if (!assignResponse.ok) {
+              const error = await assignResponse.json().catch(() => ({}))
+              console.error('❌ Failed to assign ticket:', error)
+              throw new Error(error.error || 'Failed to assign ticket')
+            }
+            
+            const assignResult = await assignResponse.json()
+            console.log('✅ Ticket assigned successfully:', assignResult)
+            
+            // Step 2: Close the ticket
+            console.log('🔒 Step 2: Closing ticket...')
+            const closeResponse = await fetch(`/api/tickets/${ticketId}/status`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ status: 'closed' }),
+            })
+            
+            console.log('🔒 Close response status:', closeResponse.status)
+            
+            if (!closeResponse.ok) {
+              const error = await closeResponse.json().catch(() => ({}))
+              console.error('❌ Failed to close ticket:', error)
+              throw new Error(error.error || 'Failed to close ticket')
+            }
+            
+            const closeResult = await closeResponse.json()
+            console.log('✅ Ticket closed successfully:', closeResult)
+            
+            // Step 3: Broadcast event to refresh tickets page
+            console.log('📢 Broadcasting ticket update event...')
+            console.log('📦 Event detail:', { ticketId, status: 'closed', assigneeUserId: currentUserId })
+            window.dispatchEvent(new CustomEvent('ticketUpdated', { 
+              detail: { ticketId, status: 'closed', assigneeUserId: currentUserId } 
+            }))
+            // Also fire a simpler refresh event for listeners
+            window.dispatchEvent(new Event('ticketsForceRefresh'))
+            console.log('✅ Events dispatched - ticketUpdated and ticketsForceRefresh')
+            console.log('✅ Send & Close completed successfully!')
+            
+            // Show success toast
+            toast({
+              title: "Ticket closed",
+              description: "Ticket has been assigned to you and closed",
+            })
+          
+          } catch (error) {
+            console.error('❌ Error in Send & Close:', error)
+            toast({
+              title: "Ticket update failed",
+              description: error instanceof Error ? error.message : "Failed to update ticket",
+              variant: "destructive",
+            })
+          }
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to send reply"
       setError(message)
@@ -401,7 +572,317 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       })
     } finally {
       setSending(false)
+      setSendingAction(null)
     }
+  }
+
+  const handleEditorInput = () => {
+    const html = editorRef.current?.innerHTML || ""
+    setDraftHtml(html)
+    setDraftText(toPlainText(html))
+  }
+
+  const execAndSync = (fn: () => void) => {
+    fn()
+    handleEditorInput()
+  }
+
+  const makeListFromSelection = (ordered: boolean) => {
+    if (typeof window === 'undefined' || !editorRef.current) {
+      execAndSync(() => applyCommand(ordered ? 'insertOrderedList' : 'insertUnorderedList'))
+      return
+    }
+    const sel = window.getSelection()
+    if (!sel || sel.rangeCount === 0) {
+      execAndSync(() => applyCommand(ordered ? 'insertOrderedList' : 'insertUnorderedList'))
+      return
+    }
+    const range = sel.getRangeAt(0)
+    if (range.collapsed) {
+      execAndSync(() => applyCommand(ordered ? 'insertOrderedList' : 'insertUnorderedList'))
+      return
+    }
+    // If selection spans partial text, extract and insert as its own list item
+    const frag = range.extractContents()
+    const list = document.createElement(ordered ? 'ol' : 'ul')
+    const li = document.createElement('li')
+    li.appendChild(frag)
+    list.appendChild(li)
+    range.insertNode(list)
+    // Place caret after the inserted list
+    sel.removeAllRanges()
+    const after = document.createTextNode(' ')
+    list.parentNode?.insertBefore(after, list.nextSibling)
+    const newRange = document.createRange()
+    newRange.setStartAfter(list)
+    newRange.collapse(true)
+    sel.addRange(newRange)
+    handleEditorInput()
+  }
+
+  // Sync external HTML into the editor without breaking selection; only touch DOM when content actually changes
+  useEffect(() => {
+    if (!editorRef.current) return
+    const html = draftHtml || textToHtml(draftText)
+    const current = editorRef.current.innerHTML
+    if (html && current !== html) {
+      editorRef.current.innerHTML = html
+    }
+    if (!html && current !== '') {
+      editorRef.current.innerHTML = ''
+    }
+  }, [draftHtml, draftText])
+
+  const handleEditorShortcut = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') { e.preventDefault(); execAndSync(() => applyCommand('bold')); return }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'i') { e.preventDefault(); execAndSync(() => applyCommand('italic')); return }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'u') { e.preventDefault(); execAndSync(() => applyCommand('underline')); return }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); handleInsertLink(); return }
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); execAndSync(() => document.execCommand('undo')); return }
+    if ((e.ctrlKey || e.metaKey) && (e.shiftKey || e.key.toLowerCase() === 'y')) { e.preventDefault(); execAndSync(() => document.execCommand('redo')); return }
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'v') { /* native paste as plain text in many browsers */ return }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); handleSendReply(); return }
+    // Gmail-like: Ctrl+Shift+8 bullets, Ctrl+Shift+7 numbers, Ctrl+Shift+9 quote
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
+      const key = e.key
+      if (key === '8') { e.preventDefault(); makeListFromSelection(false); return }
+      if (key === '7') { e.preventDefault(); makeListFromSelection(true); return }
+      if (key === '9') { e.preventDefault(); toggleBlockquote(); return }
+      const lower = e.key.toLowerCase()
+      if (lower === 'l') { e.preventDefault(); makeListFromSelection(false); return }
+      if (lower === 'e') { e.preventDefault(); execAndSync(() => applyCommand('outdent')); return }
+      if (lower === 'o') { e.preventDefault(); execAndSync(() => applyCommand('indent')); return }
+      // Do not preventDefault for other Ctrl+Shift combos to allow native selection (e.g., Ctrl+Shift+Arrow)
+    }
+  }
+
+  const toggleBlockquote = () => {
+    if (typeof window === 'undefined') return
+    const sel = window.getSelection()
+    if (!sel || sel.rangeCount === 0) return
+    
+    const range = sel.getRangeAt(0)
+    let node = range.commonAncestorContainer as Node
+    
+    // If it's a text node, get its parent element
+    if (node.nodeType === Node.TEXT_NODE) {
+      node = node.parentNode as Node
+    }
+    
+    // Check if we're inside a blockquote
+    const inQuote = !!(node as HTMLElement).closest?.('blockquote')
+    
+    execAndSync(() => {
+      if (inQuote) {
+        // Remove blockquote by converting to paragraph
+        applyCommand('formatBlock', 'p')
+      } else {
+        // Apply blockquote
+        applyCommand('formatBlock', 'blockquote')
+      }
+    })
+  }
+
+  const toggleHeading = () => {
+    if (typeof window === 'undefined') return
+    const sel = window.getSelection()
+    if (!sel || sel.rangeCount === 0) return
+    
+    const range = sel.getRangeAt(0)
+    let node = range.commonAncestorContainer as Node
+    
+    // If it's a text node, get its parent element
+    if (node.nodeType === Node.TEXT_NODE) {
+      node = node.parentNode as Node
+    }
+    
+    // Check if we're inside an h2
+    const inHeading = !!(node as HTMLElement).closest?.('h2')
+    
+    execAndSync(() => {
+      if (inHeading) {
+        // Remove heading by converting to paragraph
+        applyCommand('formatBlock', 'p')
+      } else {
+        // Apply heading
+        applyCommand('formatBlock', 'h2')
+      }
+    })
+  }
+
+  const [savedRange, setSavedRange] = React.useState<Range | null>(null)
+
+  const handleInsertLink = () => {
+    if (typeof window === 'undefined') return
+    
+    const sel = window.getSelection()
+    if (!sel) return
+    
+    // Ensure we have a range (create one at cursor if needed)
+    let range: Range
+    if (sel.rangeCount > 0) {
+      range = sel.getRangeAt(0)
+    } else {
+      // Create a range at the end of the editor if no selection
+      range = document.createRange()
+      if (editorRef.current) {
+        range.selectNodeContents(editorRef.current)
+        range.collapse(false)
+      }
+    }
+    
+    // Save the range
+    setSavedRange(range.cloneRange())
+    
+    // Get position to show dialog above it
+    const rect = range.getBoundingClientRect()
+    const editorRect = editorRef.current?.getBoundingClientRect()
+    
+    if (editorRect) {
+      // Position dialog above the selection/cursor, relative to editor
+      const topPos = rect.top - editorRect.top - 80 // 80px above
+      const leftPos = rect.left - editorRect.left
+      
+      setLinkDialogPosition({
+        top: Math.max(10, topPos), // Don't go above editor
+        left: Math.max(10, leftPos)
+      })
+    }
+    
+    // Check if text is selected
+    const hasSelection = !range.collapsed
+    const selectedText = hasSelection ? sel.toString().trim() : ""
+    
+    setLinkTextValue(selectedText)
+    setLinkHasSelection(hasSelection)
+    setLinkInputOpen(true)
+    
+    setTimeout(() => {
+      const el = document.getElementById('link-input-inline') as HTMLInputElement | null
+      el?.focus()
+    }, 50)
+  }
+
+  const applyLink = () => {
+    const url = linkInputValue.trim()
+    if (!url) {
+      setLinkInputOpen(false)
+      setLinkInputValue("")
+      setLinkTextValue("")
+      setSavedRange(null)
+      setLinkDialogPosition(null)
+      return
+    }
+    
+    if (typeof window === 'undefined' || !savedRange) return
+    
+    // Focus the editor first
+    editorRef.current?.focus()
+    
+    // Restore the saved selection range
+    const sel = window.getSelection()
+    if (sel) {
+      sel.removeAllRanges()
+      sel.addRange(savedRange)
+    }
+    
+    setTimeout(() => {
+      execAndSync(() => {
+        if (linkHasSelection) {
+          // If text was selected, wrap it with a link
+          const link = document.createElement('a')
+          link.href = url
+          link.target = '_blank'
+          link.rel = 'noopener noreferrer'
+          link.textContent = linkTextValue
+          
+          const range = savedRange
+          if (range) {
+            range.deleteContents()
+            range.insertNode(link)
+            // Add space after link
+            const space = document.createTextNode('\u00A0')
+            if (link.parentNode) {
+              link.parentNode.insertBefore(space, link.nextSibling)
+              // Move cursor after the space
+              range.setStartAfter(space)
+              range.setEndAfter(space)
+              sel?.removeAllRanges()
+              sel?.addRange(range)
+            }
+          }
+        } else {
+          // No text selected, insert new link with custom or URL text
+          const displayText = linkTextValue.trim() || url
+          const link = document.createElement('a')
+          link.href = url
+          link.target = '_blank'
+          link.rel = 'noopener noreferrer'
+          link.textContent = displayText
+          
+          const range = savedRange
+          if (range) {
+            range.insertNode(link)
+            // Add space after link
+            const space = document.createTextNode('\u00A0')
+            if (link.parentNode) {
+              link.parentNode.insertBefore(space, link.nextSibling)
+              // Move cursor after the space
+              range.setStartAfter(space)
+              range.setEndAfter(space)
+              sel?.removeAllRanges()
+              sel?.addRange(range)
+            }
+          }
+        }
+      })
+      
+      // Trigger input event to sync state
+      handleEditorInput()
+    }, 10)
+    
+    setLinkInputOpen(false)
+    setLinkInputValue("")
+    setLinkTextValue("")
+    setSavedRange(null)
+    setLinkDialogPosition(null)
+  }
+
+  const handleClearFormatting = () => {
+    execAndSync(() => applyCommand('removeFormat'))
+  }
+
+  const handleAttachFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return
+    const next: { id: string; name: string; type: string; size: number; data: string }[] = []
+    for (const file of Array.from(files)) {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => {
+          const result = reader.result as string
+          const [, dataPart] = result.split(',')
+          resolve(dataPart)
+        }
+        reader.onerror = () => reject(reader.error)
+        reader.readAsDataURL(file)
+      })
+      next.push({ id: crypto.randomUUID(), name: file.name, type: file.type || 'application/octet-stream', size: file.size, data: base64 })
+    }
+    setAttachments(prev => [...prev, ...next])
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  const handleInsertInlineImage = async (files: FileList | null) => {
+    if (!files || files.length === 0) return
+    const file = files[0]
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result as string)
+      reader.onerror = () => reject(reader.error)
+      reader.readAsDataURL(file)
+    })
+    execAndSync(() => applyCommand('insertHTML', `<img src="${dataUrl}" style="max-width:100%;height:auto;" />`))
+    if (imageInputRef.current) imageInputRef.current.value = ''
   }
 
   if (loading) {
@@ -498,8 +979,8 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
         </div>
       )}
       
-      <div className="flex-1 overflow-hidden flex flex-col min-h-0">
-        <Card className="mx-4 md:mx-6 mt-4 mb-3 flex-1 flex flex-col overflow-hidden max-w-full shadow-lg">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden">
+        <Card className={`mx-4 md:mx-6 mt-4 mb-3 flex flex-col overflow-hidden max-w-full shadow-lg ${showDraft && !draftMinimized ? 'flex-shrink-0 max-h-[40vh]' : 'flex-1'}`}>
           <div className="px-6 py-5 border-b border-border flex-shrink-0 overflow-hidden bg-card">
             <div className="flex items-start justify-between gap-4 mb-2">
               <h2 className="text-xl font-bold text-foreground line-clamp-2 break-words flex-1">
@@ -566,7 +1047,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
             )}
           </div>
 
-          <div className="flex-1 overflow-y-auto overflow-x-hidden min-h-0 px-6 py-4">
+          <div className="px-6 py-4">
             <div className="space-y-6 max-w-full">
               {threadMessages.length > 0 ? (
                 threadMessages.map((msg, index) => (
@@ -683,7 +1164,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
           </div>
         )}
 
-        <Card className="mx-4 md:mx-6 mb-4 flex-shrink-0 overflow-hidden">
+        <Card className="mx-4 md:mx-6 mb-4 shadow-lg">
           <div className="p-6 space-y-4">
             {onToggleShopify && emailSummary && (
               <Button
@@ -746,48 +1227,210 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
                   </div>
                 ) : (
                   <div className="space-y-3 animate-in fade-in slide-in-from-top-2 duration-300">
-                    <div className="relative">
-                      <textarea
-                        value={draftText}
-                        onChange={(e) => setDraftText(e.target.value)}
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap gap-1 items-center bg-muted/40 border border-border rounded-lg px-2 py-1.5">
+                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('bold'))} aria-label="Bold"><Bold className="w-3.5 h-3.5" /></button>
+                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('italic'))} aria-label="Italic"><Italic className="w-3.5 h-3.5" /></button>
+                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('underline'))} aria-label="Underline"><Underline className="w-3.5 h-3.5" /></button>
+                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('strikeThrough'))} aria-label="Strikethrough"><Strikethrough className="w-3.5 h-3.5" /></button>
+                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={toggleHeading} aria-label="Heading"><Type className="w-3.5 h-3.5" /></button>
+                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('hiliteColor', '#fef08a'))} aria-label="Highlight"><Highlighter className="w-3.5 h-3.5 text-amber-500" /></button>
+                        
+                        <div className="w-px h-5 bg-border mx-0.5" />
+                        
+                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => makeListFromSelection(false)} aria-label="Bullet list"><List className="w-3.5 h-3.5" /></button>
+                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => makeListFromSelection(true)} aria-label="Numbered list"><ListOrdered className="w-3.5 h-3.5" /></button>
+                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={toggleBlockquote} aria-label="Quote"><Quote className="w-3.5 h-3.5" /></button>
+                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('justifyLeft'))} aria-label="Align left"><AlignLeft className="w-3.5 h-3.5" /></button>
+                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('justifyCenter'))} aria-label="Align center"><AlignCenter className="w-3.5 h-3.5" /></button>
+                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('justifyRight'))} aria-label="Align right"><AlignRight className="w-3.5 h-3.5" /></button>
+                        
+                        <div className="w-px h-5 bg-border mx-0.5" />
+                        
+                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={handleInsertLink} aria-label="Insert link"><LinkIcon className="w-3.5 h-3.5" /></button>
+                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('insertHTML', '<code></code>'))} aria-label="Inline code"><Code className="w-3.5 h-3.5" /></button>
+                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => imageInputRef.current?.click()} aria-label="Inline image"><ImageIcon className="w-3.5 h-3.5" /></button>
+                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => fileInputRef.current?.click()} aria-label="Attach file"><Paperclip className="w-3.5 h-3.5" /></button>
+                        
+                        <div className="w-px h-5 bg-border mx-0.5" />
+                        
+                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 px-2.5 inline-flex items-center justify-center rounded hover:bg-accent text-xs font-medium" onClick={handleClearFormatting} aria-label="Clear formatting">Clear</button>
+                      </div>
+                      <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => handleAttachFiles(e.target.files)} />
+                      <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => handleInsertInlineImage(e.target.files)} />
+                      <div className="relative">
+                        {linkInputOpen && linkDialogPosition && (
+                          <div
+                            ref={linkDialogRef}
+                            className="absolute z-50 bg-popover border border-border rounded-md p-1.5 shadow-md text-xs"
+                            style={{
+                              top: `${linkDialogPosition.top}px`,
+                              left: `${linkDialogPosition.left}px`,
+                              minWidth: '280px',
+                              maxWidth: '320px'
+                            }}
+                          >
+                            <div className="space-y-1">
+                              {linkHasSelection && linkTextValue && (
+                                <div className="text-[9px] text-muted-foreground px-1 pb-0.5">
+                                  <span className="font-medium">Selected:</span> "{linkTextValue}"
+                                </div>
+                              )}
+                              <Input
+                                id="link-input-inline"
+                                value={linkInputValue}
+                                onChange={(e) => setLinkInputValue(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && linkInputValue.trim()) {
+                                    e.preventDefault()
+                                    applyLink()
+                                  } else if (e.key === 'Escape') {
+                                    setLinkInputOpen(false)
+                                    setLinkInputValue("")
+                                    setLinkTextValue("")
+                                    setLinkDialogPosition(null)
+                                  }
+                                }}
+                                placeholder="URL"
+                                className="h-7 text-xs px-2"
+                              />
+                              {!linkHasSelection && (
+                                <Input
+                                  id="link-text-inline"
+                                  value={linkTextValue}
+                                  onChange={(e) => setLinkTextValue(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && linkInputValue.trim()) {
+                                      e.preventDefault()
+                                      applyLink()
+                                    } else if (e.key === 'Escape') {
+                                      setLinkInputOpen(false)
+                                      setLinkInputValue("")
+                                      setLinkTextValue("")
+                                      setLinkDialogPosition(null)
+                                    }
+                                  }}
+                                  placeholder="Text (optional)"
+                                  className="h-7 text-xs px-2"
+                                />
+                              )}
+                              <div className="flex items-center gap-1">
+                                <Button size="sm" onClick={applyLink} disabled={!linkInputValue.trim()} className="flex-1 h-6 text-[11px] px-2">
+                                  Insert
+                                </Button>
+                                <Button size="sm" variant="ghost" onClick={() => { setLinkInputOpen(false); setLinkInputValue(""); setLinkTextValue(""); setLinkDialogPosition(null) }} className="h-6 text-[11px] px-2">
+                                  Cancel
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        <div
+                          ref={editorRef}
+                          contentEditable
+                          suppressContentEditableWarning
+                          onClick={(e) => {
+                            // Clear selection when clicking on empty area (not on text)
+                            const target = e.target as HTMLElement
+                            if (target === editorRef.current) {
+                              const sel = window.getSelection()
+                              sel?.removeAllRanges()
+                            }
+                          }}
+                          onInput={handleEditorInput}
+                          onPaste={(e) => {
+                          e.preventDefault()
+                          const text = e.clipboardData.getData('text/plain')
+                          execAndSync(() => {
+                            if (!document.execCommand('insertText', false, text)) {
+                              document.execCommand('insertHTML', false, text)
+                            }
+                          })
+                        }}
                         onKeyDown={(e) => {
-                          // Escape to minimize
                           if (e.key === 'Escape') {
                             setDraftMinimized(true)
                             e.preventDefault()
                           }
-                          // Ctrl/Cmd+Enter to send
-                          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                            handleSendReply()
-                            e.preventDefault()
+                          if ((e.key === 'Backspace' || e.key === 'Delete') && typeof window !== 'undefined') {
+                            const sel = window.getSelection()
+                            const node = sel?.anchorNode as HTMLElement | null
+                            const img = node?.nodeType === 1 ? (node as HTMLElement).closest('img') : node?.parentElement?.closest('img')
+                            if (img) {
+                              e.preventDefault()
+                              execAndSync(() => img.remove())
+                              return
+                            }
                           }
+                          handleEditorShortcut(e)
                         }}
-                        className="w-full min-h-[200px] p-4 border-2 border-border rounded-xl bg-background text-foreground placeholder:text-muted-foreground text-sm resize-y focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all duration-200"
-                        placeholder="Edit your draft here... (Esc to minimize, Ctrl+Enter to send)"
+                        className="w-full min-h-[200px] max-h-[300px] overflow-y-auto p-4 border-2 border-border rounded-xl bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all duration-200 prose prose-sm max-w-none prose-img:max-w-full prose-img:max-h-96"
                         aria-label="Email draft editor"
                       />
-                      {autoSaving && (
-                        <div className="absolute top-2 right-2 text-xs text-muted-foreground bg-background/80 px-2 py-1 rounded">
-                          Saving...
-                        </div>
-                      )}
+                        {autoSaving && (
+                          <div className="text-xs text-muted-foreground bg-background/90 px-2 py-1 rounded shadow-sm border border-border absolute top-3 right-3 pointer-events-none select-none">
+                            Saving...
+                          </div>
+                        )}
+                        {attachments.length > 0 && (
+                          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                            {attachments.map(att => (
+                              <div key={att.id} className="flex items-center gap-2 px-3 py-1 rounded-full border border-border bg-muted/40">
+                                <Paperclip className="w-3 h-3" />
+                                <span>{att.name}</span>
+                                <button type="button" onClick={() => setAttachments(prev => prev.filter(a => a.id !== att.id))} className="text-xs text-foreground hover:text-destructive">✕</button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}
 
                 {!draftMinimized && (
                   <div className="space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                    <Button
-                      onClick={handleSendReply}
-                      disabled={sending || sendSuccess}
-                      className={`w-full h-11 text-base font-semibold shadow-md transition-all duration-300 ease-out hover:shadow-lg disabled:cursor-not-allowed ${
-                        sendSuccess 
-                          ? "bg-green-600 text-white hover:bg-green-600" 
-                          : "disabled:opacity-50"
-                      }`}
-                    >
-                      {sendSuccess ? "✓ Reply sent!" : sending ? "Sending..." : "Send Reply"}
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        onClick={() => handleSendReply()}
+                        disabled={sending || sendSuccess}
+                        className={`flex-1 h-10 text-sm font-semibold shadow-md transition-all duration-300 ease-out hover:shadow-lg disabled:cursor-not-allowed ${
+                          sendSuccess 
+                            ? "bg-green-600 text-white hover:bg-green-600" 
+                            : "disabled:opacity-50"
+                        }`}
+                      >
+                        {sendingAction === 'send' ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Sending...
+                          </>
+                        ) : sendSuccess ? (
+                          "✓ Reply sent!"
+                        ) : (
+                          "Send Reply"
+                        )}
+                      </Button>
+                      {ticketId && !hideCloseButton && (
+                        <Button
+                          variant="secondary"
+                          onClick={() => handleSendReply({ closeTicket: true })}
+                          disabled={sending || sendSuccess}
+                          className="flex-1 h-10 text-sm font-semibold shadow-md transition-all duration-300 ease-out hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {sendingAction === 'send-close' ? (
+                            <>
+                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                              Sending...
+                            </>
+                          ) : sendSuccess ? (
+                            "✓ Sent & Closed!"
+                          ) : (
+                            "Send & Close"
+                          )}
+                        </Button>
+                      )}
+                    </div>
                     <div className="grid grid-cols-2 gap-3">
                       <Button
                         onClick={handleCopy}

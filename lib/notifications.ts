@@ -58,9 +58,15 @@ export async function createMentionNotifications(noteId: string, ticketId: strin
   await supabase.from('notifications').insert(rows)
 }
 
-export async function createAssignmentNotification(ticketId: string, assigneeUserId: string, assignerName?: string) {
+export async function createAssignmentNotification(ticketId: string, assigneeUserId: string, assignerName?: string, assignerUserId?: string) {
   if (!supabase || !assigneeUserId) return
-  const message = `${assignerName || 'Someone'} assigned you a ticket`
+  
+  // Check if user is assigning to themselves
+  const isSelfAssignment = assignerUserId && assignerUserId === assigneeUserId
+  const message = isSelfAssignment 
+    ? 'You were assigned this ticket'
+    : `${assignerName || 'Someone'} assigned you a ticket`
+  
   await supabase.from('notifications').insert({
     user_id: assigneeUserId,
     type: 'assignment',

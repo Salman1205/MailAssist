@@ -512,7 +512,7 @@ export async function assignTicket(
       }
 
       const { createAssignmentNotification } = await import('./notifications')
-      await createAssignmentNotification(ticketId, assigneeUserId, assignerName)
+      await createAssignmentNotification(ticketId, assigneeUserId, assignerName, assignerUserId || undefined)
     }
   } catch (err) {
     console.warn('Non-fatal: failed to create assignment notification', err)

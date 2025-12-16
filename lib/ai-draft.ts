@@ -92,7 +92,7 @@ export async function generateDraftReply(
 
   // Create prompt for Groq, including optional conversation history
   const relevantKnowledge = selectKnowledge(incomingEmail, knowledgeItems);
-  const prompt = createDraftPrompt(incomingEmail, styleExamples, conversationMessages, relevantKnowledge, guardrails);
+  const prompt = createDraftPrompt(incomingEmail, styleExamples, conversationMessages, relevantKnowledge, guardrails, options?.isRegeneration);
 
   // Call Groq API and measure response time
   const startTime = Date.now();
@@ -337,7 +337,8 @@ function createDraftPrompt(
   styleExamples: string,
   conversationMessages: Email[] = [],
   knowledgeItems: KnowledgeItem[] = [],
-  guardrails?: Guardrails | null
+  guardrails?: Guardrails | null,
+  isRegeneration?: boolean
 ): string {
   const history = (conversationMessages || [])
     // Exclude the incoming email itself if it's in the list
@@ -410,7 +411,7 @@ INSTRUCTIONS:
 5. Do not include placeholders like [Your Name] - write as if the user is writing directly.
 6. If the incoming email requires action or has questions, address them directly.
 7. Respect all guardrails and avoid banned words/phrases.
-8. Apply topic-specific rules when relevant to the email content or tags.
+8. Apply topic-specific rules when relevant to the email content or tags.${isRegeneration ? '\n9. IMPORTANT: This is a REGENERATION request. Create a DIFFERENT variation from any previous draft while maintaining the same core message and tone. Use different wording, sentence structure, or approach to convey the same information.' : ''}
 
 Generate the draft reply now:`;
 }
@@ -495,7 +496,7 @@ export function getGroqApiKey(): string | null {
 /**
  * Call Groq API to generate draft
  */
-async function callGroqAPI(prompt: string, apiKey: string): Promise<string> {
+async function callGroqAPI(prompt: string, apiKey: string, temperature?: number): Promise<string> {
   const REQUEST_TIMEOUT = 30000; // 30 seconds timeout for Groq API
   const models = ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile', 'llama-3-70b-8192']; // Try models in order
   
@@ -525,7 +526,7 @@ async function callGroqAPI(prompt: string, apiKey: string): Promise<string> {
                 content: prompt,
               },
             ],
-            temperature: 0.7,
+            temperature: temperature || 0.7,
             max_tokens: 1000,
           }),
           signal: controller.signal,

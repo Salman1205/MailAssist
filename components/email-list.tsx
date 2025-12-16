@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 
 interface Email {
   id: string
@@ -15,9 +15,10 @@ interface EmailListProps {
   onSelectEmail: (id: string) => void
   onLoadingChange?: (loading: boolean) => void
   viewType?: "inbox" | "sent" | "spam" | "trash"
+  onRefreshReady?: (refreshFn: () => void) => void
 }
 
-export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChange, viewType = "inbox" }: EmailListProps) {
+export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChange, viewType = "inbox", onRefreshReady }: EmailListProps) {
   const [emails, setEmails] = useState<Email[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -25,25 +26,17 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
   const [limit, setLimit] = useState(20)
   const [hasMore, setHasMore] = useState(true)
 
-  useEffect(() => {
-    // Reset state and fetch fresh emails whenever the view type changes
-    setEmails([])
-    setError(null)
-    setLimit(20)
-    setHasMore(true)
-    fetchEmails(20)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewType])
-
-  const fetchEmails = async (newLimit = limit, isLoadMore = false) => {
+  const fetchEmails = async (newLimit = limit, isLoadMore = false, silent = false) => {
     try {
-      if (isLoadMore) {
-        setLoadingMore(true)
-      } else {
-        setLoading(true)
+      if (!silent) {
+        if (isLoadMore) {
+          setLoadingMore(true)
+        } else {
+          setLoading(true)
+        }
+        onLoadingChange?.(true)
       }
       setError(null)
-      onLoadingChange?.(true)
       let url = `/api/emails?maxResults=${newLimit}`
       if (viewType === "sent") {
         url = `/api/emails?type=sent&maxResults=${newLimit}`
@@ -83,11 +76,45 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
       setError(err instanceof Error ? err.message : 'Failed to load emails')
       console.error('Error fetching emails:', err)
     } finally {
-      setLoading(false)
-      setLoadingMore(false)
-      onLoadingChange?.(false)
+      if (!silent) {
+        setLoading(false)
+        setLoadingMore(false)
+        onLoadingChange?.(false)
+      }
     }
   }
+
+  // Memoized refresh function to prevent infinite loops (silent refresh)
+  const handleRefresh = useCallback(() => {
+    fetchEmails(limit, false, true)
+  }, [limit])
+
+  // Expose refresh function to parent component
+  useEffect(() => {
+    if (onRefreshReady) {
+      onRefreshReady(handleRefresh)
+    }
+  }, [onRefreshReady, handleRefresh])
+
+  // Auto-poll for new emails every 30 seconds (silent refresh)
+  useEffect(() => {
+    const pollInterval = setInterval(() => {
+      console.log('Auto-polling for new emails...')
+      fetchEmails(limit, false, true)
+    }, 30000) // 30 seconds
+
+    return () => clearInterval(pollInterval)
+  }, [limit])
+
+  // Reset and fetch when viewType changes
+  useEffect(() => {
+    setEmails([])
+    setError(null)
+    setLimit(20)
+    setHasMore(true)
+    fetchEmails(20)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewType])
 
   const handleLoadMore = () => {
     const nextLimit = limit + 20

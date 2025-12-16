@@ -39,7 +39,16 @@ interface SyncStats {
 
 function PageContent() {
   const [isConnected, setIsConnected] = useState(false)
-  const [activeView, setActiveView] = useState<View>("inbox")
+  const [activeView, setActiveView] = useState<View>(() => {
+    // Restore last active view from localStorage
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('activeView')
+      if (saved && ['inbox', 'sent', 'spam', 'trash', 'drafts', 'tickets', 'quick-replies', 'compose', 'settings', 'ai-settings', 'analytics', 'user-management'].includes(saved)) {
+        return saved as View
+      }
+    }
+    return "inbox"
+  })
   const [selectedEmail, setSelectedEmail] = useState<string | null>(null)
   const [checkingAuth, setCheckingAuth] = useState(true)
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
@@ -62,6 +71,7 @@ function PageContent() {
   const [loggingOut, setLoggingOut] = useState(false)
   const [globalSearch, setGlobalSearch] = useState<string>("")
   const [deepLinkTicketId, setDeepLinkTicketId] = useState<string | null>(null)
+  const [ticketNavKey, setTicketNavKey] = useState(0) // Force re-selection on navigation
   const searchParams = useSearchParams()
 
   useEffect(() => {
@@ -88,8 +98,16 @@ function PageContent() {
     if (ticketId) {
       setActiveView("tickets")
       setDeepLinkTicketId(ticketId)
+      setTicketNavKey(prev => prev + 1) // Increment to force re-selection
     }
   }, [searchParams])
+
+  // Save active view to localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('activeView', activeView)
+    }
+  }, [activeView])
 
   // Update browser tab title to show current user
   useEffect(() => {
@@ -477,7 +495,7 @@ function PageContent() {
       case "drafts":
         return <DraftsView key={currentUserId || "no-user"} refreshKey={draftsVersion} currentUserId={currentUserId} />
       case "compose":
-        return <ComposeView key={currentUserId || "no-user"} currentUserId={currentUserId} onEmailSent={() => setTicketsVersion(v => v + 1)} />
+        return <ComposeView key={currentUserId || "no-user"} currentUserId={currentUserId} onEmailSent={() => setTicketsVersion(v => v + 1)} setActiveView={setActiveView} />
       case "quick-replies":
         return <QuickRepliesView key={currentUserId || "no-user"} currentUserId={currentUserId} />
       case "tickets":
@@ -489,6 +507,7 @@ function PageContent() {
             globalSearchTerm={globalSearch}
             refreshKey={ticketsVersion}
             initialTicketId={deepLinkTicketId || undefined}
+            ticketNavKey={ticketNavKey}
           />
         )
       case "ai-settings":

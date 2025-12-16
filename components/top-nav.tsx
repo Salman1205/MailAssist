@@ -358,8 +358,12 @@ export default function TopNav({ isConnected, userProfile, currentUser, onLogout
                       key={n.id}
                       className="w-full text-left flex items-start justify-between gap-2 p-2 rounded hover:bg-muted border border-transparent hover:border-border/60 transition-colors"
                       onClick={() => {
+                        console.log('🔔 Notification clicked:', { ticketId: n.ticketId, type: n.type, message: n.message })
                         if (n.ticketId) {
+                          console.log('🚀 Navigating to ticket:', n.ticketId)
                           router.push(`/?ticketId=${n.ticketId}`)
+                        } else {
+                          console.warn('⚠️ Notification has no ticketId!')
                         }
                         if (!n.isRead) markRead(n.id)
                       }}

@@ -57,14 +57,22 @@ export function getGmailClient(tokens: { access_token?: string | null; refresh_t
   return google.gmail({ version: 'v1', auth: oauth2Client });
 }
 
+interface AttachmentPayload {
+  filename: string
+  mimeType: string
+  data: string // base64 (no data: prefix)
+}
+
 interface SendReplyOptions {
-  to: string;
-  subject: string;
-  body: string;
-  threadId?: string;
-  inReplyTo?: string;
-  references?: string;
-  from?: string;
+  to: string
+  subject: string
+  body: string
+  bodyHtml?: string
+  threadId?: string
+  inReplyTo?: string
+  references?: string
+  from?: string
+  attachments?: AttachmentPayload[]
 }
 
 /**
@@ -74,32 +82,89 @@ export async function sendReplyMessage(
   tokens: { access_token?: string | null; refresh_token?: string | null },
   options: SendReplyOptions
 ) {
-  const gmail = getGmailClient(tokens);
+  const gmail = getGmailClient(tokens)
   const {
     to,
     subject,
     body,
+    bodyHtml,
     threadId,
     inReplyTo,
     references,
     from,
-  } = options;
+    attachments = [],
+  } = options
 
   const headers = [
     `To: ${to}`,
     from ? `From: ${from}` : null,
     `Subject: ${subject}`,
     'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset="UTF-8"',
     inReplyTo ? `In-Reply-To: ${inReplyTo}` : null,
     references ? `References: ${references}` : null,
   ]
     .filter(Boolean)
-    .join('\r\n');
+    .join('\r\n')
 
-  const normalizedBody = body.replace(/\r?\n/g, '\r\n');
-  const message = `${headers}\r\n\r\n${normalizedBody}`;
-  const encodedMessage = encodeBase64Url(message);
+  const hasHtml = Boolean(bodyHtml)
+  const hasAttachments = attachments.length > 0
+
+  const altBoundary = `alt-${Date.now()}`
+  const mixedBoundary = `mixed-${Date.now()}`
+
+  const textPart = [
+    `--${altBoundary}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    '',
+    body.replace(/\r?\n/g, '\r\n'),
+    '',
+  ].join('\r\n')
+
+  const htmlPart = hasHtml
+    ? [
+        `--${altBoundary}`,
+        'Content-Type: text/html; charset="UTF-8"',
+        '',
+        bodyHtml!,
+        '',
+      ].join('\r\n')
+    : ''
+
+  const altClosing = `--${altBoundary}--`
+
+  const buildAttachmentPart = (attachment: AttachmentPayload) =>
+    [
+      `--${mixedBoundary}`,
+      `Content-Type: ${attachment.mimeType}; name="${attachment.filename}"`,
+      'Content-Transfer-Encoding: base64',
+      `Content-Disposition: attachment; filename="${attachment.filename}"`,
+      '',
+      attachment.data,
+      '',
+    ].join('\r\n')
+
+  let message = ''
+
+  if (hasAttachments) {
+    message += `${headers}\r\nContent-Type: multipart/mixed; boundary="${mixedBoundary}"\r\n\r\n`
+    message += `--${mixedBoundary}\r\nContent-Type: multipart/alternative; boundary="${altBoundary}"\r\n\r\n`
+    message += textPart
+    if (hasHtml) message += htmlPart
+    message += `${altClosing}\r\n`
+    for (const attachment of attachments) {
+      message += buildAttachmentPart(attachment)
+    }
+    message += `--${mixedBoundary}--`
+  } else if (hasHtml) {
+    message += `${headers}\r\nContent-Type: multipart/alternative; boundary="${altBoundary}"\r\n\r\n`
+    message += textPart
+    message += htmlPart
+    message += altClosing
+  } else {
+    message += `${headers}\r\nContent-Type: text/plain; charset="UTF-8"\r\n\r\n${body.replace(/\r?\n/g, '\r\n')}`
+  }
+
+  const encodedMessage = encodeBase64Url(message)
 
   const response = await gmail.users.messages.send({
     userId: 'me',
@@ -107,9 +172,9 @@ export async function sendReplyMessage(
       raw: encodedMessage,
       threadId,
     },
-  });
+  })
 
-  return response.data;
+  return response.data
 }
 
 /**

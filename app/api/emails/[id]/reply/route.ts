@@ -9,6 +9,11 @@ import { storeSentEmail, loadDrafts, deleteDraft } from '@/lib/storage';
 import { logAIUsage } from '@/lib/analytics';
 import { getCurrentUserIdFromRequest, getSessionUserEmailFromRequest } from '@/lib/session';
 
+function stripHtml(html: string) {
+  if (!html) return ''
+  return html.replace(/<style[^>]*>.*?<\/style>/gis, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
 type RouteContext =
   | { params: { id: string } }
   | { params: Promise<{ id: string }> };
@@ -32,7 +37,7 @@ export async function POST(
       );
     }
 
-    let body: { draftText?: string; draftId?: string } | null = null;
+    let body: { draftText?: string; draftHtml?: string; draftId?: string; attachments?: { filename: string; mimeType: string; data?: string; dataUrl?: string }[] } | null = null;
     try {
       body = await request.json();
     } catch {
@@ -41,12 +46,38 @@ export async function POST(
 
     const sentDraftText = body?.draftText ?? '';
     const draftText = sentDraftText.trim();
-    if (!draftText) {
+    const draftHtml = (body?.draftHtml || '').trim();
+    if (!draftText && !draftHtml) {
       return NextResponse.json(
         { error: 'Draft text is required to send a reply' },
         { status: 400 }
       );
     }
+
+    // Normalize HTML fallback to text when only HTML provided
+    const plainTextBody = draftText || stripHtml(draftHtml || '');
+
+    // Attachments validation (optional)
+    const maxAttachmentSizeBytes = 8 * 1024 * 1024; // 8 MB per file cap
+    const attachments = (body?.attachments || []).map((att) => {
+      if (!att?.filename || !att?.mimeType) {
+        throw new Error('Invalid attachment metadata');
+      }
+      const rawData = att.data || (att.dataUrl ? att.dataUrl.split(',')[1] : '');
+      if (!rawData) {
+        throw new Error('Attachment data missing');
+      }
+      // Rough size check before decode
+      const estimatedBytes = Math.ceil((rawData.length * 3) / 4);
+      if (estimatedBytes > maxAttachmentSizeBytes) {
+        throw new Error(`Attachment ${att.filename} exceeds 8MB limit`);
+      }
+      return {
+        filename: att.filename,
+        mimeType: att.mimeType,
+        data: rawData,
+      };
+    });
 
     // Get user info for logging
     const userEmail = getSessionUserEmailFromRequest(request as any);
@@ -127,7 +158,9 @@ export async function POST(
       to: replyRecipient,
       from: fromAddress,
       subject: replySubject,
-      body: draftText,
+      body: plainTextBody,
+      bodyHtml: draftHtml || undefined,
+      attachments,
       threadId: incomingEmail.threadId,
       inReplyTo: incomingEmail.messageId,
       references: incomingEmail.messageId,
@@ -142,7 +175,7 @@ export async function POST(
           subject: replySubject,
           from: storedFrom,
           to: replyRecipient,
-          body: draftText,
+          body: plainTextBody,
           date: new Date().toISOString(),
           labels: sentMessage.labelIds ?? [],
           isReply: true,

@@ -8,20 +8,25 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useToast } from "@/components/ui/use-toast"
-import { Loader2, Sparkles, Send, CheckCircle, RotateCcw } from "lucide-react"
+import { Loader2, Sparkles, Send, CheckCircle, RotateCcw, X } from "lucide-react"
+import RichTextEditor from "@/components/rich-text-editor"
 
 interface ComposeViewProps {
   currentUserId: string | null
   onEmailSent?: () => void
+  setActiveView?: (view: 'inbox' | 'sent' | 'spam' | 'trash' | 'drafts' | 'compose' | 'settings' | 'users' | 'tickets' | 'ai-settings' | 'quick-replies' | 'analytics') => void
 }
 
-export default function ComposeView({ currentUserId, onEmailSent }: ComposeViewProps) {
+export default function ComposeView({ currentUserId, onEmailSent, setActiveView }: ComposeViewProps) {
   const { toast } = useToast()
+  const [composeMode, setComposeMode] = useState<'manual' | 'ai'>('manual')
   const [recipient, setRecipient] = useState("")
   const [recipientName, setRecipientName] = useState("")
   const [subject, setSubject] = useState("")
+  const [bodyHtml, setBodyHtml] = useState("")
+  const [bodyText, setBodyText] = useState("")
+  const [attachments, setAttachments] = useState<{ id: string; name: string; size: number; type: string; data: string }[]>([])
   const [context, setContext] = useState("")
-  const [generatedDraft, setGeneratedDraft] = useState("")
   const [isGenerating, setIsGenerating] = useState(false)
   const [isSending, setIsSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -33,8 +38,10 @@ export default function ComposeView({ currentUserId, onEmailSent }: ComposeViewP
     setRecipient("")
     setRecipientName("")
     setSubject("")
+    setBodyHtml("")
+    setBodyText("")
+    setAttachments([])
     setContext("")
-    setGeneratedDraft("")
     setError(null)
     setSuccess(null)
     setShowSuccess(false)
@@ -71,7 +78,13 @@ export default function ComposeView({ currentUserId, onEmailSent }: ComposeViewP
       }
 
       const data = await response.json()
-      setGeneratedDraft(data.draft)
+      // Convert plain text to HTML with paragraph tags and line breaks
+      const htmlDraft = data.draft
+        .split('\n\n')
+        .map((para: string) => `<p>${para.replace(/\n/g, '<br>')}</p>`)
+        .join('')
+      setBodyHtml(htmlDraft)
+      setBodyText(data.draft)
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Failed to generate draft"
       setError(errorMessage)
@@ -86,8 +99,8 @@ export default function ComposeView({ currentUserId, onEmailSent }: ComposeViewP
   }
 
   const handleSendEmail = async () => {
-    if (!recipient.trim() || !subject.trim() || !generatedDraft.trim()) {
-      setError("Please generate a draft first")
+    if (!recipient.trim() || !subject.trim() || !bodyHtml.trim()) {
+      setError("Please fill in recipient, subject, and message body")
       return
     }
 
@@ -104,7 +117,8 @@ export default function ComposeView({ currentUserId, onEmailSent }: ComposeViewP
           recipientEmail: recipient.trim(),
           recipientName: recipientName.trim() || null,
           subject: subject.trim(),
-          body: generatedDraft.trim(),
+          body: bodyHtml.trim(),
+          attachments: attachments,
         }),
       })
 
@@ -172,7 +186,7 @@ export default function ComposeView({ currentUserId, onEmailSent }: ComposeViewP
                 <RotateCcw className="mr-2 h-5 w-5" />
                 Compose another
               </Button>
-              <Button onClick={() => window.location.reload()} size="lg" className="shadow-md hover:shadow-lg">
+              <Button onClick={() => setActiveView?.('tickets')} size="lg" className="shadow-md hover:shadow-lg">
                 View tickets
               </Button>
             </div>
@@ -212,6 +226,28 @@ export default function ComposeView({ currentUserId, onEmailSent }: ComposeViewP
             )}
 
             <Card className="p-8 space-y-6 shadow-lg border border-border/60 bg-card/90 backdrop-blur-sm">
+              {/* Mode Toggle */}
+              <div className="flex gap-2 p-1 bg-muted/50 rounded-lg w-fit">
+                <Button
+                  variant={composeMode === 'manual' ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setComposeMode('manual')}
+                  className="h-8"
+                >
+                  Manual
+                </Button>
+                <Button
+                  variant={composeMode === 'ai' ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setComposeMode('ai')}
+                  className="h-8"
+                >
+                  <Sparkles className="w-3 h-3 mr-1.5" />
+                  AI Assist
+                </Button>
+              </div>
+
+              {/* Email Fields */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div className="space-y-2">
                   <Label htmlFor="recipient" className="text-sm font-medium flex items-center gap-1.5">
@@ -252,70 +288,90 @@ export default function ComposeView({ currentUserId, onEmailSent }: ComposeViewP
                 />
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="context" className="text-sm font-medium flex items-center gap-1.5">
-                  Context for AI <span className="text-[var(--status-urgent)]">*</span>
-                </Label>
-                <Textarea
-                  id="context"
-                  placeholder="Describe the purpose of this email, what you want to achieve, and any specific details..."
-                  value={context}
-                  onChange={(e) => setContext(e.target.value)}
-                  rows={5}
-                  className="resize-none transition-all focus:ring-2 focus:ring-primary/20"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Be specific about the recipient's situation and your goals.
-                </p>
-              </div>
-
-              <div className="flex justify-end pt-6 mt-6 border-t border-border/30">
-                <Button
-                  onClick={handleGenerateDraft}
-                  disabled={isGenerating || !recipient.trim() || !subject.trim() || !context.trim()}
-                  size="lg"
-                  className="bg-gradient-to-r from-[var(--ai-gradient-from)] to-[var(--ai-gradient-to)] hover:shadow-lg hover:scale-105 transition-all duration-200 shadow-md"
-                >
-                  {isGenerating ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Generating draft...
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="mr-2 h-4 w-4" />
-                      Generate draft
-                    </>
-                  )}
-                </Button>
-              </div>
-            </Card>
-
-            {generatedDraft && (
-              <Card className="p-6 space-y-4 shadow-md border-primary/20 bg-gradient-to-br from-primary/5 to-transparent">
+              {/* AI Mode: Context Input */}
+              {composeMode === 'ai' && (
                 <div className="space-y-2">
-                  <Label htmlFor="draft" className="text-sm font-medium flex items-center gap-2">
-                    <div className="w-5 h-5 rounded bg-primary flex items-center justify-center">
-                      <Sparkles className="w-3 h-3 text-white" />
-                    </div>
-                    Generated draft
+                  <Label htmlFor="context" className="text-sm font-medium flex items-center gap-1.5">
+                    Context for AI <span className="text-[var(--status-urgent)]">*</span>
                   </Label>
                   <Textarea
-                    id="draft"
-                    value={generatedDraft}
-                    onChange={(e) => setGeneratedDraft(e.target.value)}
-                    rows={15}
-                    className="font-mono text-sm leading-relaxed resize-none transition-all focus:ring-2 focus:ring-primary/20 bg-background/80"
+                    id="context"
+                    placeholder="Describe the purpose of this email, what you want to achieve, and any specific details..."
+                    value={context}
+                    onChange={(e) => setContext(e.target.value)}
+                    rows={5}
+                    className="resize-none transition-all focus:ring-2 focus:ring-primary/20"
                   />
                   <p className="text-xs text-muted-foreground">
-                    Review and edit the draft as needed before sending.
+                    Be specific about the recipient's situation and your goals.
                   </p>
                 </div>
+              )}
 
-                <div className="flex justify-end pt-6 mt-6 border-t border-border/30">
+              {/* Manual Mode or After AI Generation: Rich Text Editor */}
+              {(composeMode === 'manual' || bodyHtml) && (
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium flex items-center gap-1.5">
+                    Message <span className="text-[var(--status-urgent)]">*</span>
+                  </Label>
+                  <RichTextEditor
+                    value={bodyHtml}
+                    onChange={(html, text) => {
+                      setBodyHtml(html)
+                      setBodyText(text)
+                    }}
+                    onAttachments={setAttachments}
+                    placeholder="Type your message..."
+                    minHeight={attachments.length > 0 ? "180px" : "250px"}
+                    className="transition-all focus:ring-2 focus:ring-primary/20"
+                  />
+                  {attachments.length > 0 && (
+                    <div className="flex flex-wrap gap-2 pt-2 max-h-24 overflow-y-auto">
+                      {attachments.map((att) => (
+                        <div key={att.id} className="flex items-center gap-2 px-3 py-1.5 bg-muted rounded-md text-sm border">
+                          <span className="text-muted-foreground truncate max-w-[200px]">{att.name}</span>
+                          <span className="text-xs text-muted-foreground">({(att.size / 1024).toFixed(1)}KB)</span>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-5 w-5 p-0 hover:bg-destructive/10"
+                            onClick={() => setAttachments(prev => prev.filter(a => a.id !== att.id))}
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex justify-end gap-3 pt-6 mt-6 border-t border-border/30">
+                {composeMode === 'ai' && !bodyHtml && (
+                  <Button
+                    onClick={handleGenerateDraft}
+                    disabled={isGenerating || !recipient.trim() || !subject.trim() || !context.trim()}
+                    size="lg"
+                    className="bg-gradient-to-r from-[var(--ai-gradient-from)] to-[var(--ai-gradient-to)] hover:shadow-lg hover:scale-105 transition-all duration-200 shadow-md"
+                  >
+                    {isGenerating ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Generating draft...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="mr-2 h-4 w-4" />
+                        Generate draft
+                      </>
+                    )}
+                  </Button>
+                )}
+                {(composeMode === 'manual' || bodyHtml) && (
                   <Button
                     onClick={handleSendEmail}
-                    disabled={isSending || !generatedDraft.trim()}
+                    disabled={isSending || !bodyHtml.trim() || !recipient.trim() || !subject.trim()}
                     size="lg"
                     className="bg-[var(--status-success)] hover:bg-[var(--status-success)]/90 hover:shadow-lg hover:scale-105 transition-all duration-200 shadow-md"
                   >
@@ -331,9 +387,9 @@ export default function ComposeView({ currentUserId, onEmailSent }: ComposeViewP
                       </>
                     )}
                   </Button>
-                </div>
-              </Card>
-            )}
+                )}
+              </div>
+            </Card>
           </>
         )}
       </div>
