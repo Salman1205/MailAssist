@@ -16,6 +16,7 @@ export type SidebarView =
   | "ai-settings"
   | "quick-replies"
   | "analytics"
+  | "team"
 
 interface SidebarProps {
   activeView: SidebarView
@@ -38,6 +39,7 @@ const NAV_ITEMS = [
 
 const ADMIN_NAV_ITEMS = [
   { id: "users", label: "Team", icon: UsersIcon },
+  { id: "team", label: "Team Management", icon: UsersIcon },
 ] as const
 
 const AI_NAV_ITEMS = [

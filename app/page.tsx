@@ -16,6 +16,7 @@ import AISettings from "@/components/ai-settings"
 import QuickRepliesView from "@/components/quick-replies-view"
 import AnalyticsDashboard from "@/components/analytics-dashboard"
 import ComposeView from "@/components/compose-view"
+import TeamManagement from "@/components/team-management"
 
 type View = SidebarView
 
@@ -43,7 +44,7 @@ function PageContent() {
     // Restore last active view from localStorage
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('activeView')
-      if (saved && ['inbox', 'sent', 'spam', 'trash', 'drafts', 'tickets', 'quick-replies', 'compose', 'settings', 'ai-settings', 'analytics', 'user-management'].includes(saved)) {
+      if (saved && ['inbox', 'sent', 'spam', 'trash', 'drafts', 'tickets', 'quick-replies', 'compose', 'settings', 'ai-settings', 'analytics', 'user-management', 'team'].includes(saved)) {
         return saved as View
       }
     }
@@ -89,6 +90,17 @@ function PageContent() {
       window.history.replaceState({}, "", window.location.pathname)
       // After Gmail auth, check if user is selected
       checkUserSelection()
+    }
+    
+    // Check if user came from business auth
+    const businessAuth = params.get("businessAuth")
+    if (businessAuth === "true") {
+      // They just registered/logged in via business auth
+      // Mark as "connected" to bypass Gmail requirement
+      setIsConnected(true)
+      // They should have a session cookie with user data
+      checkUserSelection()
+      window.history.replaceState({}, "", window.location.pathname)
     }
   }, [])
 
@@ -396,33 +408,37 @@ function PageContent() {
 
   const checkAuthStatus = async () => {
     try {
-      // Only treat the user as "connected" on this device if they have
-      // previously completed the OAuth flow in this browser.
-      // This prevents other people's logins (on other laptops) from
-      // automatically making this browser look logged in.
+      // First, check for a valid Gmail connection (legacy logic)
       const hasLocalConnection =
         typeof window !== "undefined" &&
         window.localStorage.getItem(LOCAL_STORAGE_KEY) === "true"
 
-      if (!hasLocalConnection) {
-        setIsConnected(false)
-        return
+      // If Gmail connected, verify tokens
+      if (hasLocalConnection) {
+        const response = await fetch("/api/emails?type=inbox&maxResults=1")
+        if (response.ok) {
+          setIsConnected(true)
+          setCheckingAuth(false)
+          return
+        } else {
+          setIsConnected(false)
+          try {
+            window.localStorage.removeItem(LOCAL_STORAGE_KEY)
+          } catch {}
+        }
       }
 
-      // If this browser has a local connection flag, verify that the
-      // backend tokens are still valid.
-      const response = await fetch("/api/emails?type=inbox&maxResults=1")
-
-      if (response.ok) {
-        setIsConnected(true)
-      } else {
-        // If tokens are no longer valid, clear local flag
-        setIsConnected(false)
-        try {
-          window.localStorage.removeItem(LOCAL_STORAGE_KEY)
-        } catch {
-          // ignore
+      // Otherwise, check for a valid business/session login
+      const userResponse = await fetch("/api/auth/current-user")
+      if (userResponse.ok) {
+        const userData = await userResponse.json()
+        if (userData.user) {
+          setIsConnected(true)
+        } else {
+          setIsConnected(false)
         }
+      } else {
+        setIsConnected(false)
       }
     } catch {
       setIsConnected(false)
@@ -492,6 +508,8 @@ function PageContent() {
             <UserManagement currentUserId={currentUserId} />
           </div>
         )
+      case "team":
+        return <TeamManagement />
       case "drafts":
         return <DraftsView key={currentUserId || "no-user"} refreshKey={draftsVersion} currentUserId={currentUserId} />
       case "compose":
@@ -635,6 +653,47 @@ function PageContent() {
 
   return (
     <>
+      {/* Only show full layout if user is selected, otherwise show UserSelector in a centered card */}
+      {(!isConnected || !currentUserId || (!hasAdmin && currentUser && currentUser.role !== "admin")) ? (
+      <div className="flex h-screen w-screen items-center justify-center bg-background text-foreground">
+        <div className="max-w-md w-full">
+          {checkingAuth || checkingUser ? (
+            <div className="flex items-center justify-center h-full">
+              <div className="flex flex-col items-center gap-3 animate-in fade-in duration-500">
+                <div className="flex gap-1.5">
+                  <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  {checkingAuth ? "Checking authentication..." : "Loading..."}
+                </p>
+              </div>
+            </div>
+          ) : !isConnected ? (
+            <div className="flex items-center justify-center h-full p-4">
+              {(() => {
+                // Redirect to welcome page
+                if (typeof window !== 'undefined') {
+                  window.location.href = '/welcome'
+                }
+                return (
+                  <div className="text-center">
+                    <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
+                    <p className="mt-4 text-muted-foreground">Redirecting...</p>
+                  </div>
+                )
+              })()}
+            </div>
+          ) : (
+            <UserSelector 
+              onUserSelected={handleUserSelected}
+              currentUserId={currentUserId}
+            />
+          )}
+        </div>
+      </div>
+    ) : (
       <div className="flex h-screen bg-background text-foreground overflow-x-hidden">
         {isConnected && (
           <Sidebar 
@@ -644,7 +703,6 @@ function PageContent() {
             currentUser={currentUser}
           />
         )}
-
         <div className="flex flex-col flex-1 min-h-0">
           <TopNav 
             isConnected={isConnected} 
@@ -653,41 +711,16 @@ function PageContent() {
             onLogout={handleLogout}
             onSwitchUser={handleSwitchUser}
             onSearch={(query) => {
-              // Only update global search term. Do not auto-navigate to Tickets.
               setGlobalSearch(query)
             }}
           />
           {renderMobileTabs()}
-
           <main className="flex-1 overflow-auto">
-            {checkingAuth || checkingUser ? (
-              <div className="flex items-center justify-center h-full">
-                <div className="flex flex-col items-center gap-3 animate-in fade-in duration-500">
-                  <div className="flex gap-1.5">
-                    <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    {checkingAuth ? "Checking authentication..." : "Loading..."}
-                  </p>
-                </div>
-              </div>
-            ) : !isConnected ? (
-              <div className="flex items-center justify-center h-full p-4">
-                <GmailConnect onConnect={handleConnect} />
-              </div>
-            ) : !currentUserId || (!hasAdmin && currentUser && currentUser.role !== "admin") ? (
-              <UserSelector 
-                onUserSelected={handleUserSelected}
-                currentUserId={currentUserId}
-              />
-            ) : (
-              renderView()
-            )}
+            {renderView()}
           </main>
         </div>
       </div>
+    )}
 
       {loggingOut && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
