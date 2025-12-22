@@ -5,10 +5,12 @@
 
 import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+const supabase = (supabaseUrl && supabaseKey)
+    ? createClient(supabaseUrl, supabaseKey)
+    : null;
 
 export type AccountType = 'business' | 'personal' | null;
 
@@ -29,6 +31,16 @@ export async function getAccountInfo(email: string): Promise<AccountInfo> {
     const normalizedEmail = email.toLowerCase().trim();
 
     try {
+        if (!supabase) {
+            console.warn('Supabase client not initialized in account-type-utils');
+            return {
+                exists: false,
+                accountType: null,
+                hasPassword: false,
+                isVerified: false,
+            };
+        }
+
         // Check users table for all accounts with this email
         const { data: users, error } = await supabase
             .from('users')
@@ -175,6 +187,10 @@ export async function hasMultipleAccounts(email: string): Promise<boolean> {
     const normalizedEmail = email.toLowerCase().trim();
 
     try {
+        if (!supabase) {
+            return false;
+        }
+
         const { data: users, error } = await supabase
             .from('users')
             .select('id')
