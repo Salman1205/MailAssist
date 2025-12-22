@@ -7,10 +7,13 @@ import { cookies } from 'next/headers';
 import { canLoginWithGoogle, getAccountInfo } from '@/lib/account-type-utils';
 
 // Initialize Supabase client with service role for admin actions (creating users/sessions)
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+// Initialize Supabase client with service role for admin actions (creating users/sessions)
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+const supabase = (supabaseUrl && supabaseKey)
+  ? createClient(supabaseUrl, supabaseKey)
+  : null;
 
 export async function GET(request: NextRequest) {
   try {
@@ -18,6 +21,11 @@ export async function GET(request: NextRequest) {
     const code = searchParams.get('code');
     const error = searchParams.get('error');
     const stateParam = searchParams.get('state');
+
+    if (!supabase) {
+      console.error('Supabase client not initialized');
+      return NextResponse.json({ error: 'Database connection unavailable' }, { status: 500 });
+    }
 
     if (error) {
       return NextResponse.json(
