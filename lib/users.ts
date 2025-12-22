@@ -16,6 +16,7 @@ export interface User {
   isActive: boolean;
   sharedGmailEmail?: string | null;
   userEmail?: string | null;
+  businessId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -25,6 +26,7 @@ export interface CreateUserInput {
   email?: string | null;
   role: UserRole;
   sharedGmailEmail?: string | null;
+  businessId?: string | null;
 }
 
 export interface UpdateUserInput {
@@ -72,22 +74,32 @@ export async function getUserById(userId: string): Promise<User | null> {
 }
 
 /**
- * Get all users for the current shared Gmail account
+ * Get all users for the current account context (business or personal)
  */
-export async function getAllUsers(): Promise<User[]> {
+export async function getAllUsers(businessId?: string | null, sharedGmailEmail?: string | null): Promise<User[]> {
   if (!supabase) return [];
 
-  const sharedGmailEmail = await getSessionUserEmail();
-  if (!sharedGmailEmail) {
-    return [];
-  }
-
-  const { data, error } = await supabase
+  let query = supabase
     .from('users')
     .select('*')
-    .eq('user_email', sharedGmailEmail)
     .eq('is_active', true)
     .order('name', { ascending: true });
+
+  // For business accounts: use businessId
+  if (businessId) {
+    query = query.eq('business_id', businessId);
+  }
+  // For personal accounts: use sharedGmailEmail
+  else {
+    const email = sharedGmailEmail ?? await getSessionUserEmail();
+    if (!email) {
+      console.log('[getAllUsers] No shared Gmail account or business ID found');
+      return [];
+    }
+    query = query.eq('user_email', email);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     console.error('Error fetching users:', error);
@@ -98,24 +110,34 @@ export async function getAllUsers(): Promise<User[]> {
 }
 
 /**
- * Create a new user (Admin only)
+ * Create a new user
+ * Supports both business accounts (via businessId) and personal accounts (via sharedGmailEmail)
  */
 export async function createUser(input: CreateUserInput): Promise<User | null> {
   if (!supabase) return null;
-
-  const sharedGmailEmail = await getSessionUserEmail();
-  if (!sharedGmailEmail) {
-    throw new Error('No shared Gmail account found');
-  }
 
   const payload: any = {
     name: input.name,
     email: input.email ?? null,
     role: input.role,
-    shared_gmail_email: input.sharedGmailEmail ?? sharedGmailEmail,
-    user_email: sharedGmailEmail,
     is_active: true,
   };
+
+  // For business accounts: use businessId
+  if (input.businessId) {
+    payload.business_id = input.businessId;
+    console.log('[CreateUser] Creating user for business:', input.businessId);
+  }
+  // For personal accounts: use sharedGmailEmail from cookie or input
+  else {
+    const sharedGmailEmail = input.sharedGmailEmail ?? await getSessionUserEmail();
+    if (!sharedGmailEmail) {
+      throw new Error('No shared Gmail account or business ID provided');
+    }
+    payload.shared_gmail_email = sharedGmailEmail;
+    payload.user_email = sharedGmailEmail;
+    console.log('[CreateUser] Creating user for personal account:', sharedGmailEmail);
+  }
 
   const { data, error } = await supabase
     .from('users')
@@ -251,6 +273,7 @@ function mapRowToUser(row: any): User {
     isActive: row.is_active,
     sharedGmailEmail: row.shared_gmail_email,
     userEmail: row.user_email,
+    businessId: row.business_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

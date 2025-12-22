@@ -1,30 +1,42 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useRef } from "react"
+import { Button } from "@/components/ui/button"
+import { Mail, Plus } from "lucide-react"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
+import { ConnectImapForm } from "./connect-imap-form"
 
 interface Email {
   id: string
   from: string
+  to: string
   subject: string
   snippet: string
+  body: string
   date: string
+  threadId: string
+  accountEmail?: string // Legacy field
+  ownerEmail?: string // New field
 }
 
 interface EmailListProps {
   selectedEmail: string | null
-  onSelectEmail: (id: string) => void
+  onSelectEmail: (id: string, email?: Partial<Email>) => void
   onLoadingChange?: (loading: boolean) => void
   viewType?: "inbox" | "sent" | "spam" | "trash"
   onRefreshReady?: (refreshFn: () => void) => void
+  selectedAccount?: string  // NEW: Filter by account email
 }
 
-export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChange, viewType = "inbox", onRefreshReady }: EmailListProps) {
+export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChange, viewType = "inbox", onRefreshReady, selectedAccount }: EmailListProps) {
   const [emails, setEmails] = useState<Email[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [limit, setLimit] = useState(20)
+  const [limit, setLimit] = useState(100) // Start with 100 emails for better ticket coverage
   const [hasMore, setHasMore] = useState(true)
+  const [showImapForm, setShowImapForm] = useState(false)
+  const listContainerRef = useRef<HTMLDivElement>(null)
 
   const fetchEmails = async (newLimit = limit, isLoadMore = false, silent = false) => {
     try {
@@ -51,6 +63,11 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
         url = `/api/emails?type=inbox&maxResults=${newLimit}`
       }
 
+      // Add account filter if specified
+      if (selectedAccount) {
+        url += `&account=${encodeURIComponent(selectedAccount)}`
+      }
+
       // Cache strategy:
       // - Initial loads: Use 'no-cache' to revalidate with server (can use stale-while-revalidate)
       // - Load more: Use 'default' to leverage browser cache for faster pagination
@@ -58,7 +75,7 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
       const response = await fetch(url, {
         cache: isLoadMore ? 'default' : 'no-cache'
       })
-      
+
       if (!response.ok) {
         if (response.status === 401) {
           setError('Not authenticated')
@@ -106,19 +123,50 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
     return () => clearInterval(pollInterval)
   }, [limit])
 
-  // Reset and fetch when viewType changes
+  // Reset and fetch when viewType or selectedAccount changes
   useEffect(() => {
     setEmails([])
     setError(null)
-    setLimit(20)
+    setLimit(100)
     setHasMore(true)
-    fetchEmails(20)
+    fetchEmails(100)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewType])
+  }, [viewType, selectedAccount])
+
+  // Auto-load more when scrolling near bottom
+  useEffect(() => {
+    const container = listContainerRef.current?.closest('.overflow-y-auto')
+    if (!container) return
+
+    const handleScroll = () => {
+      if (loadingMore || !hasMore) return
+      const { scrollTop, scrollHeight, clientHeight } = container as HTMLElement
+      // Load more when within 200px of bottom
+      if (scrollHeight - scrollTop - clientHeight < 200) {
+        handleLoadMore()
+      }
+    }
+
+    container.addEventListener('scroll', handleScroll)
+    return () => container.removeEventListener('scroll', handleScroll)
+  }, [loadingMore, hasMore, limit])
 
   const handleLoadMore = () => {
-    const nextLimit = limit + 20
+    if (loadingMore) return
+    const nextLimit = limit + 50 // Load 50 more at a time
     fetchEmails(nextLimit, true)
+  }
+
+  const handleConnectGmail = async () => {
+    try {
+      const response = await fetch('/api/auth/gmail')
+      if (!response.ok) throw new Error('Failed to get auth URL')
+      const { authUrl } = await response.json()
+      window.location.href = authUrl
+    } catch (error) {
+      console.error('Error connecting Gmail:', error)
+      alert('Failed to connect Gmail. Please try again.')
+    }
   }
 
   const formatDate = (dateString: string) => {
@@ -188,6 +236,9 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
   }
 
   if (emails.length === 0 && !loadingMore) {
+    // Check if we are filtering by a specific account
+    const isFiltering = !!selectedAccount;
+
     return (
       <div className="flex items-center justify-center p-12 animate-in fade-in duration-300">
         <div className="text-center space-y-5 max-w-sm">
@@ -198,7 +249,43 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
           </div>
           <div className="space-y-3">
             <div className="text-base font-bold text-foreground">No emails found</div>
-            <p className="text-sm text-muted-foreground leading-relaxed">Try checking another folder or refresh the page</p>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              {isFiltering
+                ? `No emails found for ${selectedAccount}. Try checking another filter or refresh the page.`
+                : viewType === 'inbox'
+                  ? "Connect your Gmail account to see your emails here."
+                  : "Try checking another folder or refresh the page"}
+            </p>
+            {viewType === 'inbox' && !isFiltering && (
+              <div className="flex gap-2 justify-center mt-2">
+                <Button onClick={handleConnectGmail}>
+                  <Mail className="mr-2 h-4 w-4" />
+                  Connect Gmail
+                </Button>
+                <Button variant="outline" onClick={() => setShowImapForm(true)}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Connect Other
+                </Button>
+              </div>
+            )}
+
+            <Dialog open={showImapForm} onOpenChange={setShowImapForm}>
+              <DialogContent className="max-w-md text-left">
+                <DialogHeader>
+                  <DialogTitle>Connect Email Account</DialogTitle>
+                  <DialogDescription>
+                    Connect any email provider using IMAP/SMTP
+                  </DialogDescription>
+                </DialogHeader>
+                <ConnectImapForm
+                  onSuccess={() => {
+                    setShowImapForm(false)
+                    fetchEmails()
+                  }}
+                  onCancel={() => setShowImapForm(false)}
+                />
+              </DialogContent>
+            </Dialog>
           </div>
         </div>
       </div>
@@ -233,33 +320,64 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
             body: email.body,
             threadId: email.threadId,
           })}
-          className={`w-full text-left rounded-xl transition-all duration-200 ease-out border animate-in fade-in slide-in-from-left-2 group relative overflow-hidden ${
-            selectedEmail === email.id 
-              ? "border-primary/50 bg-accent/15 shadow-lg ring-2 ring-primary/30 border-l-4" 
-              : "border-border/50 hover:border-primary/40 hover:bg-accent/5 hover:shadow-md bg-card"
-          }`}
+          className={`w-full text-left rounded-xl transition-all duration-200 ease-out border animate-in fade-in slide-in-from-left-2 group relative overflow-hidden ${selectedEmail === email.id
+            ? "border-primary/50 bg-accent/15 shadow-lg ring-2 ring-primary/30 border-l-4"
+            : "border-border/50 hover:border-primary/40 hover:bg-accent/5 hover:shadow-md bg-card"
+            }`}
           style={{ animationDelay: `${index * 20}ms` }}
         >
           <div className="flex gap-4 p-4 relative z-10">
             {/* Avatar */}
-            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-sm flex-shrink-0 ${
-              getAvatarColor(email.from)
-            } shadow-md`}>
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-sm flex-shrink-0 ${getAvatarColor(email.from)
+              } shadow-md`}>
               {getInitials(email.from)}
             </div>
-            
+
             {/* Content */}
             <div className="flex-1 min-w-0 space-y-2">
               {/* Header row */}
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
-                  <h3 className={`font-semibold text-base truncate transition-colors ${
-                    selectedEmail === email.id ? "text-primary" : "text-foreground group-hover:text-primary"
-                  }`}>
-                    {email.from.split("<")[0].trim() || email.from}
+                  <h3 className={`font-semibold text-base truncate transition-colors ${selectedEmail === email.id ? "text-primary" : "text-foreground group-hover:text-primary"
+                    }`}>
+                    {(() => {
+                      // Get current user email from session storage if available
+                      const currentUserEmail = typeof window !== 'undefined' ? sessionStorage.getItem('current_user_email') : null;
+
+                      // Check if the email is from the current user
+                      if (currentUserEmail && email.from.includes(currentUserEmail)) {
+                        return "Me";
+                      }
+
+                      // Parse the from field
+                      const nameMatch = email.from.match(/^"?(.*?)"? <.*>$/);
+                      if (nameMatch && nameMatch[1]) {
+                        return nameMatch[1];
+                      }
+
+                      // If no name, format the email address
+                      const emailAddress = email.from.replace(/[<>]/g, '');
+                      const localPart = emailAddress.split('@')[0];
+
+                      // Convert "john.doe" to "John Doe"
+                      if (localPart) {
+                        return localPart
+                          .split(/[._]/)
+                          .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+                          .join(' ');
+                      }
+
+                      return emailAddress;
+                    })()}
                   </h3>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
+                  {/* Account Badge */}
+                  {email.ownerEmail && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground font-medium border border-border/50 max-w-[120px] truncate" title={`Received by ${email.ownerEmail}`}>
+                      {email.ownerEmail}
+                    </span>
+                  )}
                   <span className="text-xs text-muted-foreground font-medium">
                     {formatDate(email.date)}
                   </span>
@@ -268,14 +386,14 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
                   )}
                 </div>
               </div>
-              
+
               {/* Subject and snippet */}
               <div className="space-y-1.5">
                 <p className="text-sm font-semibold text-foreground line-clamp-1 leading-snug">
                   {email.subject || "(No subject)"}
                 </p>
                 {email.snippet && (
-                  <p className="text-sm text-muted-foreground line-clamp-2 leading-relaxed">
+                  <p className="text-sm text-muted-foreground line-clamp-1 leading-relaxed">
                     {email.snippet}
                   </p>
                 )}

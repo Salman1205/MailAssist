@@ -32,8 +32,11 @@ export async function GET(request: NextRequest) {
     // Check if user can view all tickets (Admin/Manager)
     const canViewAll = await canViewAllTickets(userId);
 
-    // Get tickets with role-based filtering
-    const tickets = await getTickets(userId, canViewAll, userEmail);
+    // Get account filter if specified
+    const accountFilter = request.nextUrl.searchParams.get('account') || undefined;
+
+    // Get tickets with role-based filtering and optional account scope
+    const tickets = await getTickets(userId, canViewAll, userEmail, accountFilter);
 
     return NextResponse.json({ tickets });
   } catch (error) {

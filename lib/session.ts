@@ -46,7 +46,7 @@ export async function setSessionUserEmail(userEmail: string): Promise<void> {
     // In Vercel production, all requests are HTTPS, so secure should be true
     // Use VERCEL env var or NODE_ENV to detect production
     const isProduction = process.env.VERCEL === '1' || process.env.NODE_ENV === 'production';
-    
+
     const cookieStore = await cookies();
     cookieStore.set(SESSION_COOKIE_NAME, userEmail, {
       httpOnly: true,
@@ -72,7 +72,7 @@ export function setSessionUserEmailInResponse(
     // In Vercel production, all requests are HTTPS, so secure should be true
     // Use VERCEL env var or NODE_ENV to detect production
     const isProduction = process.env.VERCEL === '1' || process.env.NODE_ENV === 'production';
-    
+
     response.cookies.set(SESSION_COOKIE_NAME, userEmail, {
       httpOnly: true,
       secure: isProduction, // true on Vercel (HTTPS), false in local dev (HTTP)
@@ -185,8 +185,9 @@ export interface SessionUser {
   name: string
   email: string
   role: 'admin' | 'manager' | 'agent'
-  businessId: string
+  businessId: string | null
   businessName: string
+  accountType: 'business' | 'personal'
 }
 
 /**
@@ -256,6 +257,7 @@ export async function validateBusinessSession(): Promise<SessionUser | null> {
       role: user.role as 'admin' | 'manager' | 'agent',
       businessId: user.business_id,
       businessName: business?.business_name || 'Unknown Business',
+      accountType: user.business_id !== null ? 'business' : 'personal',
     }
   } catch (error) {
     console.error('[Session] Validation error:', error)
@@ -330,6 +332,7 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
     role: user.role as 'admin' | 'manager' | 'agent',
     businessId: user.business_id,
     businessName: business?.business_name || 'Unknown Business',
+    accountType: user.business_id !== null ? 'business' : 'personal',
   }
 }
 

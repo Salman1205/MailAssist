@@ -8,6 +8,21 @@ import { getUserProfile } from '@/lib/gmail';
 
 export async function GET() {
   try {
+    // 1. Try to get user from business session first
+    const { getCurrentUser } = await import('@/lib/session');
+    const user = await getCurrentUser();
+
+    if (user) {
+      return NextResponse.json({
+        emailAddress: user.email,
+        displayName: user.name,
+        picture: null, // Business users might not have a picture yet
+        role: user.role,
+        businessName: user.businessName
+      });
+    }
+
+    // 2. Fall back to Gmail tokens (legacy flow)
     const tokens = await getValidTokens();
 
     if (!tokens || !tokens.access_token) {

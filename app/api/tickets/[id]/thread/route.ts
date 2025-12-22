@@ -51,16 +51,24 @@ export async function GET(
     }
 
     // Get tokens and fetch thread
-    const tokens = await getValidTokens();
+    // First try the ticket's user_email, then fallback to current user's email
+    let tokens = await getValidTokens(ticket.userEmail);
+
+    // Fallback: If ticket's userEmail doesn't have tokens, try current user's email
+    if ((!tokens || !tokens.access_token) && userEmail && userEmail !== ticket.userEmail) {
+      console.log(`[Thread] Ticket userEmail ${ticket.userEmail} has no tokens, trying current user ${userEmail}`);
+      tokens = await getValidTokens(userEmail);
+    }
+
     if (!tokens || !tokens.access_token) {
       return NextResponse.json(
-        { error: 'Not authenticated. Please connect Gmail first.' },
+        { error: `No valid Gmail tokens found. Please reconnect your Gmail account.` },
         { status: 401 }
       );
     }
 
     const thread = await getThreadById(tokens, ticket.threadId);
-    
+
     return NextResponse.json({ messages: thread.messages || [] });
   } catch (error) {
     console.error('Error fetching ticket thread:', error);

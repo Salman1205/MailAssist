@@ -13,7 +13,7 @@ import { validateTextInput, isValidEmail, isValidUserRole } from '@/lib/validati
 export async function GET(request: NextRequest) {
   try {
     const userId = getCurrentUserIdFromRequest(request);
-    
+
     if (!userId) {
       return NextResponse.json(
         { error: 'Not authenticated' },
@@ -24,8 +24,12 @@ export async function GET(request: NextRequest) {
     // For user switching, all authenticated users should be able to see all users
     // This allows agents to switch to admin/manager accounts
     // The restriction on user management (create/edit/delete) is still enforced in POST/PATCH/DELETE endpoints
-    const users = await getAllUsers();
-    
+    const { validateBusinessSession, getSessionUserEmail } = await import('@/lib/session');
+    const businessSession = await validateBusinessSession();
+    const sharedGmailEmail = await getSessionUserEmail();
+
+    const users = await getAllUsers(businessSession?.businessId, sharedGmailEmail);
+
     return NextResponse.json({ users });
   } catch (error) {
     console.error('Error fetching users:', error);
@@ -40,7 +44,7 @@ export async function POST(request: NextRequest) {
   try {
     // Check admin permission
     const { allowed } = await requirePermission(request, 'admin');
-    
+
     if (!allowed) {
       return NextResponse.json(
         { error: 'Admin access required' },

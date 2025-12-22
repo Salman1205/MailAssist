@@ -158,11 +158,11 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
   // Autosave draft HTML to localStorage
   useEffect(() => {
     if (!emailId || !draftHtml || !showDraft) return
-    
+
     if (draftAutoSaveTimerRef.current) {
       clearTimeout(draftAutoSaveTimerRef.current)
     }
-    
+
     draftAutoSaveTimerRef.current = setTimeout(() => {
       try {
         setAutoSaving(true)
@@ -172,7 +172,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
         // Ignore localStorage errors
       }
     }, 1000)
-    
+
     return () => {
       if (draftAutoSaveTimerRef.current) {
         clearTimeout(draftAutoSaveTimerRef.current)
@@ -185,7 +185,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       // CRITICAL UX FIX: Clear previous email content immediately
       setThreadMessages([])
       setEmailSummary(null)
-      
+
       // Reset draft/UI state whenever user selects a new email
       setShowDraft(false)
       setDraftMinimized(false)
@@ -197,7 +197,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       setError(null)
       setConversationSummary("")
       setSummaryExpanded(false)
-      
+
       // Try to load autosaved draft from localStorage
       try {
         const saved = localStorage.getItem(`draft_${emailId}`)
@@ -211,7 +211,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       } catch {
         // Ignore localStorage errors
       }
-      
+
       // Set initial email data immediately if provided
       if (initialEmailData) {
         setEmailSummary({
@@ -245,7 +245,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
         setLoading(true)
         setLoadingFullContent(false)
       }
-      
+
       fetchThread()
     }
   }, [emailId, initialEmailData])
@@ -255,7 +255,10 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       if (!initialEmailData) {
         setLoading(true)
       }
-      setError(null)
+      // Don't clear error if we have content showing - it causes the UI glitch
+      if (!initialEmailData && !emailSummary) {
+        setError(null)
+      }
 
       // OPTIMIZED: Fetch email and thread in parallel for faster loading
       // Use initial threadId if available, otherwise fetch email first
@@ -270,9 +273,10 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       // Process email response
       if (emailResponse.ok) {
         try {
-          const emailData = await emailResponse.json()
+          const emailData = await (emailResponse as Response).json()
           const email: EmailSummary = emailData.email
           setEmailSummary(email)
+          setError(null) // Clear any previous errors on success
         } catch (e) {
           // Ignore JSON parse errors, thread will have the data
         }
@@ -281,11 +285,11 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       // Process thread response (this is what we really need)
       if (threadResponse.ok) {
         try {
-          const threadData = await threadResponse.json()
+          const threadData = await (threadResponse as Response).json()
           const messages = threadData.thread?.messages || []
           setThreadMessages(messages)
-          setError(null)
-          
+          setError(null) // Clear error on successful load
+
           // Update emailSummary from first message if we don't have it
           if (messages.length > 0 && !emailSummary) {
             const firstMessage = messages[0]
@@ -307,10 +311,10 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
         // If thread fetch failed, try with email's threadId
         if (emailResponse.ok) {
           try {
-            const emailData = await emailResponse.json()
+            const emailData = await (emailResponse as Response).json()
             const email: EmailSummary = emailData.email
             const threadId = email.threadId || email.id
-            
+
             if (threadId !== initialThreadId) {
               // Retry with correct threadId
               const retryResponse = await fetch(`/api/emails/threads/${encodeURIComponent(threadId)}`)
@@ -319,21 +323,28 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
                 setThreadMessages(threadData.thread?.messages || [])
                 setEmailSummary(email)
                 setError(null)
-              } else {
+              } else if (!initialEmailData) {
+                // Only set error if we have nothing to show
                 setError("Conversation not found")
               }
-            } else {
+            } else if (!initialEmailData) {
               setError("Conversation not found")
             }
           } catch (e) {
-            setError("Failed to load conversation")
+            if (!initialEmailData) {
+              setError("Failed to load conversation")
+            }
           }
-        } else {
+        } else if (!initialEmailData) {
+          // Only set error if we have no content at all
           setError("Failed to load email")
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load email')
+      // Only set error if we have no content showing
+      if (!initialEmailData && !emailSummary) {
+        setError(err instanceof Error ? err.message : 'Failed to load email')
+      }
       console.error('Error fetching email:', err)
     } finally {
       setLoading(false)
@@ -343,7 +354,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
 
   const handleGenerateDraft = async () => {
     if (!emailId) return
-    
+
     try {
       setGenerating(true)
       setError(null)
@@ -380,7 +391,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
 
   const handleRegenerate = async () => {
     if (!emailId) return
-    
+
     try {
       setGenerating(true)
       setError(null)
@@ -448,7 +459,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       }
 
       setSendSuccess(true)
-      
+
       // Add sent message to thread immediately (optimistic UI update)
       // Get the user's email from the first message's 'to' field (since it was sent to us)
       const userEmail = threadMessages[0]?.to || emailSummary?.to || 'You'
@@ -463,7 +474,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
         snippet: textValue.substring(0, 100)
       }
       setThreadMessages(prev => [...prev, newMessage])
-      
+
       // Clear draft UI and autosaved data after successful send
       try {
         localStorage.removeItem(`draft_${emailId}`)
@@ -475,7 +486,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       setDraftId(null)
       setShowDraft(false)
       setDraftMinimized(false)
-      
+
       if (sendResetTimer) {
         clearTimeout(sendResetTimer)
       }
@@ -485,81 +496,81 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
           setSendResetTimer(null)
         }, 5000) // Show success for 5 seconds instead of 3
       )
-      
+
       toast({
         title: "Reply sent",
         description: "Your reply was delivered via Gmail.",
       })
-      
+
       // If closeTicket option is set and we have a ticketId, assign and close it
       if (opts?.closeTicket && ticketId && currentUserId) {
         console.log('🎫 Starting Send & Close for ticket:', ticketId, 'user:', currentUserId)
-        
-          // Execute assign and close sequentially - wait for completion
-          try {
-            // Step 1: Assign the ticket
-            console.log('📝 Step 1: Assigning ticket to user...')
-            const assignResponse = await fetch(`/api/tickets/${ticketId}/assign`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ assigneeUserId: currentUserId }),
-            })
-            
-            console.log('📝 Assign response status:', assignResponse.status)
-            
-            if (!assignResponse.ok) {
-              const error = await assignResponse.json().catch(() => ({}))
-              console.error('❌ Failed to assign ticket:', error)
-              throw new Error(error.error || 'Failed to assign ticket')
-            }
-            
-            const assignResult = await assignResponse.json()
-            console.log('✅ Ticket assigned successfully:', assignResult)
-            
-            // Step 2: Close the ticket
-            console.log('🔒 Step 2: Closing ticket...')
-            const closeResponse = await fetch(`/api/tickets/${ticketId}/status`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ status: 'closed' }),
-            })
-            
-            console.log('🔒 Close response status:', closeResponse.status)
-            
-            if (!closeResponse.ok) {
-              const error = await closeResponse.json().catch(() => ({}))
-              console.error('❌ Failed to close ticket:', error)
-              throw new Error(error.error || 'Failed to close ticket')
-            }
-            
-            const closeResult = await closeResponse.json()
-            console.log('✅ Ticket closed successfully:', closeResult)
-            
-            // Step 3: Broadcast event to refresh tickets page
-            console.log('📢 Broadcasting ticket update event...')
-            console.log('📦 Event detail:', { ticketId, status: 'closed', assigneeUserId: currentUserId })
-            window.dispatchEvent(new CustomEvent('ticketUpdated', { 
-              detail: { ticketId, status: 'closed', assigneeUserId: currentUserId } 
-            }))
-            // Also fire a simpler refresh event for listeners
-            window.dispatchEvent(new Event('ticketsForceRefresh'))
-            console.log('✅ Events dispatched - ticketUpdated and ticketsForceRefresh')
-            console.log('✅ Send & Close completed successfully!')
-            
-            // Show success toast
-            toast({
-              title: "Ticket closed",
-              description: "Ticket has been assigned to you and closed",
-            })
-          
-          } catch (error) {
-            console.error('❌ Error in Send & Close:', error)
-            toast({
-              title: "Ticket update failed",
-              description: error instanceof Error ? error.message : "Failed to update ticket",
-              variant: "destructive",
-            })
+
+        // Execute assign and close sequentially - wait for completion
+        try {
+          // Step 1: Assign the ticket
+          console.log('📝 Step 1: Assigning ticket to user...')
+          const assignResponse = await fetch(`/api/tickets/${ticketId}/assign`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ assigneeUserId: currentUserId }),
+          })
+
+          console.log('📝 Assign response status:', assignResponse.status)
+
+          if (!assignResponse.ok) {
+            const error = await assignResponse.json().catch(() => ({}))
+            console.error('❌ Failed to assign ticket:', error)
+            throw new Error(error.error || 'Failed to assign ticket')
           }
+
+          const assignResult = await assignResponse.json()
+          console.log('✅ Ticket assigned successfully:', assignResult)
+
+          // Step 2: Close the ticket
+          console.log('🔒 Step 2: Closing ticket...')
+          const closeResponse = await fetch(`/api/tickets/${ticketId}/status`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'closed' }),
+          })
+
+          console.log('🔒 Close response status:', closeResponse.status)
+
+          if (!closeResponse.ok) {
+            const error = await closeResponse.json().catch(() => ({}))
+            console.error('❌ Failed to close ticket:', error)
+            throw new Error(error.error || 'Failed to close ticket')
+          }
+
+          const closeResult = await closeResponse.json()
+          console.log('✅ Ticket closed successfully:', closeResult)
+
+          // Step 3: Broadcast event to refresh tickets page
+          console.log('📢 Broadcasting ticket update event...')
+          console.log('📦 Event detail:', { ticketId, status: 'closed', assigneeUserId: currentUserId })
+          window.dispatchEvent(new CustomEvent('ticketUpdated', {
+            detail: { ticketId, status: 'closed', assigneeUserId: currentUserId }
+          }))
+          // Also fire a simpler refresh event for listeners
+          window.dispatchEvent(new Event('ticketsForceRefresh'))
+          console.log('✅ Events dispatched - ticketUpdated and ticketsForceRefresh')
+          console.log('✅ Send & Close completed successfully!')
+
+          // Show success toast
+          toast({
+            title: "Ticket closed",
+            description: "Ticket has been assigned to you and closed",
+          })
+
+        } catch (error) {
+          console.error('❌ Error in Send & Close:', error)
+          toast({
+            title: "Ticket update failed",
+            description: error instanceof Error ? error.message : "Failed to update ticket",
+            variant: "destructive",
+          })
+        }
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to send reply"
@@ -660,18 +671,18 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
     if (typeof window === 'undefined') return
     const sel = window.getSelection()
     if (!sel || sel.rangeCount === 0) return
-    
+
     const range = sel.getRangeAt(0)
     let node = range.commonAncestorContainer as Node
-    
+
     // If it's a text node, get its parent element
     if (node.nodeType === Node.TEXT_NODE) {
       node = node.parentNode as Node
     }
-    
+
     // Check if we're inside a blockquote
     const inQuote = !!(node as HTMLElement).closest?.('blockquote')
-    
+
     execAndSync(() => {
       if (inQuote) {
         // Remove blockquote by converting to paragraph
@@ -687,18 +698,18 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
     if (typeof window === 'undefined') return
     const sel = window.getSelection()
     if (!sel || sel.rangeCount === 0) return
-    
+
     const range = sel.getRangeAt(0)
     let node = range.commonAncestorContainer as Node
-    
+
     // If it's a text node, get its parent element
     if (node.nodeType === Node.TEXT_NODE) {
       node = node.parentNode as Node
     }
-    
+
     // Check if we're inside an h2
     const inHeading = !!(node as HTMLElement).closest?.('h2')
-    
+
     execAndSync(() => {
       if (inHeading) {
         // Remove heading by converting to paragraph
@@ -714,10 +725,10 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
 
   const handleInsertLink = () => {
     if (typeof window === 'undefined') return
-    
+
     const sel = window.getSelection()
     if (!sel) return
-    
+
     // Ensure we have a range (create one at cursor if needed)
     let range: Range
     if (sel.rangeCount > 0) {
@@ -730,33 +741,33 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
         range.collapse(false)
       }
     }
-    
+
     // Save the range
     setSavedRange(range.cloneRange())
-    
+
     // Get position to show dialog above it
     const rect = range.getBoundingClientRect()
     const editorRect = editorRef.current?.getBoundingClientRect()
-    
+
     if (editorRect) {
       // Position dialog above the selection/cursor, relative to editor
       const topPos = rect.top - editorRect.top - 80 // 80px above
       const leftPos = rect.left - editorRect.left
-      
+
       setLinkDialogPosition({
         top: Math.max(10, topPos), // Don't go above editor
         left: Math.max(10, leftPos)
       })
     }
-    
+
     // Check if text is selected
     const hasSelection = !range.collapsed
     const selectedText = hasSelection ? sel.toString().trim() : ""
-    
+
     setLinkTextValue(selectedText)
     setLinkHasSelection(hasSelection)
     setLinkInputOpen(true)
-    
+
     setTimeout(() => {
       const el = document.getElementById('link-input-inline') as HTMLInputElement | null
       el?.focus()
@@ -773,19 +784,19 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       setLinkDialogPosition(null)
       return
     }
-    
+
     if (typeof window === 'undefined' || !savedRange) return
-    
+
     // Focus the editor first
     editorRef.current?.focus()
-    
+
     // Restore the saved selection range
     const sel = window.getSelection()
     if (sel) {
       sel.removeAllRanges()
       sel.addRange(savedRange)
     }
-    
+
     setTimeout(() => {
       execAndSync(() => {
         if (linkHasSelection) {
@@ -795,7 +806,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
           link.target = '_blank'
           link.rel = 'noopener noreferrer'
           link.textContent = linkTextValue
-          
+
           const range = savedRange
           if (range) {
             range.deleteContents()
@@ -819,7 +830,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
           link.target = '_blank'
           link.rel = 'noopener noreferrer'
           link.textContent = displayText
-          
+
           const range = savedRange
           if (range) {
             range.insertNode(link)
@@ -836,11 +847,11 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
           }
         }
       })
-      
+
       // Trigger input event to sync state
       handleEditorInput()
     }, 10)
-    
+
     setLinkInputOpen(false)
     setLinkInputValue("")
     setLinkTextValue("")
@@ -893,7 +904,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
           <div className="h-6 bg-muted rounded w-1/3 animate-pulse mb-3" />
           <div className="h-4 bg-muted rounded w-1/4 animate-pulse" />
         </div>
-        
+
         {/* Messages skeleton */}
         <div className="flex-1 overflow-y-auto p-6 space-y-4">
           {[1, 2].map((i) => (
@@ -978,7 +989,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
           </Button>
         </div>
       )}
-      
+
       <div className="flex-1 overflow-y-auto overflow-x-hidden">
         <Card className={`mx-4 md:mx-6 mt-4 mb-3 flex flex-col overflow-hidden max-w-full shadow-lg ${showDraft && !draftMinimized ? 'flex-shrink-0 max-h-[40vh]' : 'flex-1'}`}>
           <div className="px-6 py-5 border-b border-border flex-shrink-0 overflow-hidden bg-card">
@@ -1068,11 +1079,11 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
                               <AvatarFallback className="bg-primary/10 text-primary font-semibold text-xs">
                                 {msg.from.split("<")[0].trim()
                                   ? msg.from.split("<")[0].trim()
-                                      .split(" ")
-                                      .map((n) => n[0])
-                                      .join("")
-                                      .slice(0, 2)
-                                      .toUpperCase()
+                                    .split(" ")
+                                    .map((n) => n[0])
+                                    .join("")
+                                    .slice(0, 2)
+                                    .toUpperCase()
                                   : msg.from.slice(0, 2).toUpperCase()}
                               </AvatarFallback>
                             </Avatar>
@@ -1100,7 +1111,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
                       {msg.body && msg.body.trim() ? (
                         // Check if it looks like HTML (more comprehensive check)
                         /<[^>]*(div|p|span|html|table|tr|td|br|img|a|b|i|em|strong|blockquote|pre|code|ul|ol|li|h[1-6])[\s>]/i.test(msg.body) ? (
-                          <div 
+                          <div
                             className="prose prose-sm max-w-none 
                               prose-headings:font-semibold prose-headings:text-foreground
                               prose-p:text-foreground prose-p:leading-relaxed
@@ -1235,25 +1246,25 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
                         <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('strikeThrough'))} aria-label="Strikethrough"><Strikethrough className="w-3.5 h-3.5" /></button>
                         <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={toggleHeading} aria-label="Heading"><Type className="w-3.5 h-3.5" /></button>
                         <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('hiliteColor', '#fef08a'))} aria-label="Highlight"><Highlighter className="w-3.5 h-3.5 text-amber-500" /></button>
-                        
+
                         <div className="w-px h-5 bg-border mx-0.5" />
-                        
+
                         <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => makeListFromSelection(false)} aria-label="Bullet list"><List className="w-3.5 h-3.5" /></button>
                         <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => makeListFromSelection(true)} aria-label="Numbered list"><ListOrdered className="w-3.5 h-3.5" /></button>
                         <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={toggleBlockquote} aria-label="Quote"><Quote className="w-3.5 h-3.5" /></button>
                         <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('justifyLeft'))} aria-label="Align left"><AlignLeft className="w-3.5 h-3.5" /></button>
                         <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('justifyCenter'))} aria-label="Align center"><AlignCenter className="w-3.5 h-3.5" /></button>
                         <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('justifyRight'))} aria-label="Align right"><AlignRight className="w-3.5 h-3.5" /></button>
-                        
+
                         <div className="w-px h-5 bg-border mx-0.5" />
-                        
+
                         <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={handleInsertLink} aria-label="Insert link"><LinkIcon className="w-3.5 h-3.5" /></button>
                         <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('insertHTML', '<code></code>'))} aria-label="Inline code"><Code className="w-3.5 h-3.5" /></button>
                         <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => imageInputRef.current?.click()} aria-label="Inline image"><ImageIcon className="w-3.5 h-3.5" /></button>
                         <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => fileInputRef.current?.click()} aria-label="Attach file"><Paperclip className="w-3.5 h-3.5" /></button>
-                        
+
                         <div className="w-px h-5 bg-border mx-0.5" />
-                        
+
                         <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 px-2.5 inline-flex items-center justify-center rounded hover:bg-accent text-xs font-medium" onClick={handleClearFormatting} aria-label="Clear formatting">Clear</button>
                       </div>
                       <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => handleAttachFiles(e.target.files)} />
@@ -1339,34 +1350,34 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
                           }}
                           onInput={handleEditorInput}
                           onPaste={(e) => {
-                          e.preventDefault()
-                          const text = e.clipboardData.getData('text/plain')
-                          execAndSync(() => {
-                            if (!document.execCommand('insertText', false, text)) {
-                              document.execCommand('insertHTML', false, text)
-                            }
-                          })
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Escape') {
-                            setDraftMinimized(true)
                             e.preventDefault()
-                          }
-                          if ((e.key === 'Backspace' || e.key === 'Delete') && typeof window !== 'undefined') {
-                            const sel = window.getSelection()
-                            const node = sel?.anchorNode as HTMLElement | null
-                            const img = node?.nodeType === 1 ? (node as HTMLElement).closest('img') : node?.parentElement?.closest('img')
-                            if (img) {
+                            const text = e.clipboardData.getData('text/plain')
+                            execAndSync(() => {
+                              if (!document.execCommand('insertText', false, text)) {
+                                document.execCommand('insertHTML', false, text)
+                              }
+                            })
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Escape') {
+                              setDraftMinimized(true)
                               e.preventDefault()
-                              execAndSync(() => img.remove())
-                              return
                             }
-                          }
-                          handleEditorShortcut(e)
-                        }}
-                        className="w-full min-h-[200px] max-h-[300px] overflow-y-auto p-4 border-2 border-border rounded-xl bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all duration-200 prose prose-sm max-w-none prose-img:max-w-full prose-img:max-h-96"
-                        aria-label="Email draft editor"
-                      />
+                            if ((e.key === 'Backspace' || e.key === 'Delete') && typeof window !== 'undefined') {
+                              const sel = window.getSelection()
+                              const node = sel?.anchorNode as HTMLElement | null
+                              const img = node?.nodeType === 1 ? (node as HTMLElement).closest('img') : node?.parentElement?.closest('img')
+                              if (img) {
+                                e.preventDefault()
+                                execAndSync(() => img.remove())
+                                return
+                              }
+                            }
+                            handleEditorShortcut(e)
+                          }}
+                          className="w-full min-h-[200px] max-h-[300px] overflow-y-auto p-4 border-2 border-border rounded-xl bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all duration-200 prose prose-sm max-w-none prose-img:max-w-full prose-img:max-h-96"
+                          aria-label="Email draft editor"
+                        />
                         {autoSaving && (
                           <div className="text-xs text-muted-foreground bg-background/90 px-2 py-1 rounded shadow-sm border border-border absolute top-3 right-3 pointer-events-none select-none">
                             Saving...
@@ -1394,11 +1405,10 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
                       <Button
                         onClick={() => handleSendReply()}
                         disabled={sending || sendSuccess}
-                        className={`flex-1 h-10 text-sm font-semibold shadow-md transition-all duration-300 ease-out hover:shadow-lg disabled:cursor-not-allowed ${
-                          sendSuccess 
-                            ? "bg-green-600 text-white hover:bg-green-600" 
+                        className={`flex-1 h-10 text-sm font-semibold shadow-md transition-all duration-300 ease-out hover:shadow-lg disabled:cursor-not-allowed ${sendSuccess
+                            ? "bg-green-600 text-white hover:bg-green-600"
                             : "disabled:opacity-50"
-                        }`}
+                          }`}
                       >
                         {sendingAction === 'send' ? (
                           <>

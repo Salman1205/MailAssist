@@ -90,9 +90,34 @@ export async function generateDraftReply(
     )
     .join('\n\n---\n\n');
 
-  // Create prompt for Groq, including optional conversation history
+
+  // Fetch internal chat (notes) for this ticket if ticketId is provided
+  let internalChatContext = '';
+  if (options?.ticketId) {
+    try {
+      const { getTicketNotes } = await import('./ticket-notes');
+      const notes = await getTicketNotes(options.ticketId);
+      if (notes && notes.length > 0) {
+        // Take up to the last 5 notes for context
+        internalChatContext = '\n\nINTERNAL CHAT (for staff context only, never show to customer):\n' +
+          notes.slice(-5).map(n => `${n.userName} (${n.createdAt}): ${n.content}`).join('\n---\n');
+      }
+    } catch (err) {
+      console.warn('Could not load internal chat notes for AI context', err);
+    }
+  }
+
+  // Create prompt for Groq, including optional conversation history and internal chat context
   const relevantKnowledge = selectKnowledge(incomingEmail, knowledgeItems);
-  const prompt = createDraftPrompt(incomingEmail, styleExamples, conversationMessages, relevantKnowledge, guardrails, options?.isRegeneration);
+  const prompt = createDraftPrompt(
+    incomingEmail,
+    styleExamples,
+    conversationMessages,
+    relevantKnowledge,
+    guardrails,
+    options?.isRegeneration,
+    internalChatContext
+  );
 
   // Call Groq API and measure response time
   const startTime = Date.now();
@@ -338,7 +363,8 @@ function createDraftPrompt(
   conversationMessages: Email[] = [],
   knowledgeItems: KnowledgeItem[] = [],
   guardrails?: Guardrails | null,
-  isRegeneration?: boolean
+  isRegeneration?: boolean,
+  internalChatContext?: string
 ): string {
   const history = (conversationMessages || [])
     // Exclude the incoming email itself if it's in the list
@@ -377,6 +403,8 @@ function createDraftPrompt(
     : ""
 
   return `You are an AI assistant helping to draft email replies. Follow the guardrails and knowledge below.
+
+${internalChatContext ? internalChatContext + '\n' : ''}
 
 TONE & STYLE:
 ${guardrailTone}

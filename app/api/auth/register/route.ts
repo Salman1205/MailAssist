@@ -22,6 +22,7 @@ import {
   validateBusinessRegistration,
 } from '@/lib/auth-utils'
 import { sendEmail } from '@/lib/email-service'
+import { validateAccountType } from '@/lib/account-type-utils'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -49,28 +50,40 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // 2. Check if business email already exists
-    const { data: existingBusiness } = await supabase
-      .from('businesses')
-      .select('id, is_email_verified')
-      .eq('business_email', businessEmail.toLowerCase().trim())
-      .single()
+    // 2. Check account type - prevent creating business account if personal account exists
+    const accountTypeValidation = await validateAccountType(businessEmail, 'business')
 
-    if (existingBusiness) {
-      if (existingBusiness.is_email_verified) {
+    if (!accountTypeValidation.isValid) {
+      return NextResponse.json(
+        { error: accountTypeValidation.error },
+        { status: 409 }
+      )
+    }
+
+    // If account exists and is already business type, check if verified
+    if (accountTypeValidation.accountInfo?.exists && accountTypeValidation.accountInfo.accountType === 'business') {
+      if (accountTypeValidation.accountInfo.isVerified) {
         return NextResponse.json(
-          { error: 'This email is already registered. Please login instead.' },
+          { error: 'This email is already registered as a business account. Please login instead.' },
           { status: 409 }
         )
       } else {
         // Business exists but not verified - allow re-registration
-        // Delete old unverified business and its tokens
-        await supabase
+        // Delete old unverified business
+        const { data: existingBusiness } = await supabase
           .from('businesses')
-          .delete()
-          .eq('id', existingBusiness.id)
-        
-        console.log('[Register] Deleted unverified business:', existingBusiness.id)
+          .select('id')
+          .eq('business_email', businessEmail.toLowerCase().trim())
+          .maybeSingle()
+
+        if (existingBusiness) {
+          await supabase
+            .from('businesses')
+            .delete()
+            .eq('id', existingBusiness.id)
+
+          console.log('[Register] Deleted unverified business:', existingBusiness.id)
+        }
       }
     }
 
@@ -138,7 +151,7 @@ export async function POST(req: NextRequest) {
         ownerName,
         otpCode,
       })
-      
+
       console.log('[Register] OTP email sent to:', businessEmail)
     } catch (emailError) {
       console.error('[Register] Error sending email:', emailError)

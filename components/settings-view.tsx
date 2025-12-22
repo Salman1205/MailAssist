@@ -4,6 +4,7 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardDescription, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import ShopifySettings from "@/components/shopify-settings"
+import { AccountManager } from "@/components/account-manager"
 
 interface SyncStats {
   totalStored: number
@@ -57,104 +58,107 @@ export default function SettingsView({ status, syncing, onSync, error }: Setting
 
         <div className="space-y-6">
           <Card className="border-border shadow-lg">
-          <CardHeader className="pb-6 pt-6 px-6">
-            <CardTitle className="text-lg font-bold">Email synchronization</CardTitle>
-            <CardDescription className="text-sm mt-2">
-              Keep your sent emails synchronized so AI drafts match your exact tone.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-5 px-6 pb-6">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="rounded-xl border-2 border-border bg-accent/5 p-4 hover:shadow-md transition-shadow">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Emails embedded</p>
-                <p className="text-2xl font-bold text-primary mt-3">
-                  {status?.sentWithEmbeddings ?? 0}
-                </p>
+            <CardHeader className="pb-6 pt-6 px-6">
+              <CardTitle className="text-lg font-bold">Email synchronization</CardTitle>
+              <CardDescription className="text-sm mt-2">
+                Keep your sent emails synchronized so AI drafts match your exact tone.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-5 px-6 pb-6">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="rounded-xl border-2 border-border bg-accent/5 p-4 hover:shadow-md transition-shadow">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Emails embedded</p>
+                  <p className="text-2xl font-bold text-primary mt-3">
+                    {status?.sentWithEmbeddings ?? 0}
+                  </p>
+                </div>
+                <div className="rounded-xl border-2 border-border bg-accent/5 p-4 hover:shadow-md transition-shadow">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Pending replies</p>
+                  <p className="text-2xl font-bold text-primary mt-3">
+                    {status?.pendingReplies ?? 0}
+                  </p>
+                </div>
+                <div className="rounded-xl border-2 border-border bg-accent/5 p-4 hover:shadow-md transition-shadow">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Last sync</p>
+                  <p className="text-sm font-semibold text-foreground mt-3">
+                    {formatLastSync()}
+                  </p>
+                </div>
               </div>
-              <div className="rounded-xl border-2 border-border bg-accent/5 p-4 hover:shadow-md transition-shadow">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Pending replies</p>
-                <p className="text-2xl font-bold text-primary mt-3">
-                  {status?.pendingReplies ?? 0}
-                </p>
-              </div>
-              <div className="rounded-xl border-2 border-border bg-accent/5 p-4 hover:shadow-md transition-shadow">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Last sync</p>
-                <p className="text-sm font-semibold text-foreground mt-3">
-                  {formatLastSync()}
-                </p>
-              </div>
-            </div>
 
-            <div className="space-y-3">
-              <Button
-                onClick={handleSyncClick}
-                disabled={syncing}
-                size="lg"
-                className="shadow-md hover:shadow-lg w-full sm:w-auto"
-              >
-                {syncing ? "Syncing..." : "Sync sent emails"}
-              </Button>
+              <div className="space-y-3">
+                <Button
+                  onClick={handleSyncClick}
+                  disabled={syncing}
+                  size="lg"
+                  className="shadow-md hover:shadow-lg w-full sm:w-auto"
+                >
+                  {syncing ? "Syncing..." : "Sync sent emails"}
+                </Button>
 
-              {message && (
-                <div className="text-sm font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 border-2 border-emerald-200 dark:border-emerald-900/50 rounded-xl px-5 py-4">
-                  {message}
-                </div>
-              )}
+                {message && (
+                  <div className="text-sm font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 border-2 border-emerald-200 dark:border-emerald-900/50 rounded-xl px-5 py-4">
+                    {message}
+                  </div>
+                )}
 
-              {(error || localError) && (
-                <div className="text-sm font-medium text-destructive bg-destructive/10 border border-destructive/20 rounded-lg px-4 py-3">
-                  {error || localError}
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+                {(error || localError) && (
+                  <div className="text-sm font-medium text-destructive bg-destructive/10 border border-destructive/20 rounded-lg px-4 py-3">
+                    {error || localError}
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
 
-        <Card className="border-border/40 shadow-md">
-          <CardHeader className="pb-6 pt-6 px-6">
-            <CardTitle className="text-base">How syncing works</CardTitle>
-          </CardHeader>
-          <CardContent className="px-6 pb-6">
-            <div className="space-y-3">
-              <div className="flex gap-2">
-                <div className="w-6 h-6 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-                  <svg className="w-3 h-3 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
+          <Card className="border-border/40 shadow-md">
+            <CardHeader className="pb-6 pt-6 px-6">
+              <CardTitle className="text-base">How syncing works</CardTitle>
+            </CardHeader>
+            <CardContent className="px-6 pb-6">
+              <div className="space-y-3">
+                <div className="flex gap-2">
+                  <div className="w-6 h-6 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                    <svg className="w-3 h-3 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-xs font-medium text-foreground">Secure Gmail Integration</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">We fetch your sent emails securely via Gmail OAuth</p>
+                  </div>
                 </div>
-                <div className="flex-1">
-                  <p className="text-xs font-medium text-foreground">Secure Gmail Integration</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">We fetch your sent emails securely via Gmail OAuth</p>
+                <div className="flex gap-2">
+                  <div className="w-6 h-6 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                    <svg className="w-3 h-3 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                    </svg>
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-xs font-medium text-foreground">AI Tone Learning</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Each email is converted into embedding vectors to learn your writing style</p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <div className="w-6 h-6 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                    <svg className="w-3 h-3 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-xs font-medium text-foreground">Continuous Updates</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Re-sync anytime to capture new sent emails and improve accuracy</p>
+                  </div>
                 </div>
               </div>
-              <div className="flex gap-2">
-                <div className="w-6 h-6 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-                  <svg className="w-3 h-3 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-                  </svg>
-                </div>
-                <div className="flex-1">
-                  <p className="text-xs font-medium text-foreground">AI Tone Learning</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">Each email is converted into embedding vectors to learn your writing style</p>
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <div className="w-6 h-6 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-                  <svg className="w-3 h-3 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                </div>
-                <div className="flex-1">
-                  <p className="text-xs font-medium text-foreground">Continuous Updates</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">Re-sync anytime to capture new sent emails and improve accuracy</p>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
 
-        {/* Shopify Integration Settings */}
-        <ShopifySettings />
+          {/* Account Management */}
+          <AccountManager />
+
+          {/* Shopify Integration Settings */}
+          <ShopifySettings />
         </div>
       </div>
     </div>

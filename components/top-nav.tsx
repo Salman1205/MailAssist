@@ -39,7 +39,7 @@ type NotificationItem = {
 interface TopNavProps {
   isConnected: boolean
   userProfile?: UserProfile | null
-  currentUser?: { id: string; name: string; role: string } | null
+  currentUser?: { id: string; name: string; role: string; businessId?: string | null; businessName?: string | null } | null
   onLogout?: () => void
   onSwitchUser?: (userId: string) => void
   onSearch?: (query: string) => void
@@ -193,362 +193,370 @@ export default function TopNav({ isConnected, userProfile, currentUser, onLogout
   }
   const initials = userProfile?.name
     ? userProfile.name
-        .split(" ")
-        .map((n) => n[0])
-        .join("")
-        .slice(0, 2)
-        .toUpperCase()
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase()
     : "ME"
 
   return (
     <>
-    <header className="bg-background/95 backdrop-blur-sm border-b border-border h-16 flex items-center justify-between px-4 md:px-6 gap-2 md:gap-4">
-      <div className="flex items-center gap-2 md:gap-3 min-w-0">
-        <div className="flex-shrink-0 flex items-center gap-2">
-          <Logo size="small" />
+      <header className="bg-background/95 backdrop-blur-sm border-b border-border h-16 flex items-center justify-between px-4 md:px-6 gap-2 md:gap-4">
+        <div className="flex items-center gap-2 md:gap-3 min-w-0">
+          <div className="flex-shrink-0 flex items-center gap-2">
+            <Logo size="small" />
+          </div>
+          <div className="text-base font-bold text-foreground truncate block sm:hidden">MailAssist</div>
         </div>
-        <div className="text-base font-bold text-foreground truncate block sm:hidden">MailAssist</div>
-      </div>
 
-      {/* Global Search - Now visible on all screen sizes */}
-      {isConnected && (
-        <form
-          className="flex items-center gap-2 flex-1 max-w-3xl relative"
-          onSubmit={(e) => {
-            e.preventDefault()
-            const form = e.currentTarget
-            const input = form.querySelector<HTMLInputElement>('input[name="global-search"]')
-            if (input && onSearch) {
-              onSearch(input.value.trim())
-            }
-          }}
-        >
-          <input
-            name="global-search"
-            type="search"
-            placeholder="Search..."
-            className="w-full h-10 px-4 pr-10 rounded-xl border-2 border-border bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all hover:border-primary/50 md:placeholder:text-[length:inherit]"
-            style={{ fontSize: '14px' }}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                const target = e.target as HTMLInputElement
-                target.value = ''
-                target.blur()
-                if (onSearch) onSearch('')
-              }
-            }}
-            onChange={(e) => {
-              if (e.target.value === '' && onSearch) {
-                onSearch('')
-              }
-            }}
-          />
-          {/* Clear button */}
-          <button
-            type="button"
-            onClick={(e) => {
-              const form = e.currentTarget.closest('form')
-              const input = form?.querySelector<HTMLInputElement>('input[name="global-search"]')
-              if (input) {
-                input.value = ''
-                input.focus()
-                if (onSearch) onSearch('')
-              }
-            }}
-            className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center rounded-md hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors opacity-0 hover:opacity-100 focus:opacity-100"
-            aria-label="Clear search"
-            style={{
-              opacity: 'var(--search-has-value, 0)',
-            }}
-            onMouseEnter={(e) => {
-              const form = e.currentTarget.closest('form')
-              const input = form?.querySelector<HTMLInputElement>('input[name="global-search"]')
-              if (input && input.value) {
-                e.currentTarget.style.opacity = '1'
-              }
-            }}
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </form>
-      )}
-
-      <div className="flex items-center gap-2 flex-shrink-0">
+        {/* Global Search - Now visible on all screen sizes */}
         {isConnected && (
-          <Popover
-            open={notificationsOpen}
-            onOpenChange={(open) => {
-              setNotificationsOpen(open)
-              if (open) {
-                setLastOpenedAt(Date.now())
-                setShowNewOnly(false)
-                // Reset baseline for "new" detection to avoid replaying chime on open
-                const unread = notifications.filter(n => !n.isRead)
-                prevUnreadIdsRef.current = new Set(unread.map(n => n.id))
+          <form
+            className="flex items-center gap-2 flex-1 max-w-3xl relative"
+            onSubmit={(e) => {
+              e.preventDefault()
+              const form = e.currentTarget
+              const input = form.querySelector<HTMLInputElement>('input[name="global-search"]')
+              if (input && onSearch) {
+                onSearch(input.value.trim())
               }
             }}
           >
-            <PopoverTrigger asChild>
-              <button className="h-9 w-9 flex items-center justify-center rounded-lg border border-input hover:bg-muted/60 transition-colors relative">
-                <Bell className="w-4 h-4" />
-                {unreadCount > 0 && (
-                  <Badge className="absolute -top-1 -right-1 h-4 min-w-4 px-1 text-[10px]" variant="destructive">{unreadCount}</Badge>
-                )}
-              </button>
-            </PopoverTrigger>
-            <PopoverContent className="w-72 p-0 rounded-lg shadow-lg overflow-hidden" align="end">
-              <div className="flex items-center justify-between p-2 border-b text-xs text-muted-foreground">
-                <span className="font-semibold text-foreground">Notifications</span>
-                <div className="flex items-center gap-2">
-                  <button
-                    className={`text-[11px] ${showNewOnly ? 'text-primary font-semibold' : 'text-muted-foreground hover:text-foreground'}`}
-                    onClick={() => setShowNewOnly((v) => !v)}
-                  >
-                    New since open
-                  </button>
-                  <button
-                    className="text-[11px] text-primary hover:underline"
-                    onClick={() => fetchNotifications()}
-                    disabled={notificationsLoading}
-                  >
-                    Refresh
-                  </button>
-                  <button
-                    className="text-[11px] text-primary hover:underline disabled:text-muted-foreground"
-                    onClick={markAllRead}
-                    disabled={notificationsLoading || unreadCount === 0}
-                  >
-                    Mark all read
-                  </button>
-                </div>
-              </div>
-              <ScrollArea className="h-56">
-                <div className="p-2 space-y-1">
-                  {notificationsLoading ? (
-                    <div className="space-y-2">
-                      {[1,2,3].map(i => (
-                        <div key={i} className="flex items-center gap-3 p-2 rounded border border-border/60 animate-pulse">
-                          <div className="h-8 w-8 rounded-full bg-muted" />
-                          <div className="flex-1 space-y-1">
-                            <div className="h-3 w-24 bg-muted rounded" />
-                            <div className="h-3 w-40 bg-muted rounded" />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (() => {
-                    const filtered = showNewOnly && lastOpenedAt
-                      ? notifications.filter(n => new Date(n.createdAt).getTime() > lastOpenedAt)
-                      : notifications
-
-                    if (filtered.length === 0) {
-                      return (
-                        <div className="p-6 text-center text-sm text-muted-foreground flex flex-col items-center gap-2">
-                          <Inbox className="w-5 h-5" />
-                          <div>{showNewOnly ? 'No new notifications since open' : 'No notifications yet'}</div>
-                          <div className="text-[11px]">Mentions and assignments will appear here.</div>
-                        </div>
-                      )
-                    }
-
-                    return filtered.map(n => (
-                    <button
-                      key={n.id}
-                      className="w-full text-left flex items-start justify-between gap-2 p-2 rounded hover:bg-muted border border-transparent hover:border-border/60 transition-colors"
-                      onClick={() => {
-                        console.log('🔔 Notification clicked:', { ticketId: n.ticketId, type: n.type, message: n.message })
-                        if (n.ticketId) {
-                          console.log('🚀 Navigating to ticket:', n.ticketId)
-                          router.push(`/?ticketId=${n.ticketId}`)
-                        } else {
-                          console.warn('⚠️ Notification has no ticketId!')
-                        }
-                        if (!n.isRead) markRead(n.id)
-                      }}
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className={`h-8 w-8 rounded-full flex items-center justify-center text-xs font-semibold ${n.type === 'mention' ? 'bg-primary/10 text-primary' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200'}`}>
-                          {n.type === 'mention' ? '@' : <Megaphone className="w-4 h-4" />}
-                        </div>
-                        <div className="text-sm space-y-0.5">
-                          <div className="font-medium capitalize leading-tight">{n.type}</div>
-                          <div className="text-muted-foreground text-xs leading-tight">{n.message}</div>
-                          <div className="text-[11px] text-muted-foreground">{formatTimeAgo(n.createdAt)}</div>
-                        </div>
-                      </div>
-                      <div className="flex flex-col items-end gap-1">
-                        {!n.isRead && (
-                          <span className="text-[11px] text-primary">New</span>
-                        )}
-                      </div>
-                    </button>
-                    ))
-                  })()}
-                </div>
-              </ScrollArea>
-            </PopoverContent>
-          </Popover>
-        )}
-        {isConnected && (
-          <button
-            onClick={toggleTheme}
-            className="h-9 w-9 flex items-center justify-center rounded-lg border border-input hover:bg-muted/60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label="Toggle theme"
-            title={isDark ? "Switch to light mode" : "Switch to dark mode"}
-          >
-            {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-          </button>
+            <input
+              name="global-search"
+              type="search"
+              placeholder="Search..."
+              className="w-full h-10 px-4 pr-10 rounded-xl border-2 border-border bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all hover:border-primary/50 md:placeholder:text-[length:inherit]"
+              style={{ fontSize: '14px' }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  const target = e.target as HTMLInputElement
+                  if (onSearch) {
+                    onSearch(target.value.trim())
+                  }
+                } else if (e.key === 'Escape') {
+                  const target = e.target as HTMLInputElement
+                  target.value = ''
+                  target.blur()
+                  if (onSearch) onSearch('')
+                }
+              }}
+              onChange={(e) => {
+                if (e.target.value === '' && onSearch) {
+                  onSearch('')
+                }
+              }}
+            />
+            {/* Clear button */}
+            <button
+              type="button"
+              onClick={(e) => {
+                const form = e.currentTarget.closest('form')
+                const input = form?.querySelector<HTMLInputElement>('input[name="global-search"]')
+                if (input) {
+                  input.value = ''
+                  input.focus()
+                  if (onSearch) onSearch('')
+                }
+              }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center rounded-md hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors opacity-0 hover:opacity-100 focus:opacity-100"
+              aria-label="Clear search"
+              style={{
+                opacity: 'var(--search-has-value, 0)',
+              }}
+              onMouseEnter={(e) => {
+                const form = e.currentTarget.closest('form')
+                const input = form?.querySelector<HTMLInputElement>('input[name="global-search"]')
+                if (input && input.value) {
+                  e.currentTarget.style.opacity = '1'
+                }
+              }}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </form>
         )}
 
-        {isConnected && (
-          <DropdownMenu open={profileMenuOpen} onOpenChange={setProfileMenuOpen}>
-            <DropdownMenuTrigger asChild>
-              <button className="flex items-center gap-2.5 rounded-lg px-3 py-1.5 hover:bg-muted/60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                <div className="hidden text-right sm:block min-w-0">
-                  <div className="text-sm font-medium text-foreground truncate">
-                    {currentUser?.name || userProfile?.name || "Connected"}
-                  </div>
-                  <div className="text-xs text-muted-foreground truncate">
-                    {currentUser?.role 
-                      ? `${currentUser.role.charAt(0).toUpperCase() + currentUser.role.slice(1)}` 
-                      : userProfile?.email || "Loading..."}
-                  </div>
-                </div>
-                <Avatar className="h-8 w-8 flex-shrink-0 border border-border">
-                  {userProfile?.picture ? (
-                    <img src={userProfile.picture} alt={userProfile.name || "User"} className="rounded-full" />
-                  ) : (
-                    <AvatarFallback className="bg-primary text-primary-foreground text-xs font-semibold">
-                      {currentUser?.name 
-                        ? currentUser.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()
-                        : initials}
-                    </AvatarFallback>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {isConnected && (
+            <Popover
+              open={notificationsOpen}
+              onOpenChange={(open) => {
+                setNotificationsOpen(open)
+                if (open) {
+                  setLastOpenedAt(Date.now())
+                  setShowNewOnly(false)
+                  // Reset baseline for "new" detection to avoid replaying chime on open
+                  const unread = notifications.filter(n => !n.isRead)
+                  prevUnreadIdsRef.current = new Set(unread.map(n => n.id))
+                }
+              }}
+            >
+              <PopoverTrigger asChild>
+                <button className="h-9 w-9 flex items-center justify-center rounded-lg border border-input hover:bg-muted/60 transition-colors relative">
+                  <Bell className="w-4 h-4" />
+                  {unreadCount > 0 && (
+                    <Badge className="absolute -top-1 -right-1 h-4 min-w-4 px-1 text-[10px]" variant="destructive">{unreadCount}</Badge>
                   )}
-                </Avatar>
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuItem className="block sm:hidden text-left py-3">
-                <div>
-                  <p className="text-sm font-semibold text-foreground">
-                    {currentUser?.name || userProfile?.name || "Connected"}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {currentUser?.role 
-                      ? `${currentUser.role.charAt(0).toUpperCase() + currentUser.role.slice(1)}` 
-                      : userProfile?.email || "Loading..."}
-                  </p>
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-72 p-0 rounded-lg shadow-lg overflow-hidden" align="end">
+                <div className="flex items-center justify-between p-2 border-b text-xs text-muted-foreground">
+                  <span className="font-semibold text-foreground">Notifications</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      className={`text-[11px] ${showNewOnly ? 'text-primary font-semibold' : 'text-muted-foreground hover:text-foreground'}`}
+                      onClick={() => setShowNewOnly((v) => !v)}
+                    >
+                      New since open
+                    </button>
+                    <button
+                      className="text-[11px] text-primary hover:underline"
+                      onClick={() => fetchNotifications()}
+                      disabled={notificationsLoading}
+                    >
+                      Refresh
+                    </button>
+                    <button
+                      className="text-[11px] text-primary hover:underline disabled:text-muted-foreground"
+                      onClick={markAllRead}
+                      disabled={notificationsLoading || unreadCount === 0}
+                    >
+                      Mark all read
+                    </button>
+                  </div>
                 </div>
-              </DropdownMenuItem>
-              <DropdownMenuSeparator className="block sm:hidden" />
-              {onSwitchUser && (
-                <>
-                  <DropdownMenuItem 
-                    onSelect={(e) => {
-                      e.preventDefault()
-                      fetchUsers()
-                      setShowUserDialog(true)
-                    }}
-                    className="cursor-pointer"
-                  >
-                    <Users className="w-4 h-4 mr-2" />
-                    <span>Switch User</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                </>
-              )}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={onLogout} className="text-destructive cursor-pointer">
-                Logout
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-      </div>
-    </header>
+                <ScrollArea className="h-56">
+                  <div className="p-2 space-y-1">
+                    {notificationsLoading ? (
+                      <div className="space-y-2">
+                        {[1, 2, 3].map(i => (
+                          <div key={i} className="flex items-center gap-3 p-2 rounded border border-border/60 animate-pulse">
+                            <div className="h-8 w-8 rounded-full bg-muted" />
+                            <div className="flex-1 space-y-1">
+                              <div className="h-3 w-24 bg-muted rounded" />
+                              <div className="h-3 w-40 bg-muted rounded" />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (() => {
+                      const filtered = showNewOnly && lastOpenedAt
+                        ? notifications.filter(n => new Date(n.createdAt).getTime() > lastOpenedAt)
+                        : notifications
 
-    {/* Switch User Dialog rendered at root to stay mounted when menu closes */}
-    {isConnected && onSwitchUser && (
-      <Dialog open={showUserDialog} onOpenChange={setShowUserDialog}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
-                <Users className="w-4 h-4 text-primary" />
-              </div>
-              Switch User
-            </DialogTitle>
-            <DialogDescription className="text-xs mt-1">
-              Select a team member to manage their account
-            </DialogDescription>
-          </DialogHeader>
-          <div className="py-4">
-            {loadingUsers ? (
-              <div className="text-sm text-muted-foreground text-center py-8 flex flex-col items-center gap-3">
-                <div className="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
-                <span>Loading users...</span>
-              </div>
-            ) : users.length === 0 ? (
-              <div className="text-sm text-muted-foreground text-center py-8">
-                No users found
-              </div>
-            ) : (
-              <div className="space-y-2 max-h-[320px] overflow-y-auto pr-2">
-                {users.map((user, index) => (
-                  <button
-                    key={user.id}
-                    onClick={() => handleSwitchUser(user.id)}
-                    className={`w-full text-left group transition-all duration-200 rounded-lg animate-in fade-in slide-in-from-bottom-2`}
-                    style={{ animationDelay: `${index * 50}ms` }}
-                  >
-                    <div className={`p-3 border-2 rounded-lg transition-all duration-200 ${
-                      user.id === currentUser?.id
+                      if (filtered.length === 0) {
+                        return (
+                          <div className="p-6 text-center text-sm text-muted-foreground flex flex-col items-center gap-2">
+                            <Inbox className="w-5 h-5" />
+                            <div>{showNewOnly ? 'No new notifications since open' : 'No notifications yet'}</div>
+                            <div className="text-[11px]">Mentions and assignments will appear here.</div>
+                          </div>
+                        )
+                      }
+
+                      return filtered.map(n => (
+                        <button
+                          key={n.id}
+                          className="w-full text-left flex items-start justify-between gap-2 p-2 rounded hover:bg-muted border border-transparent hover:border-border/60 transition-colors"
+                          onClick={() => {
+                            console.log('🔔 Notification clicked:', { ticketId: n.ticketId, type: n.type, message: n.message })
+                            if (n.ticketId) {
+                              console.log('🚀 Navigating to ticket:', n.ticketId)
+                              router.push(`/?ticketId=${n.ticketId}`)
+                            } else {
+                              console.warn('⚠️ Notification has no ticketId!')
+                            }
+                            if (!n.isRead) markRead(n.id)
+                          }}
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className={`h-8 w-8 rounded-full flex items-center justify-center text-xs font-semibold ${n.type === 'mention' ? 'bg-primary/10 text-primary' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200'}`}>
+                              {n.type === 'mention' ? '@' : <Megaphone className="w-4 h-4" />}
+                            </div>
+                            <div className="text-sm space-y-0.5">
+                              <div className="font-medium capitalize leading-tight">{n.type}</div>
+                              <div className="text-muted-foreground text-xs leading-tight">{n.message}</div>
+                              <div className="text-[11px] text-muted-foreground">{formatTimeAgo(n.createdAt)}</div>
+                            </div>
+                          </div>
+                          <div className="flex flex-col items-end gap-1">
+                            {!n.isRead && (
+                              <span className="text-[11px] text-primary">New</span>
+                            )}
+                          </div>
+                        </button>
+                      ))
+                    })()}
+                  </div>
+                </ScrollArea>
+              </PopoverContent>
+            </Popover>
+          )}
+          {isConnected && (
+            <button
+              onClick={toggleTheme}
+              className="h-9 w-9 flex items-center justify-center rounded-lg border border-input hover:bg-muted/60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label="Toggle theme"
+              title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+            >
+              {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
+          )}
+
+          {isConnected && (
+            <DropdownMenu open={profileMenuOpen} onOpenChange={setProfileMenuOpen}>
+              <DropdownMenuTrigger asChild>
+                <button className="flex items-center gap-2.5 rounded-lg px-3 py-1.5 hover:bg-muted/60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  <div className="hidden text-right sm:block min-w-0">
+                    <div className="text-sm font-medium text-foreground truncate flex items-center gap-2">
+                      {currentUser?.name || userProfile?.name || "Connected"}
+                      {currentUser?.businessName && (
+                        <Badge variant="outline" className="text-[10px] h-4 px-1.5 bg-primary/10 text-primary border-primary/20 font-bold uppercase tracking-wider">
+                          {currentUser.businessName}
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="text-xs text-muted-foreground truncate">
+                      {currentUser?.role && currentUser.role !== 'user'
+                        ? `${currentUser.role.charAt(0).toUpperCase() + currentUser.role.slice(1)}`
+                        : userProfile?.email || "Loading..."}
+                    </div>
+                  </div>
+                  <Avatar className="h-8 w-8 flex-shrink-0 border border-border">
+                    {userProfile?.picture ? (
+                      <img src={userProfile.picture} alt={userProfile.name || "User"} className="rounded-full" />
+                    ) : (
+                      <AvatarFallback className="bg-primary text-primary-foreground text-xs font-semibold">
+                        {currentUser?.name
+                          ? currentUser.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()
+                          : initials}
+                      </AvatarFallback>
+                    )}
+                  </Avatar>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem className="block sm:hidden text-left py-3">
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">
+                      {currentUser?.name || userProfile?.name || "Connected"}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {currentUser?.role
+                        ? `${currentUser.role.charAt(0).toUpperCase() + currentUser.role.slice(1)}`
+                        : userProfile?.email || "Loading..."}
+                    </p>
+                  </div>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator className="block sm:hidden" />
+                {onSwitchUser && (
+                  <>
+                    <DropdownMenuItem
+                      onSelect={(e) => {
+                        e.preventDefault()
+                        fetchUsers()
+                        setShowUserDialog(true)
+                      }}
+                      className="cursor-pointer"
+                    >
+                      <Users className="w-4 h-4 mr-2" />
+                      <span>Switch User</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                  </>
+                )}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={onLogout} className="text-destructive cursor-pointer">
+                  Logout
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
+      </header>
+
+      {/* Switch User Dialog rendered at root to stay mounted when menu closes */}
+      {isConnected && onSwitchUser && (
+        <Dialog open={showUserDialog} onOpenChange={setShowUserDialog}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <Users className="w-4 h-4 text-primary" />
+                </div>
+                Switch User
+              </DialogTitle>
+              <DialogDescription className="text-xs mt-1">
+                Select a team member to manage their account
+              </DialogDescription>
+            </DialogHeader>
+            <div className="py-4">
+              {loadingUsers ? (
+                <div className="text-sm text-muted-foreground text-center py-8 flex flex-col items-center gap-3">
+                  <div className="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                  <span>Loading users...</span>
+                </div>
+              ) : users.length === 0 ? (
+                <div className="text-sm text-muted-foreground text-center py-8">
+                  No users found
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-[320px] overflow-y-auto pr-2">
+                  {users.map((user, index) => (
+                    <button
+                      key={user.id}
+                      onClick={() => handleSwitchUser(user.id)}
+                      className={`w-full text-left group transition-all duration-200 rounded-lg animate-in fade-in slide-in-from-bottom-2`}
+                      style={{ animationDelay: `${index * 50}ms` }}
+                    >
+                      <div className={`p-3 border-2 rounded-lg transition-all duration-200 ${user.id === currentUser?.id
                         ? "border-primary bg-gradient-to-r from-primary/10 to-primary/5 shadow-md ring-2 ring-primary/20"
                         : "border-border/50 hover:border-primary/40 hover:bg-muted/50 hover:shadow-sm"
-                    }`}>
-                      <div className="flex items-center gap-3">
-                        <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 transition-all ${
-                          user.id === currentUser?.id
+                        }`}>
+                        <div className="flex items-center gap-3">
+                          <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 transition-all ${user.id === currentUser?.id
                             ? "bg-primary text-white shadow-sm"
                             : "bg-primary/10 text-primary group-hover:bg-primary/20"
-                        }`}>
-                          <User className="w-4 h-4" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="font-medium text-sm text-foreground">{user.name}</div>
-                          {user.email && (
-                            <div className="text-xs text-muted-foreground truncate mt-0.5">
-                              {user.email}
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                          <Badge 
-                            variant="outline" 
-                            className={`text-xs px-2 py-0.5 capitalize font-semibold ${
-                              user.id === currentUser?.id 
-                                ? "border-primary bg-primary/10 text-primary" 
+                            }`}>
+                            <User className="w-4 h-4" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-sm text-foreground">{user.name}</div>
+                            {user.email && (
+                              <div className="text-xs text-muted-foreground truncate mt-0.5">
+                                {user.email}
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                            <Badge
+                              variant="outline"
+                              className={`text-xs px-2 py-0.5 capitalize font-semibold ${user.id === currentUser?.id
+                                ? "border-primary bg-primary/10 text-primary"
                                 : "border-border/50 bg-transparent"
-                            }`}
-                          >
-                            {user.role}
-                          </Badge>
-                          {user.id === currentUser?.id && (
-                            <span className="text-[10px] text-primary font-medium">Active</span>
-                          )}
+                                }`}
+                            >
+                              {user.role}
+                            </Badge>
+                            {user.id === currentUser?.id && (
+                              <span className="text-[10px] text-primary font-medium">Active</span>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
-    )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </>
   )
 }

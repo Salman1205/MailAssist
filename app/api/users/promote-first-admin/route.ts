@@ -9,17 +9,20 @@ import { getSessionUserEmailFromRequest } from '@/lib/session';
 
 export async function POST(request: NextRequest) {
   try {
-    const sharedGmailEmail = getSessionUserEmailFromRequest(request);
-    if (!sharedGmailEmail) {
+    const { validateBusinessSession, getSessionUserEmail } = await import('@/lib/session');
+    const businessSession = await validateBusinessSession();
+    const sharedGmailEmail = await getSessionUserEmail();
+
+    if (!businessSession && !sharedGmailEmail) {
       return NextResponse.json(
-        { error: 'Not authenticated. Please connect Gmail first.' },
+        { error: 'Not authenticated. Please connect Gmail or log in first.' },
         { status: 401 }
       );
     }
 
     // Get all users for this account
-    const users = await getAllUsers();
-    
+    const users = await getAllUsers(businessSession?.businessId, sharedGmailEmail);
+
     if (users.length === 0) {
       return NextResponse.json(
         { error: 'No users found' },
@@ -28,14 +31,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Find the first user (oldest by created_at)
-    const sortedUsers = users.sort((a, b) => 
+    const sortedUsers = users.sort((a, b) =>
       new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
     );
     const firstUser = sortedUsers[0];
 
     // Check if there's already an admin
     const hasAdmin = users.some(u => u.role === 'admin' && u.isActive);
-    
+
     if (hasAdmin) {
       return NextResponse.json(
         { error: 'An admin user already exists. Use the Team management page to change roles.' },
@@ -58,7 +61,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ 
+    return NextResponse.json({
       success: true,
       message: `User "${updatedUser.name}" has been promoted to admin`,
       user: updatedUser

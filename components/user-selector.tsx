@@ -66,12 +66,12 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
     // Check if any admin exists
     const adminExists = users.some(u => u.role === "admin" && u.isActive)
     setHasAdmin(adminExists)
-    
+
     // If no users exist, default role to admin for first user
     if (users.length === 0 && newUserRole !== "admin") {
       setNewUserRole("admin")
     }
-    
+
     // Find current user if currentUserId is provided
     if (currentUserId && users.length > 0) {
       const user = users.find(u => u.id === currentUserId)
@@ -83,6 +83,15 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
     try {
       setLoading(true)
       const response = await fetch("/api/auth/select-user")
+
+      // If 401 (not authenticated), treat as "no users yet" instead of error
+      if (response.status === 401) {
+        setUsers([])
+        setError(null)
+        setLoading(false)
+        return
+      }
+
       if (!response.ok) {
         throw new Error("Failed to fetch users")
       }
@@ -109,14 +118,14 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
       }
 
       const data = await response.json()
-      
+
       // Store in sessionStorage for this tab
       if (typeof window !== "undefined") {
         sessionStorage.setItem("current_user_id", userId)
         sessionStorage.setItem("current_user_name", data.user.name)
         sessionStorage.setItem("current_user_role", data.user.role)
       }
-      
+
       onUserSelected(userId)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to select user")
@@ -157,16 +166,21 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
       setNewUserName("")
       setNewUserEmail("")
       setNewUserRole(users.length === 0 ? "admin" : "agent")
-      await fetchUsers()
-      
-      // If this was the first user (now admin), auto-select them
-      if (users.length === 0 && data.user && data.user.role === "admin") {
-        // Auto-select the first admin user
-        setTimeout(() => {
-          handleSelectUser(data.user.id)
-        }, 500)
+
+      // If auto-selected (first admin), immediately redirect
+      if (data.autoSelected && data.user) {
+        // Store in sessionStorage for this tab
+        if (typeof window !== "undefined") {
+          sessionStorage.setItem("current_user_id", data.user.id)
+          sessionStorage.setItem("current_user_name", data.user.name)
+          sessionStorage.setItem("current_user_role", data.user.role)
+        }
+        onUserSelected(data.user.id)
+        return
       }
-      
+
+      await fetchUsers()
+
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create user")
@@ -304,9 +318,9 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
                         <span>The first user must be Admin to manage the system.</span>
                       </p>
                     </div>
-                    <Button 
-                      onClick={handleCreateUser} 
-                      disabled={creating || !newUserName.trim() || newUserRole !== "admin"} 
+                    <Button
+                      onClick={handleCreateUser}
+                      disabled={creating || !newUserName.trim() || newUserRole !== "admin"}
                       className="w-full shadow-sm h-11 text-base font-semibold"
                     >
                       {creating ? (
@@ -345,17 +359,15 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
                           }
                         }}
                       >
-                        <div className={`p-5 border-2 rounded-xl transition-all duration-200 ${
-                          isSelected
-                            ? "border-primary bg-gradient-to-r from-primary/15 via-primary/10 to-primary/5 shadow-lg ring-2 ring-primary/20 scale-[1.02]"
-                            : "border-border/40 bg-card hover:border-primary/50 hover:bg-muted/40 hover:shadow-lg hover:scale-[1.01] active:scale-[0.99]"
-                        }`}>
+                        <div className={`p-5 border-2 rounded-xl transition-all duration-200 ${isSelected
+                          ? "border-primary bg-gradient-to-r from-primary/15 via-primary/10 to-primary/5 shadow-lg ring-2 ring-primary/20 scale-[1.02]"
+                          : "border-border/40 bg-card hover:border-primary/50 hover:bg-muted/40 hover:shadow-lg hover:scale-[1.01] active:scale-[0.99]"
+                          }`}>
                           <div className="flex items-center gap-4">
-                            <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 transition-all duration-200 ${
-                              isSelected 
-                                ? "bg-gradient-to-br from-primary to-primary/80 text-white shadow-lg scale-110" 
-                                : "bg-gradient-to-br from-primary/10 to-primary/5 text-primary group-hover:from-primary/20 group-hover:to-primary/10 group-hover:scale-105"
-                            }`}>
+                            <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 transition-all duration-200 ${isSelected
+                              ? "bg-gradient-to-br from-primary to-primary/80 text-white shadow-lg scale-110"
+                              : "bg-gradient-to-br from-primary/10 to-primary/5 text-primary group-hover:from-primary/20 group-hover:to-primary/10 group-hover:scale-105"
+                              }`}>
                               <User className={`transition-all duration-200 ${isSelected ? 'w-6 h-6' : 'w-5 h-5'}`} />
                             </div>
                             <div className="flex-1 min-w-0">
@@ -367,9 +379,8 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
                               )}
                             </div>
                             <div className="flex flex-col items-end gap-2 flex-shrink-0">
-                              <span className={`text-xs font-bold px-3 py-1.5 rounded-lg capitalize border shadow-sm transition-all ${
-                                getRoleColor(user.role)
-                              } ${isSelected ? 'scale-105' : ''}`}>
+                              <span className={`text-xs font-bold px-3 py-1.5 rounded-lg capitalize border shadow-sm transition-all ${getRoleColor(user.role)
+                                } ${isSelected ? 'scale-105' : ''}`}>
                                 {user.role}
                               </span>
                               {isSelected && (
@@ -391,92 +402,92 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
                 <div className="pt-2">
                   <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
                     <DialogTrigger asChild>
-                      <Button 
-                        variant="outline" 
+                      <Button
+                        variant="outline"
                         className="w-full border-2 border-dashed hover:border-primary hover:bg-primary/5 transition-all shadow-sm hover:shadow-md h-12 text-sm font-semibold"
                       >
                         <User className="w-4 h-4 mr-2" />
                         Create New User
                       </Button>
                     </DialogTrigger>
-                  <DialogContent className="max-w-md">
-                    <DialogHeader>
-                      <DialogTitle className="flex items-center gap-3 text-xl">
-                        <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                          <User className="w-5 h-5 text-primary" />
+                    <DialogContent className="max-w-md">
+                      <DialogHeader>
+                        <DialogTitle className="flex items-center gap-3 text-xl">
+                          <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                            <User className="w-5 h-5 text-primary" />
+                          </div>
+                          Create New User
+                        </DialogTitle>
+                        <DialogDescription className="text-sm">
+                          {!hasAdmin
+                            ? "Add a new team member. At least one Admin is required."
+                            : "Add a new team member to this account"}
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-5 pt-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="new-name" className="text-sm font-semibold">Name *</Label>
+                          <Input
+                            id="new-name"
+                            value={newUserName}
+                            onChange={(e) => setNewUserName(e.target.value)}
+                            placeholder="e.g., Ali"
+                            className="shadow-sm h-11"
+                          />
                         </div>
-                        Create New User
-                      </DialogTitle>
-                      <DialogDescription className="text-sm">
-                        {!hasAdmin 
-                          ? "Add a new team member. At least one Admin is required."
-                          : "Add a new team member to this account"}
-                      </DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-5 pt-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="new-name" className="text-sm font-semibold">Name *</Label>
-                        <Input
-                          id="new-name"
-                          value={newUserName}
-                          onChange={(e) => setNewUserName(e.target.value)}
-                          placeholder="e.g., Ali"
-                          className="shadow-sm h-11"
-                        />
+                        <div className="space-y-2">
+                          <Label htmlFor="new-email" className="text-sm font-semibold">Email (optional)</Label>
+                          <Input
+                            id="new-email"
+                            type="email"
+                            value={newUserEmail}
+                            onChange={(e) => setNewUserEmail(e.target.value)}
+                            placeholder="personal@example.com"
+                            className="shadow-sm h-11"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="new-role" className="text-sm font-semibold">Role *</Label>
+                          <Select value={newUserRole} onValueChange={(v: any) => setNewUserRole(v)}>
+                            <SelectTrigger className="shadow-sm h-11">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="admin" className="py-3">
+                                <span className="font-medium">Admin</span>
+                              </SelectItem>
+                              <SelectItem value="manager" className="py-3">
+                                <span className="font-medium">Manager</span>
+                              </SelectItem>
+                              <SelectItem value="agent" className="py-3">
+                                <span className="font-medium">Agent</span>
+                              </SelectItem>
+                            </SelectContent>
+                          </Select>
+                          {!hasAdmin && (
+                            <p className="text-xs text-[var(--status-medium)] mt-2 flex items-start gap-1.5">
+                              <span className="text-base leading-none">⚠️</span>
+                              <span>No admin exists. You must create at least one admin user.</span>
+                            </p>
+                          )}
+                        </div>
+                        <Button
+                          onClick={handleCreateUser}
+                          disabled={creating || !newUserName.trim()}
+                          className="w-full shadow-sm h-11 text-base font-semibold"
+                        >
+                          {creating ? (
+                            <>
+                              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2" />
+                              Creating...
+                            </>
+                          ) : (
+                            "Create User"
+                          )}
+                        </Button>
                       </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="new-email" className="text-sm font-semibold">Email (optional)</Label>
-                        <Input
-                          id="new-email"
-                          type="email"
-                          value={newUserEmail}
-                          onChange={(e) => setNewUserEmail(e.target.value)}
-                          placeholder="personal@example.com"
-                          className="shadow-sm h-11"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="new-role" className="text-sm font-semibold">Role *</Label>
-                        <Select value={newUserRole} onValueChange={(v: any) => setNewUserRole(v)}>
-                          <SelectTrigger className="shadow-sm h-11">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="admin" className="py-3">
-                              <span className="font-medium">Admin</span>
-                            </SelectItem>
-                            <SelectItem value="manager" className="py-3">
-                              <span className="font-medium">Manager</span>
-                            </SelectItem>
-                            <SelectItem value="agent" className="py-3">
-                              <span className="font-medium">Agent</span>
-                            </SelectItem>
-                          </SelectContent>
-                        </Select>
-                        {!hasAdmin && (
-                          <p className="text-xs text-[var(--status-medium)] mt-2 flex items-start gap-1.5">
-                            <span className="text-base leading-none">⚠️</span>
-                            <span>No admin exists. You must create at least one admin user.</span>
-                          </p>
-                        )}
-                      </div>
-                      <Button 
-                        onClick={handleCreateUser} 
-                        disabled={creating || !newUserName.trim()} 
-                        className="w-full shadow-sm h-11 text-base font-semibold"
-                      >
-                        {creating ? (
-                          <>
-                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2" />
-                            Creating...
-                          </>
-                        ) : (
-                          "Create User"
-                        )}
-                      </Button>
-                    </div>
-                  </DialogContent>
-                </Dialog>
+                    </DialogContent>
+                  </Dialog>
                 </div>
               )}
             </>
@@ -495,9 +506,9 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
                   </p>
                 </div>
               </div>
-              <Button 
-                variant="outline" 
-                size="default" 
+              <Button
+                variant="outline"
+                size="default"
                 onClick={() => setShowPromoteDialog(true)}
                 className="w-full font-semibold border-[var(--status-medium)]/40 hover:border-[var(--status-medium)] hover:bg-[var(--status-medium)]/10"
               >

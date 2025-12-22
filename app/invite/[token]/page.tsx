@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, Suspense } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -10,6 +10,18 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Lock, Eye, EyeOff, CheckCircle2, Mail, Building2, UserPlus, XCircle } from "lucide-react"
 
 export default function AcceptInvitationPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex h-screen w-screen items-center justify-center bg-slate-950">
+        <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    }>
+      <AcceptInvitationContent />
+    </Suspense>
+  )
+}
+
+function AcceptInvitationContent() {
   const params = useParams()
   const router = useRouter()
   const token = params.token as string

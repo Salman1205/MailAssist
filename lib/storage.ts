@@ -24,7 +24,7 @@ export async function getCurrentUserEmail(): Promise<string | null> {
     if (sessionEmail) {
       return sessionEmail;
     }
-    
+
     // If no session cookie, return null - don't try to guess from database
     // This ensures each device only accesses its own account's data
     return null;
@@ -46,6 +46,8 @@ export interface StoredEmail {
   labels?: string[];
   isSent: boolean; // true for sent emails, false for received
   isReply?: boolean;
+  snippet?: string;
+  ownerEmail?: string; // The account that received/sent this email
 }
 
 export interface StoredDraft {
@@ -65,6 +67,10 @@ export interface StoredTokens {
   expiry_date?: number | null;
   token_type?: string | null;
   scope?: string | null;
+  // New fields for multi-provider support
+  provider?: 'gmail' | 'imap';
+  imap_config?: any;
+  smtp_config?: any;
   [key: string]: any;
 }
 
@@ -100,11 +106,11 @@ export async function loadStoredEmails(options?: {
   }
 
   const userEmail = await getCurrentUserEmail();
-  
+
   let query = supabase
     .from('emails')
     .select('*');
-  
+
   // If specific email ID requested, use indexed query (much faster)
   if (options?.emailId) {
     query = query.eq('id', options.emailId);
@@ -114,17 +120,17 @@ export async function loadStoredEmails(options?: {
       query = query.eq('is_sent', true);
     }
   }
-  
+
   // Only filter by user_email if we have it and column exists
   if (userEmail) {
     query = query.eq('user_email', userEmail);
   }
-  
+
   // Apply limit if specified (for pagination/caching)
   if (options?.limit) {
     query = query.limit(options.limit);
   }
-  
+
   const { data, error } = await query.order('date', { ascending: false });
 
   if (error) {
@@ -145,6 +151,8 @@ export async function loadStoredEmails(options?: {
     labels: row.labels || [],
     isSent: row.is_sent,
     isReply: row.is_reply ?? undefined,
+    snippet: row.snippet,
+    ownerEmail: row.owner_email,
   }));
 }
 
@@ -157,17 +165,17 @@ export async function getStoredEmailById(emailId: string): Promise<StoredEmail |
   }
 
   const userEmail = await getCurrentUserEmail();
-  
+
   let query = supabase
     .from('emails')
     .select('*')
     .eq('id', emailId)
     .limit(1);
-  
+
   if (userEmail) {
     query = query.eq('user_email', userEmail);
   }
-  
+
   const { data, error } = await query.maybeSingle();
 
   if (error) {
@@ -219,13 +227,15 @@ export async function saveStoredEmails(emails: StoredEmail[], retries = 1) {
       labels: email.labels ?? [],
       is_sent: email.isSent,
       is_reply: email.isReply ?? null,
+      snippet: email.snippet,
+      owner_email: email.ownerEmail,
     };
-    
+
     // Only add user_email if we have it (column might not exist yet)
     if (userEmail) {
       payload.user_email = userEmail;
     }
-    
+
     return payload;
   });
 
@@ -252,6 +262,8 @@ export async function saveStoredEmails(emails: StoredEmail[], retries = 1) {
           labels: email.labels ?? [],
           is_sent: email.isSent,
           is_reply: email.isReply ?? null,
+          snippet: email.snippet,
+          owner_email: email.ownerEmail,
         };
         if (userEmail) {
           payload.user_email = userEmail;
@@ -273,16 +285,16 @@ export async function loadDrafts(userId?: string | null): Promise<StoredDraft[]>
   }
 
   const userEmail = await getCurrentUserEmail();
-  
+
   let query = supabase.from('drafts').select('*');
-  
+
   // Filter by created_by (user ID) if provided, otherwise fall back to user_email
   if (userId) {
     query = query.eq('created_by', userId);
   } else if (userEmail) {
     query = query.eq('user_email', userEmail);
   }
-  
+
   const { data, error } = await query.order('created_at', { ascending: false });
 
   if (error) {
@@ -344,7 +356,7 @@ export async function deleteDraft(draftId: string, userId?: string | null) {
   }
 
   let query = supabase.from('drafts').delete().eq('id', draftId);
-  
+
   // Filter by created_by (user ID) if provided, otherwise fall back to user_email
   if (userId) {
     query = query.eq('created_by', userId);
@@ -383,13 +395,13 @@ export async function storeSentEmail(email: {
         .select('id, embedding')
         .eq('id', email.id)
         .eq('is_sent', true);
-      
+
       if (userEmail) {
         query = query.eq('user_email', userEmail);
       }
-      
+
       const { data: existingEmail } = await query.limit(1).maybeSingle();
-      
+
       // If email exists and has embedding, return early (skip re-embedding)
       if (existingEmail && existingEmail.embedding && Array.isArray(existingEmail.embedding) && existingEmail.embedding.length > 0) {
         // Return the existing email structure (we'll need to load it fully if needed)
@@ -412,13 +424,13 @@ export async function storeSentEmail(email: {
       console.warn('Could not check existing email, continuing with normal flow:', error);
     }
   }
-  
+
   // Check if email exists using optimized query
   const existing = await getStoredEmailById(email.id);
-  
+
   // Determine if this is a reply (check email.isReply or infer from subject)
   const isReply = email.isReply ?? /^(re|fwd?):\s*/i.test(email.subject || '');
-  
+
   // Double-check: if existing email has embedding, skip
   if (existing && existing.embedding.length > 0) {
     return existing; // Already processed with embedding
@@ -449,7 +461,7 @@ export async function storeSentEmail(email: {
     console.error(`[STORAGE] Error generating embedding for email ${email.id}:`, errorMessage);
     console.error('[STORAGE] Full error details:', error);
     console.error('[STORAGE] Stack trace:', error instanceof Error ? error.stack : 'N/A');
-    
+
     // Store without embedding if embedding generation fails
     // This allows the app to continue working even if some embeddings fail
     const storedEmail: StoredEmail = {
@@ -459,7 +471,7 @@ export async function storeSentEmail(email: {
       isSent: true,
       isReply: isReply,
     };
-    
+
     // Save the email (upsert will handle existing)
     await saveStoredEmails([storedEmail]);
     return storedEmail;
@@ -519,8 +531,9 @@ export async function getSentEmails(): Promise<StoredEmail[]> {
 /**
  * Load stored OAuth tokens for a specific user
  * @param userEmail - Optional user email to filter tokens. If not provided, uses session cookie.
+ * @param businessId - Optional business ID to filter tokens.
  */
-export async function loadTokens(userEmail?: string | null): Promise<StoredTokens | null> {
+export async function loadTokens(userEmail?: string | null, businessId?: string): Promise<StoredTokens | null> {
   if (!supabase) {
     return null;
   }
@@ -528,7 +541,7 @@ export async function loadTokens(userEmail?: string | null): Promise<StoredToken
   try {
     // Get user email from parameter or session cookie
     let targetUserEmail = userEmail;
-    if (!targetUserEmail) {
+    if (!targetUserEmail && !businessId) {
       targetUserEmail = await getSessionUserEmail();
     }
 
@@ -537,9 +550,14 @@ export async function loadTokens(userEmail?: string | null): Promise<StoredToken
       .select('*')
       .order('updated_at', { ascending: false });
 
-    // Filter by user_email if we have it (critical for multi-user security)
+    // Filter by user_email if we have it
     if (targetUserEmail) {
       query = query.eq('user_email', targetUserEmail);
+    }
+
+    // Filter by business_id if provided
+    if (businessId) {
+      query = query.eq('business_id', businessId);
     }
 
     const { data, error } = await query.limit(1).maybeSingle();
@@ -562,6 +580,9 @@ export async function loadTokens(userEmail?: string | null): Promise<StoredToken
       expiry_date: data.expiry_date,
       token_type: data.token_type,
       scope: data.scope,
+      provider: data.provider || 'gmail',
+      imap_config: data.imap_config,
+      smtp_config: data.smtp_config,
     };
 
     return tokens;
@@ -572,11 +593,63 @@ export async function loadTokens(userEmail?: string | null): Promise<StoredToken
 }
 
 /**
+ * Load ALL stored OAuth tokens for a business
+ */
+export async function loadBusinessTokens(businessId: string | null, userEmail?: string | null): Promise<Array<{ email: string, tokens: StoredTokens }>> {
+  if (!supabase || (!businessId && !userEmail)) {
+    return [];
+  }
+
+  try {
+    let query = supabase
+      .from('tokens')
+      .select('*');
+
+    if (businessId && userEmail) {
+      // If both are provided, fetch tokens for business OR this specific user
+      query = query.or(`business_id.eq.${businessId},user_email.eq.${userEmail}`);
+    } else if (businessId) {
+      // Only business ID provided
+      query = query.eq('business_id', businessId);
+    } else if (userEmail) {
+      // Only user email provided (personal account case)
+      query = query.eq('user_email', userEmail).is('business_id', null);
+    } else {
+      return [];
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Error loading business tokens:', error);
+      return [];
+    }
+
+    return (data || []).map((row: any) => ({
+      email: row.user_email,
+      tokens: {
+        access_token: row.access_token,
+        refresh_token: row.refresh_token,
+        expiry_date: row.expiry_date,
+        token_type: row.token_type,
+        scope: row.scope,
+        provider: row.provider || 'gmail',
+        imap_config: row.imap_config,
+        smtp_config: row.smtp_config,
+      }
+    }));
+  } catch (error) {
+    console.error('Error loading business tokens:', error);
+    return [];
+  }
+}
+
+/**
  * Save OAuth tokens for a specific user
  * CRITICAL: Only deletes tokens for this user, not all users (prevents cross-user data access)
  * @returns The user email if successful, null if failed
  */
-export async function saveTokens(tokens: StoredTokens): Promise<string | null> {
+export async function saveTokens(tokens: StoredTokens, businessId?: string | null): Promise<string | null> {
   if (!supabase) {
     console.error('Cannot save tokens: Supabase client not initialized');
     return null;
@@ -602,21 +675,22 @@ export async function saveTokens(tokens: StoredTokens): Promise<string | null> {
     throw new Error('User email is required to save tokens securely');
   }
 
-  // CRITICAL SECURITY FIX: Only delete tokens for THIS user, not all users
+  // CRITICAL SECURITY FIX: Only delete tokens for THIS user AND THIS CONTEXT
   // This prevents one user's login from affecting another user's session
-  // Delete first, then insert to ensure only one token row per user
+  // and separates Personal (business_id=null) from Business (business_id=xyz) contexts
   try {
-    await supabase.from('tokens').delete().eq('user_email', userEmail);
-  } catch (deleteError) {
-    // If user_email column doesn't exist, try deleting all (backward compatibility)
-    // But this should only happen during migration
-    console.warn('user_email column might not exist, using fallback delete:', deleteError);
-    try {
-      await supabase.from('tokens').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    } catch (fallbackError) {
-      // Ignore delete errors - table might be empty or have different structure
-      console.warn('Fallback delete also failed:', fallbackError);
+    let deleteQuery = supabase.from('tokens').delete().eq('user_email', userEmail);
+
+    if (businessId) {
+      deleteQuery = deleteQuery.eq('business_id', businessId);
+    } else {
+      // For personal accounts, business_id is null
+      deleteQuery = deleteQuery.is('business_id', null);
     }
+
+    await deleteQuery;
+  } catch (deleteError) {
+    console.warn('Error deleting old tokens:', deleteError);
   }
 
   // Build insert payload (only include fields that definitely exist)
@@ -627,14 +701,43 @@ export async function saveTokens(tokens: StoredTokens): Promise<string | null> {
     token_type: tokens.token_type ?? null,
     scope: tokens.scope ?? null,
     user_email: userEmail, // Always include user_email for proper scoping
+    provider: tokens.provider || 'gmail',
+    imap_config: tokens.imap_config,
+    smtp_config: tokens.smtp_config,
+    business_id: businessId || null // Explicitly set business_id
   };
 
-  // Try to insert tokens (after deleting old ones for this user)
+  // Try to insert tokens (after deleting old ones for this specific context)
   const { error } = await supabase.from('tokens').insert(insertPayload);
 
   if (error) {
-    // If error is about user_email column not existing, try without it
-    if (error.message?.includes('user_email') || error.message?.includes('column')) {
+    console.warn('Error saving tokens, checking for schema mismatch:', error.message);
+
+    // Fallback: If error suggests missing columns (provider, imap_config, etc.), try saving without them
+    // This handles the case where the user hasn't run the migration yet
+    if (error.message?.includes('column') || error.message?.includes('provider') || error.message?.includes('imap_config')) {
+      console.warn('Schema mismatch detected. Retrying with legacy schema (Gmail only)...');
+
+      const legacyPayload = {
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token ?? null,
+        expiry_date: tokens.expiry_date ?? null,
+        token_type: tokens.token_type ?? null,
+        scope: tokens.scope ?? null,
+        user_email: userEmail,
+        business_id: businessId
+      };
+
+      const { error: retryError } = await supabase.from('tokens').insert(legacyPayload);
+      if (retryError) {
+        console.error('CRITICAL: Failed to save tokens even with legacy schema:', retryError);
+        throw retryError;
+      }
+      return userEmail;
+    }
+
+    // If error is about user_email column not existing (very old schema), try without it
+    if (error.message?.includes('user_email')) {
       console.warn('user_email column might not exist, retrying without it...');
       delete insertPayload.user_email;
       const { error: retryError } = await supabase.from('tokens').insert(insertPayload);
@@ -647,7 +750,7 @@ export async function saveTokens(tokens: StoredTokens): Promise<string | null> {
       throw error;
     }
   }
-  
+
   return userEmail; // Return user email so caller can set session cookie
 }
 
@@ -727,18 +830,18 @@ function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function loadSyncState(): Promise<SyncState> {
+export async function loadSyncState(explicitUserEmail?: string | null): Promise<SyncState> {
   if (!supabase) {
     return { ...defaultSyncState };
   }
 
-  const userEmail = await getCurrentUserEmail();
-  
+  const userEmail = explicitUserEmail || await getCurrentUserEmail();
+
   let query = supabase.from('sync_state').select('*');
   if (userEmail) {
     query = query.eq('user_email', userEmail);
   }
-  
+
   const { data, error } = await query.limit(1).maybeSingle();
 
   if (error) {
@@ -760,23 +863,16 @@ export async function loadSyncState(): Promise<SyncState> {
   };
 }
 
-export async function saveSyncState(state: SyncState) {
+export async function saveSyncState(state: SyncState, explicitUserEmail?: string | null) {
   if (!supabase) {
     return;
   }
 
-  const userEmail = await getCurrentUserEmail();
+  const userEmail = explicitUserEmail || await getCurrentUserEmail();
   if (!userEmail) {
-    console.error('Cannot save sync state: no user email');
+    // If we can't identify the user, we can't save state
     return;
   }
-
-  const { data, error } = await supabase
-    .from('sync_state')
-    .select('id')
-    .eq('user_email', userEmail)
-    .limit(1)
-    .maybeSingle();
 
   const payload = {
     user_email: userEmail,
@@ -786,25 +882,25 @@ export async function saveSyncState(state: SyncState) {
     errors: state.errors,
     started_at: state.startedAt ? new Date(state.startedAt).toISOString() : null,
     finished_at: state.finishedAt ? new Date(state.finishedAt).toISOString() : null,
+    updated_at: new Date().toISOString(),
   };
 
-  if (data && data.id) {
-    const { error: updateError } = await supabase
-      .from('sync_state')
-      .update(payload)
-      .eq('id', data.id);
+  const { error } = await supabase.from('sync_state').upsert(payload, { onConflict: 'user_email' });
 
-    if (updateError) {
-      console.error('Error updating sync state in Supabase:', updateError);
-    }
-  } else {
-    const { error: insertError } = await supabase
-      .from('sync_state')
-      .insert(payload);
+  if (error) {
+    // Fallback: If updated_at column is missing, try saving without it
+    if (error.message?.includes('column') && error.message?.includes('updated_at')) {
+      console.warn('Schema mismatch: updated_at column missing in sync_state. Retrying without it...');
+      const { updated_at, ...legacyPayload } = payload;
+      const { error: retryError } = await supabase.from('sync_state').upsert(legacyPayload, { onConflict: 'user_email' });
 
-    if (insertError) {
-      console.error('Error inserting sync state in Supabase:', insertError);
+      if (retryError) {
+        console.error('Error saving sync state to Supabase (after retry):', retryError);
+      }
+    } else {
+      console.error('Error saving sync state to Supabase:', error);
     }
   }
 }
+
 

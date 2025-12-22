@@ -15,7 +15,7 @@ export async function refreshTokenIfNeeded(userEmail?: string | null): Promise<S
   // Get user email from parameter or session
   const targetUserEmail = userEmail || await getSessionUserEmail();
   const tokens = await loadTokens(targetUserEmail);
-  
+
   if (!tokens || !tokens.refresh_token) {
     return null;
   }
@@ -23,7 +23,7 @@ export async function refreshTokenIfNeeded(userEmail?: string | null): Promise<S
   // Check if token is expired (with 5 minute buffer)
   const expiryDate = tokens.expiry_date;
   const now = Date.now();
-  
+
   if (expiryDate && now < expiryDate - 5 * 60 * 1000) {
     // Token is still valid
     return tokens;
@@ -37,7 +37,7 @@ export async function refreshTokenIfNeeded(userEmail?: string | null): Promise<S
     });
 
     const { credentials } = await oauth2Client.refreshAccessToken();
-    
+
     // Update tokens with new access token
     const updatedTokens: StoredTokens = {
       ...tokens,
@@ -56,10 +56,10 @@ export async function refreshTokenIfNeeded(userEmail?: string | null): Promise<S
 
 /**
  * Get valid tokens, refreshing if necessary
- * Uses session cookie to determine which user's tokens to load
+ * @param userEmail - Optional user email to filter tokens. If not provided, uses session cookie.
  */
-export async function getValidTokens(): Promise<StoredTokens | null> {
-  return await refreshTokenIfNeeded();
+export async function getValidTokens(userEmail?: string | null): Promise<StoredTokens | null> {
+  return await refreshTokenIfNeeded(userEmail);
 }
 
 

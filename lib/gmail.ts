@@ -17,25 +17,28 @@ export function getOAuth2Client(): OAuth2Client {
     throw new Error('Missing Gmail OAuth2 credentials in environment variables');
   }
 
-  return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
+  return new google.auth.OAuth2(clientId, clientSecret, redirectUri) as any;
 }
 
 /**
  * Get OAuth2 authorization URL for Gmail authentication
  */
-export function getAuthUrl(): string {
+export function getAuthUrl(state?: string): string {
   const oauth2Client = getOAuth2Client();
-  
+
   const scopes = [
     'https://www.googleapis.com/auth/gmail.readonly',
     'https://www.googleapis.com/auth/gmail.send',
     'https://www.googleapis.com/auth/gmail.modify',
+    'https://www.googleapis.com/auth/userinfo.email', // Added to get user email for login
+    'https://www.googleapis.com/auth/userinfo.profile', // Added for name
   ];
 
   return oauth2Client.generateAuthUrl({
     access_type: 'offline',
     scope: scopes,
     prompt: 'consent', // Force consent to get refresh token
+    state: state,
   });
 }
 
@@ -122,12 +125,12 @@ export async function sendReplyMessage(
 
   const htmlPart = hasHtml
     ? [
-        `--${altBoundary}`,
-        'Content-Type: text/html; charset="UTF-8"',
-        '',
-        bodyHtml!,
-        '',
-      ].join('\r\n')
+      `--${altBoundary}`,
+      'Content-Type: text/html; charset="UTF-8"',
+      '',
+      bodyHtml!,
+      '',
+    ].join('\r\n')
     : ''
 
   const altClosing = `--${altBoundary}--`
@@ -189,7 +192,7 @@ export async function fetchInboxEmails(
   includeBody: boolean = false
 ) {
   const gmail = getGmailClient(tokens);
-  
+
   const response = await gmail.users.messages.list({
     userId: 'me',
     maxResults,
@@ -197,20 +200,20 @@ export async function fetchInboxEmails(
   });
 
   const messages = response.data.messages || [];
-  
+
   if (messages.length === 0) {
     return [];
   }
-  
+
   // Use metadata format for list views (10x faster, less data)
   // Only fetch full body if explicitly needed
   const format = includeBody ? 'full' : 'metadata';
-  
+
   // OPTIMIZED: Batch fetch messages with controlled concurrency
   // Gmail API has rate limits, so we batch requests to avoid hitting limits
   const BATCH_SIZE = 10; // Process 10 emails at a time
   const emailDetails: any[] = [];
-  
+
   for (let i = 0; i < messages.length; i += BATCH_SIZE) {
     const batch = messages.slice(i, i + BATCH_SIZE);
     const batchResults = await Promise.all(
@@ -228,7 +231,7 @@ export async function fetchInboxEmails(
         }
       })
     );
-    
+
     // Filter out null results from failed fetches
     emailDetails.push(...batchResults.filter((email) => email !== null));
   }
@@ -247,7 +250,7 @@ export async function fetchSentEmails(
   includeBody: boolean = false
 ) {
   const gmail = getGmailClient(tokens);
-  
+
   const response = await gmail.users.messages.list({
     userId: 'me',
     maxResults,
@@ -255,20 +258,20 @@ export async function fetchSentEmails(
   });
 
   const messages = response.data.messages || [];
-  
+
   if (messages.length === 0) {
     return [];
   }
-  
+
   // Use metadata format for list views (10x faster, less data)
   // Only fetch full body if explicitly needed (e.g., for embeddings)
   const format = includeBody ? 'full' : 'metadata';
-  
+
   // OPTIMIZED: Batch fetch messages with controlled concurrency
   // Gmail API has rate limits, so we batch requests to avoid hitting limits
   const BATCH_SIZE = 10; // Process 10 emails at a time
   const emailDetails: any[] = [];
-  
+
   for (let i = 0; i < messages.length; i += BATCH_SIZE) {
     const batch = messages.slice(i, i + BATCH_SIZE);
     const batchResults = await Promise.all(
@@ -286,7 +289,7 @@ export async function fetchSentEmails(
         }
       })
     );
-    
+
     // Filter out null results from failed fetches
     emailDetails.push(...batchResults.filter((email) => email !== null));
   }
@@ -354,7 +357,7 @@ export async function getUserProfile(
   tokens: { access_token?: string | null; refresh_token?: string | null }
 ) {
   const gmail = getGmailClient(tokens);
-  
+
   const response = await gmail.users.getProfile({
     userId: 'me',
   });
@@ -485,8 +488,8 @@ function parseEmailMessage(message: any, metadataOnly: boolean = false) {
   const subject = getHeader('subject');
   const messageIdHeader = getHeader('message-id');
   const isReply = Boolean(
-    inReplyTo || 
-    references || 
+    inReplyTo ||
+    references ||
     /^(re|fwd?):\s*/i.test(subject)
   );
 
@@ -545,7 +548,7 @@ export async function sendNewEmail(
   let response;
   let retries = 3;
   let lastError: any = null;
-  
+
   while (retries > 0) {
     try {
       response = await gmail.users.messages.send({
@@ -559,7 +562,7 @@ export async function sendNewEmail(
       console.error(`Gmail API send attempt failed (${4 - retries}/3):`, error.message);
       lastError = error;
       retries--;
-      
+
       // For ECONNRESET, the email might have been sent successfully despite the error
       // Let's check if we can find the message in sent folder
       if (error.code === 'ECONNRESET' || error.message?.includes('ECONNRESET')) {
@@ -571,7 +574,7 @@ export async function sendNewEmail(
             q: `subject:(${subject.replace(/"/g, '\\"')}) in:sent`,
             maxResults: 5,
           });
-          
+
           if (sentResponse.data.messages && sentResponse.data.messages.length > 0) {
             // Check if any of these messages match our content
             for (const msg of sentResponse.data.messages) {
@@ -581,11 +584,11 @@ export async function sendNewEmail(
                   id: msg.id!,
                   format: 'metadata',
                 });
-                
+
                 // Check if this is our message by comparing subject and approximate time
                 const msgSubject = fullMsg.data.payload?.headers?.find((h: any) => h.name === 'Subject')?.value;
                 const msgDate = fullMsg.data.payload?.headers?.find((h: any) => h.name === 'Date')?.value;
-                
+
                 if (msgSubject === subject && msgDate) {
                   const msgTime = new Date(msgDate).getTime();
                   const now = Date.now();
@@ -601,13 +604,13 @@ export async function sendNewEmail(
               }
             }
           }
-          
+
           if (response) break; // Found the message
         } catch (checkError) {
           console.error('Error checking for sent message:', checkError);
         }
       }
-      
+
       if (retries === 0) {
         throw lastError; // All retries failed
       }
@@ -625,10 +628,10 @@ export async function sendNewEmail(
 
   // Store the sent email
   const sentEmail = {
-    id: messageId,
-    threadId,
+    id: messageId!,
+    threadId: threadId!,
     subject,
-    from: await getCurrentUserEmail(),
+    from: await getCurrentUserEmail() || '',
     to,
     body,
     date: new Date().toISOString(),
@@ -676,6 +679,85 @@ export async function sendNewEmail(
     threadId,
     ticketId: ticket?.id || null,
   };
+}
+
+/**
+ * Fetch inbox emails from ALL connected accounts for a business
+ */
+export async function fetchAllInboxEmails(
+  businessId: string,
+  maxResults: number = 50,
+  query?: string,
+  includeBody: boolean = false
+) {
+  const { loadBusinessTokens } = await import('./storage');
+  const accounts = await loadBusinessTokens(businessId);
+
+  if (accounts.length === 0) {
+    return [];
+  }
+
+  // Fetch from all accounts in parallel
+  const results = await Promise.all(
+    accounts.map(async ({ email, tokens }) => {
+      try {
+        const emails = await fetchInboxEmails(tokens, maxResults, query, includeBody);
+        // Tag each email with the source account
+        return emails.map(e => ({ ...e, accountEmail: email }));
+      } catch (error) {
+        console.error(`Error fetching inbox for ${email}:`, error);
+        return [];
+      }
+    })
+  );
+
+  // Flatten and sort by date (newest first)
+  const allEmails = results.flat().sort((a, b) => {
+    const dateA = new Date(a.date || 0).getTime();
+    const dateB = new Date(b.date || 0).getTime();
+    return dateB - dateA;
+  });
+
+  return allEmails;
+}
+
+/**
+ * Fetch sent emails from ALL connected accounts for a business
+ */
+export async function fetchAllSentEmails(
+  businessId: string,
+  maxResults: number = 50,
+  includeBody: boolean = false
+) {
+  const { loadBusinessTokens } = await import('./storage');
+  const accounts = await loadBusinessTokens(businessId);
+
+  if (accounts.length === 0) {
+    return [];
+  }
+
+  // Fetch from all accounts in parallel
+  const results = await Promise.all(
+    accounts.map(async ({ email, tokens }) => {
+      try {
+        const emails = await fetchSentEmails(tokens, maxResults, includeBody);
+        // Tag each email with the source account
+        return emails.map(e => ({ ...e, accountEmail: email }));
+      } catch (error) {
+        console.error(`Error fetching sent emails for ${email}:`, error);
+        return [];
+      }
+    })
+  );
+
+  // Flatten and sort by date (newest first)
+  const allEmails = results.flat().sort((a, b) => {
+    const dateA = new Date(a.date || 0).getTime();
+    const dateB = new Date(b.date || 0).getTime();
+    return dateB - dateA;
+  });
+
+  return allEmails;
 }
 
 

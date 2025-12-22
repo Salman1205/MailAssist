@@ -14,6 +14,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { setSessionUserEmailInResponse } from '@/lib/session';
 import { createClient } from '@supabase/supabase-js'
 import { validateOTPCode, isOTPExpired, generateSession } from '@/lib/auth-utils'
 import { cookies } from 'next/headers'
@@ -185,7 +186,7 @@ export async function POST(req: NextRequest) {
     console.log('[VerifyOTP] Session created and cookies set')
 
     // 10. Return success
-    return NextResponse.json({
+    let response = NextResponse.json({
       success: true,
       message: 'Email verified successfully! Welcome to your new account.',
       user: {
@@ -200,7 +201,10 @@ export async function POST(req: NextRequest) {
         email: business.business_email,
       },
       sessionToken,
-    })
+    });
+    // Set gmail_user_email session cookie for business login
+    response = setSessionUserEmailInResponse(response, business.business_email);
+    return response;
   } catch (error) {
     console.error('[VerifyOTP] Unexpected error:', error)
     return NextResponse.json(

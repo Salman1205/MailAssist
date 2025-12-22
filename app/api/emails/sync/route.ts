@@ -22,36 +22,60 @@ async function setSyncState(state: SyncState) {
 
 export async function POST(request: NextRequest) {
   try {
-    // Load and refresh tokens if needed
-    const tokens = await getValidTokens();
-    
-    if (!tokens || !tokens.access_token) {
-      return NextResponse.json(
-        { error: 'Not authenticated. Please connect Gmail first.' },
-        { status: 401 }
-      );
+    const searchParams = request.nextUrl.searchParams;
+    // Cap maxResults at 500 to prevent processing too many emails
+    const requestedMax = parseInt(searchParams.get('maxResults') || '100');
+    const maxResults = Math.min(requestedMax, 500);
+
+    // Check for business session first
+    const { validateBusinessSession } = await import('@/lib/session');
+    const businessSession = await validateBusinessSession();
+
+    let sentEmails: any[] = [];
+    let userEmail: string | null = null;
+
+    if (businessSession) {
+      console.log('[SYNC] Business session detected:', businessSession.businessId);
+      const { fetchAllSentEmails } = await import('@/lib/email-service');
+      const { loadBusinessTokens } = await import('@/lib/storage');
+
+      // Fetch from all accounts (capped at 500)
+      sentEmails = await fetchAllSentEmails(businessSession.businessId, maxResults, businessSession.email);
+
+      // Get the first account's email to use as the "primary" user for sync state
+      const accounts = await loadBusinessTokens(businessSession.businessId, businessSession.email);
+      if (accounts.length > 0) {
+        userEmail = accounts[0].email;
+      }
+    } else {
+      // Legacy flow: Single account
+      const tokens = await getValidTokens();
+
+      if (!tokens || !tokens.access_token) {
+        return NextResponse.json(
+          { error: 'Not authenticated. Please connect Gmail first.' },
+          { status: 401 }
+        );
+      }
+
+      sentEmails = await fetchSentEmails(tokens, maxResults);
+      userEmail = await getCurrentUserEmail();
     }
 
-    const searchParams = request.nextUrl.searchParams;
-    const maxResults = parseInt(searchParams.get('maxResults') || '100');
-
-    const currentSyncState = await getSyncState();
+    // Use explicit userEmail for sync state operations
+    const currentSyncState = await loadSyncState(userEmail || undefined);
     const isContinuing = currentSyncState.status === 'running';
-    
+
     console.log(`[SYNC] ${isContinuing ? 'Continuing' : 'Starting new'} sync job. Current state:`, {
       status: currentSyncState.status,
       processed: currentSyncState.processed,
       queued: currentSyncState.queued
     });
-    
-    // Fetch sent emails
-    const sentEmails = await fetchSentEmails(tokens, maxResults);
-    
+
     // OPTIMIZED: Only check for emails with embeddings using a lightweight query
     // Instead of loading all emails, just get IDs that have embeddings
-    const userEmail = await getCurrentUserEmail();
     let emailsWithEmbeddings = new Set<string>();
-    
+
     if (supabase && userEmail) {
       try {
         // Only fetch IDs that have embeddings (much lighter query)
@@ -61,7 +85,7 @@ export async function POST(request: NextRequest) {
           .eq('is_sent', true)
           .eq('user_email', userEmail)
           .not('embedding', 'is', null); // Has embedding
-        
+
         if (existingEmails) {
           emailsWithEmbeddings = new Set(existingEmails.map((e: any) => e.id));
         }
@@ -83,11 +107,11 @@ export async function POST(request: NextRequest) {
     if (newEmails.length === 0) {
       // Mark as complete if no new emails
       if (isContinuing) {
-        await setSyncState({
+        await saveSyncState({
           ...currentSyncState,
           status: 'idle',
           finishedAt: Date.now(),
-        });
+        }, userEmail || undefined);
       }
       return NextResponse.json({
         message: 'All emails already processed',
@@ -98,17 +122,17 @@ export async function POST(request: NextRequest) {
 
     // Use existing job start time if continuing, otherwise create new
     const jobStartedAt = isContinuing ? (currentSyncState.startedAt || Date.now()) : Date.now();
-    
+
     // Only reset processed to 0 when starting a NEW job (not continuing)
     // When continuing, keep the existing processed count
-    await setSyncState({
+    await saveSyncState({
       status: 'running',
       queued: isContinuing ? (currentSyncState.queued || newEmails.length) : newEmails.length,
       processed: isContinuing ? (currentSyncState.processed || 0) : 0,
       errors: isContinuing ? (currentSyncState.errors || 0) : 0,
       startedAt: jobStartedAt,
       finishedAt: null,
-    });
+    }, userEmail || undefined);
 
     // On Vercel, serverless functions have time limits (~10s free tier)
     // Process a batch synchronously (await it) so it completes within timeout
@@ -116,7 +140,7 @@ export async function POST(request: NextRequest) {
     const BATCH_SIZE = 50; // Process 50 emails per request (maximized for speed)
     const batchToProcess = newEmails.slice(0, BATCH_SIZE);
     const remainingEmails = newEmails.slice(BATCH_SIZE);
-    
+
     console.log(`[SYNC] Processing batch: ${batchToProcess.length} emails, ${remainingEmails.length} remaining`);
 
     let batchProcessed = 0;
@@ -150,8 +174,8 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({
-      message: isComplete 
-        ? 'Email processing complete' 
+      message: isComplete
+        ? 'Email processing complete'
         : `Processed ${batchProcessed} emails. ${remainingEmails.length} remaining.`,
       queued: newEmails.length,
       processed: totalProcessed,
@@ -177,7 +201,7 @@ async function processEmailsBatch(emails: any[], startedAt: number): Promise<{ p
   const provider = (process.env.EMBEDDING_PROVIDER || 'local').toLowerCase();
   const isLocal = provider === 'local';
   const embeddingApiKey = process.env.EMBEDDING_API_KEY;
-  
+
   let processed = 0;
   let errors = 0;
 
@@ -186,14 +210,14 @@ async function processEmailsBatch(emails: any[], startedAt: number): Promise<{ p
   if (!isLocal && embeddingApiKey && provider === 'huggingface') {
     // Process in batches of 20 for batch API calls (optimal batch size for HF)
     const BATCH_SIZE = 20;
-    
+
     for (let i = 0; i < emails.length; i += BATCH_SIZE) {
       const batch = emails.slice(i, i + BATCH_SIZE);
-      
+
       try {
         // Prepare email contexts for batch embedding
         const { generateEmbeddingsBatchHF } = await import('@/lib/embeddings');
-        
+
         // Helper function to sanitize email body (same as in storage.ts)
         const sanitizeEmailBody = (text: string, maxLength: number): string => {
           if (!text) return '';
@@ -202,24 +226,24 @@ async function processEmailsBatch(emails: any[], startedAt: number): Promise<{ p
           const normalized = withoutTags.replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim();
           return normalized.length <= maxLength ? normalized : normalized.slice(0, maxLength);
         };
-        
+
         const contexts = batch.map(email => {
           const trimmedBody = sanitizeEmailBody(email.body || '', 2000);
           return createEmailContext(email.subject, trimmedBody);
         });
-        
+
         // Generate all embeddings in one API call (much faster!)
         const embeddings = await generateEmbeddingsBatchHF(contexts, embeddingApiKey);
-        
+
         // Store emails with their embeddings
         for (let idx = 0; idx < batch.length; idx++) {
           const email = batch[idx];
           const embedding = embeddings[idx] || [];
-          
+
           try {
             const isReply = email.isReply ?? /^(re|fwd?):\s*/i.test(email.subject || '');
             const trimmedBody = sanitizeEmailBody(email.body || '', 2000);
-            
+
             const storedEmail = {
               ...email,
               body: trimmedBody,
@@ -227,7 +251,7 @@ async function processEmailsBatch(emails: any[], startedAt: number): Promise<{ p
               isSent: true,
               isReply: isReply,
             };
-            
+
             // Save to database using upsert (more efficient than loading all emails)
             await saveStoredEmails([storedEmail]);
             processed++;
@@ -253,18 +277,18 @@ async function processEmailsBatch(emails: any[], startedAt: number): Promise<{ p
   } else {
     // For local or non-HF providers, process individually with high concurrency
     const CONCURRENCY = isLocal ? emails.length : 30;
-    
+
     for (let i = 0; i < emails.length; i += CONCURRENCY) {
       const batch = emails.slice(i, i + CONCURRENCY);
-      
+
       const results = await Promise.allSettled(
         batch.map(email => storeSentEmail(email))
       );
-      
+
       for (let idx = 0; idx < results.length; idx++) {
         const result = results[idx];
         const email = batch[idx];
-        
+
         if (result.status === 'fulfilled') {
           processed++;
         } else {
@@ -285,10 +309,10 @@ async function processEmailsBatch(emails: any[], startedAt: number): Promise<{ p
  */
 async function processEmailsInBackground(emails: any[], startedAt: number) {
   console.log(`Processing ${emails.length} emails in background...`);
-  
+
   let processed = 0;
   let errors = 0;
-  
+
   // Determine delay based on embedding provider
   const provider = (process.env.EMBEDDING_PROVIDER || 'local').toLowerCase();
   const isLocal = provider === 'local';
@@ -298,20 +322,20 @@ async function processEmailsInBackground(emails: any[], startedAt: number) {
   // This prevents corruption and ENOENT errors from concurrent writes
   for (let i = 0; i < emails.length; i++) {
     const email = emails[i];
-    
+
     try {
       await storeSentEmail(email);
       processed++;
     } catch (error) {
       const errorMessage = (error as Error)?.message || String(error);
-      
+
       // Only count as error if it's not a recoverable file system error
-      const isRecoverableError = 
+      const isRecoverableError =
         errorMessage.includes('ENOENT') ||
         errorMessage.includes('EEXIST') ||
         errorMessage.includes('EPERM') ||
         errorMessage.includes('no such file or directory');
-      
+
       if (!isRecoverableError) {
         errors++;
         console.error(`Error processing email ${email.id}:`, error);
@@ -328,7 +352,7 @@ async function processEmailsInBackground(emails: any[], startedAt: number) {
         }
       }
     }
-    
+
     // Update sync state every 10 emails or at the end
     if (processed % 10 === 0 || i === emails.length - 1) {
       await setSyncState({
@@ -341,7 +365,7 @@ async function processEmailsInBackground(emails: any[], startedAt: number) {
       });
       console.log(`Processed ${processed}/${emails.length} emails...`);
     }
-    
+
     // Small delay between emails to prevent file system conflicts
     if (i < emails.length - 1) {
       await new Promise(resolve => setTimeout(resolve, delayMs));
@@ -368,11 +392,11 @@ async function processEmailsInBackground(emails: any[], startedAt: number) {
 export async function GET() {
   try {
     const userEmail = await getCurrentUserEmail();
-    
+
     // OPTIMIZED: Use lightweight count query instead of loading all emails
     let allSentWithEmbeddings = 0;
     let repliesWithEmbeddings = 0;
-    
+
     if (supabase && userEmail) {
       try {
         // Count all sent emails with embeddings
@@ -383,7 +407,7 @@ export async function GET() {
           .eq('user_email', userEmail)
           .not('embedding', 'is', null);
         allSentWithEmbeddings = allCount || 0;
-        
+
         // Count replies with embeddings
         const { count: repliesCount } = await supabase
           .from('emails')
@@ -406,7 +430,7 @@ export async function GET() {
       allSentWithEmbeddings = storedEmails.filter(e => e.isSent && e.embedding.length > 0).length;
       repliesWithEmbeddings = storedEmails.filter(e => e.isSent && e.isReply && e.embedding.length > 0).length;
     }
-    
+
     const syncState = await getSyncState();
 
     // Use syncState to determine "pending" so the UI isn't stuck if some
@@ -418,14 +442,14 @@ export async function GET() {
 
     // When sync is running, use the job's processed count
     // When not running, use the actual stored count
-    const actualProcessed = syncState.status === 'running' 
+    const actualProcessed = syncState.status === 'running'
       ? (syncState.processed ?? 0)
       : allSentWithEmbeddings;
 
     // Get total stored count if needed for lastSync calculation
     let totalStored = 0;
     let lastSync: number | null = null;
-    
+
     if (supabase && userEmail) {
       try {
         const { count: totalCount } = await supabase
@@ -434,7 +458,7 @@ export async function GET() {
           .eq('is_sent', true)
           .eq('user_email', userEmail);
         totalStored = totalCount || 0;
-        
+
         // Get most recent email date for lastSync
         const { data: recentEmail } = await supabase
           .from('emails')
@@ -444,7 +468,7 @@ export async function GET() {
           .order('date', { ascending: false })
           .limit(1)
           .maybeSingle();
-        
+
         if (recentEmail?.date) {
           lastSync = new Date(recentEmail.date).getTime();
         }

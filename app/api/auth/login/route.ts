@@ -39,99 +39,144 @@ export async function POST(req: NextRequest) {
 
     const normalizedEmail = email.toLowerCase().trim()
 
-    // 2. Find business by email
-    const { data: business, error: businessError } = await supabase
-      .from('businesses')
-      .select('*')
-      .eq('business_email', normalizedEmail)
-      .single()
-
-    if (businessError || !business) {
-      console.error('[Login] Business not found:', normalizedEmail)
-      return NextResponse.json(
-        { error: 'Invalid email or password.' },
-        { status: 401 }
-      )
-    }
-
-    // 3. Check if email is verified
-    if (!business.is_email_verified) {
-      return NextResponse.json(
-        { 
-          error: 'Email not verified. Please check your email for the verification code.',
-          requiresVerification: true,
-          businessId: business.id,
-        },
-        { status: 403 }
-      )
-    }
-
-    // 4. Verify password
-    const isPasswordValid = await verifyPassword(password, business.password_hash)
-    if (!isPasswordValid) {
-      console.error('[Login] Invalid password for:', normalizedEmail)
-      return NextResponse.json(
-        { error: 'Invalid email or password.' },
-        { status: 401 }
-      )
-    }
-
-    // 5. Find admin user for this business
-    const { data: users, error: usersError } = await supabase
+    // 2. Try to find user in 'users' table first (Agents & Admins)
+    // IMPORTANT: Check for ALL users with this email, prioritize business accounts
+    const { data: users, error: userError } = await supabase
       .from('users')
-      .select('*')
-      .eq('business_id', business.id)
+      .select('*, businesses(*)')
+      .eq('email', normalizedEmail)
       .eq('is_active', true)
-      .order('created_at', { ascending: true })
 
-    if (usersError) {
-      console.error('[Login] Error fetching users:', usersError)
-      return NextResponse.json(
-        { error: 'Failed to fetch user data.' },
-        { status: 500 }
-      )
+    let targetUser = null
+    let targetBusiness = null
+
+    // If multiple users found, prioritize business accounts over personal
+    if (users && users.length > 0) {
+      // Prefer business accounts
+      const businessUser = users.find(u => u.business_id !== null)
+      targetUser = businessUser || users[0]
+      targetBusiness = targetUser?.businesses
     }
 
-    // Find admin user or first active user
-    let user = users?.find(u => u.role === 'admin')
-    if (!user) {
-      user = users?.[0]
-    }
-
-    if (!user) {
-      // No users exist - create admin user
-      const { data: newUser, error: createUserError } = await supabase
-        .from('users')
-        .insert({
-          business_id: business.id,
-          name: business.owner_name,
-          email: business.business_email,
-          role: 'admin',
-          is_active: true,
-          is_email_verified: true,
-          user_email: business.business_email,
-          shared_gmail_email: business.business_email,
-        })
-        .select()
+    // If user found in users table, verify password there
+    if (targetUser && targetUser.password_hash) {
+      const isPasswordValid = await verifyPassword(password, targetUser.password_hash)
+      if (!isPasswordValid) {
+        console.error('[Login] Invalid password for user:', normalizedEmail)
+        return NextResponse.json(
+          { error: 'Invalid email or password.' },
+          { status: 401 }
+        )
+      }
+    } else {
+      // Fallback: Check businesses table (Legacy/Owner flow)
+      const { data: business, error: businessError } = await supabase
+        .from('businesses')
+        .select('*')
+        .eq('business_email', normalizedEmail)
         .single()
 
-      if (createUserError || !newUser) {
-        console.error('[Login] Error creating admin user:', createUserError)
+      if (businessError || !business) {
+        console.error('[Login] User/Business not found:', normalizedEmail)
         return NextResponse.json(
-          { error: 'Failed to create user account.' },
+          { error: 'Invalid email or password.' },
+          { status: 401 }
+        )
+      }
+
+      // Check if email is verified
+      if (!business.is_email_verified) {
+        return NextResponse.json(
+          {
+            error: 'Email not verified. Please check your email for the verification code.',
+            requiresVerification: true,
+            businessId: business.id,
+          },
+          { status: 403 }
+        )
+      }
+
+      // Verify password against business record
+      const isPasswordValid = await verifyPassword(password, business.password_hash)
+      if (!isPasswordValid) {
+        console.error('[Login] Invalid password for business:', normalizedEmail)
+        return NextResponse.json(
+          { error: 'Invalid email or password.' },
+          { status: 401 }
+        )
+      }
+
+      targetBusiness = business
+
+      // Find or create user record for this business owner
+      // (Logic continues below...)
+    }
+
+    // 5. Find admin user for this business (if we are in legacy flow)
+    if (!targetUser && targetBusiness) {
+      const { data: users, error: usersError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('business_id', targetBusiness.id)
+        .eq('is_active', true)
+        .order('created_at', { ascending: true })
+
+      if (usersError) {
+        console.error('[Login] Error fetching users:', usersError)
+        return NextResponse.json(
+          { error: 'Failed to fetch user data.' },
           { status: 500 }
         )
       }
 
-      user = newUser
-      console.log('[Login] Created admin user:', user.id)
+      // Find admin user or first active user
+      targetUser = users?.find(u => u.role === 'admin')
+      if (!targetUser) {
+        targetUser = users?.[0]
+      }
+
+      if (!targetUser) {
+        // No users exist - create admin user
+        const { data: newUser, error: createUserError } = await supabase
+          .from('users')
+          .insert({
+            business_id: targetBusiness.id,
+            name: targetBusiness.owner_name,
+            email: targetBusiness.business_email,
+            role: 'admin',
+            is_active: true,
+            is_email_verified: true,
+            user_email: targetBusiness.business_email,
+            shared_gmail_email: targetBusiness.business_email,
+          })
+          .select()
+          .single()
+
+        if (createUserError || !newUser) {
+          console.error('[Login] Error creating admin user:', createUserError)
+          return NextResponse.json(
+            { error: 'Failed to create user account.' },
+            { status: 500 }
+          )
+        }
+
+        targetUser = newUser
+        console.log('[Login] Created admin user:', targetUser.id)
+      }
+    }
+
+    if (!targetUser || !targetBusiness) {
+      return NextResponse.json(
+        { error: 'Login failed. User or Business not found.' },
+        { status: 500 }
+      )
     }
 
     // 6. Update last login
     await supabase
       .from('users')
       .update({ last_login_at: new Date().toISOString() })
-      .eq('id', user.id)
+      .eq('id', targetUser.id)
 
     // 7. Create session
     const { token: sessionToken, expiresAt } = generateSession(30) // 30 days
@@ -139,8 +184,8 @@ export async function POST(req: NextRequest) {
     const { error: sessionError } = await supabase
       .from('user_sessions')
       .insert({
-        user_id: user.id,
-        business_id: business.id,
+        user_id: targetUser.id,
+        business_id: targetBusiness.id,
         session_token: sessionToken,
         expires_at: expiresAt.toISOString(),
       })
@@ -153,10 +198,12 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    console.log('[Login] Session created for user:', user.id)
+    console.log('[Login] Session created for user:', targetUser.id)
 
     // 8. Set session cookies
     const cookieStore = await cookies()
+
+    // Set session token
     cookieStore.set('session_token', sessionToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -165,8 +212,19 @@ export async function POST(req: NextRequest) {
       path: '/',
     })
 
-    cookieStore.set('user_id', user.id, {
-      httpOnly: false,
+    // Set current_user_id (CRITICAL: Must match CURRENT_USER_ID_COOKIE_NAME in lib/session.ts)
+    cookieStore.set('current_user_id', targetUser.id, {
+      httpOnly: false, // Accessible to client-side
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 30 * 24 * 60 * 60,
+      path: '/',
+    })
+
+    // Set gmail_user_email (CRITICAL: Must match SESSION_COOKIE_NAME in lib/session.ts)
+    // This is required for getSessionUserEmailFromRequest to work
+    cookieStore.set('gmail_user_email', targetUser.email || targetUser.user_email, {
+      httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       maxAge: 30 * 24 * 60 * 60,
@@ -178,15 +236,15 @@ export async function POST(req: NextRequest) {
       success: true,
       message: 'Login successful!',
       user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
+        id: targetUser.id,
+        name: targetUser.name,
+        email: targetUser.email,
+        role: targetUser.role,
       },
       business: {
-        id: business.id,
-        name: business.business_name,
-        email: business.business_email,
+        id: targetBusiness.id,
+        name: targetBusiness.business_name || targetBusiness.name, // Handle both schema variations if needed
+        email: targetBusiness.business_email,
       },
       sessionToken,
     })

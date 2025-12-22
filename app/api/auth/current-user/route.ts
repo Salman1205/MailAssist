@@ -4,13 +4,14 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getCurrentUserIdFromRequest, getSessionUserEmailFromRequest } from '@/lib/session';
+import { getSessionUserEmailFromRequest, getCurrentUserIdFromRequest } from '@/lib/session';
 import { getUserById } from '@/lib/users';
+import { supabase } from '@/lib/supabase';
 
 export async function GET(request: NextRequest) {
   try {
     const userId = getCurrentUserIdFromRequest(request);
-    
+
     if (!userId) {
       return NextResponse.json(
         { error: 'No user selected' },
@@ -36,8 +37,16 @@ export async function GET(request: NextRequest) {
     }
 
     // CRITICAL: Verify user belongs to current Gmail account
-    if (user.userEmail !== sessionGmailEmail) {
-      // User doesn't belong to this Gmail account - clear the cookie
+    // For personal accounts, we allow the session Gmail to be different from the login email
+    // as long as they are linked or it's a personal account (where the user IS the account)
+    const isPersonalAccount = !user.businessId;
+    const emailMatches = user.userEmail === sessionGmailEmail ||
+      user.email === sessionGmailEmail ||
+      (user as any).sharedGmailEmail === sessionGmailEmail;
+
+    if (!emailMatches && !isPersonalAccount) {
+      // For business accounts, the mismatch is still an error
+      console.log('[Current User] Unauthorized access attempt:', { userId: user.id, userEmail: user.userEmail, sessionEmail: sessionGmailEmail });
       const response = NextResponse.json(
         { error: 'User does not belong to current account' },
         { status: 403 }
@@ -47,7 +56,31 @@ export async function GET(request: NextRequest) {
       return response;
     }
 
-    return NextResponse.json({ user });
+    // Get business name if user belongs to a business
+    let businessName = null;
+    if (user.businessId && supabase) {
+      const { data: business } = await supabase
+        .from('businesses')
+        .select('name')
+        .eq('id', user.businessId)
+        .single();
+      if (business) {
+        businessName = business.name;
+      }
+    }
+
+    // Return user with businessId and businessName explicitly set
+    return NextResponse.json({
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        businessId: user.businessId,
+        businessName: businessName, // Added businessName
+        isActive: user.isActive,
+      }
+    });
   } catch (error) {
     console.error('Error fetching current user:', error);
     return NextResponse.json(

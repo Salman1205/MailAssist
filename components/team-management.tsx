@@ -123,7 +123,7 @@ export default function TeamManagementView() {
       setInviteName("")
       setInviteEmail("")
       setInviteRole("agent")
-      
+
       // Reload data to show new invitation
       await loadTeamData()
     } catch (err) {
@@ -182,7 +182,7 @@ export default function TeamManagementView() {
         </div>
         <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>
           <DialogTrigger asChild>
-            <Button className="bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 shadow-lg shadow-purple-500/20 hover:shadow-purple-500/40 transition-all duration-200 group">
+            <Button className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 shadow-lg shadow-blue-500/20 hover:shadow-blue-500/40 transition-all duration-200 group">
               <UserPlus className="mr-2 h-4 w-4 group-hover:scale-110 transition-transform" />
               Invite Team Member
             </Button>
@@ -252,7 +252,7 @@ export default function TeamManagementView() {
                 <Button
                   type="submit"
                   disabled={inviteLoading}
-                  className="bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800"
+                  className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800"
                 >
                   {inviteLoading ? (
                     <>
@@ -283,8 +283,8 @@ export default function TeamManagementView() {
       <Card className="bg-slate-900/50 border-slate-800 backdrop-blur shadow-xl hover:shadow-2xl transition-shadow duration-300">
         <CardHeader>
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-gradient-to-br from-purple-600/20 to-purple-800/20 rounded-lg border border-purple-700/30">
-              <User className="h-5 w-5 text-purple-400" />
+            <div className="p-2 bg-gradient-to-br from-blue-600/20 to-blue-800/20 rounded-lg border border-blue-700/30">
+              <User className="h-5 w-5 text-blue-400" />
             </div>
             <div>
               <CardTitle className="text-white">Team Members</CardTitle>
@@ -297,7 +297,7 @@ export default function TeamManagementView() {
         <CardContent>
           {loading ? (
             <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-8 w-8 animate-spin text-purple-500" />
+              <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
             </div>
           ) : members.length === 0 ? (
             <div className="text-center py-12">
@@ -319,15 +319,15 @@ export default function TeamManagementView() {
               </TableHeader>
               <TableBody>
                 {members.map((member, index) => (
-                  <TableRow 
-                    key={member.id} 
+                  <TableRow
+                    key={member.id}
                     className="border-slate-800 hover:bg-slate-800/30 transition-colors"
                     style={{ animationDelay: `${index * 50}ms` }}
                   >
                     <TableCell className="font-medium text-white">
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 bg-gradient-to-br from-purple-600/20 to-purple-800/20 rounded-full flex items-center justify-center border border-purple-700/30">
-                          <User className="h-4 w-4 text-purple-400" />
+                        <div className="w-8 h-8 bg-gradient-to-br from-blue-600/20 to-blue-800/20 rounded-full flex items-center justify-center border border-blue-700/30">
+                          <User className="h-4 w-4 text-blue-400" />
                         </div>
                         <span className="font-semibold">{member.name}</span>
                       </div>
@@ -390,8 +390,8 @@ export default function TeamManagementView() {
                 {invitations.map((invitation, index) => {
                   const expired = isExpired(invitation.expires_at)
                   return (
-                    <TableRow 
-                      key={invitation.id} 
+                    <TableRow
+                      key={invitation.id}
                       className="border-slate-800 hover:bg-slate-800/30 transition-colors group"
                       style={{ animationDelay: `${index * 50}ms` }}
                     >

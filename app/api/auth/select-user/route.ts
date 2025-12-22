@@ -13,8 +13,16 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { userId, createNew } = body;
 
-    const sharedGmailEmail = getSessionUserEmailFromRequest(request);
-    if (!sharedGmailEmail) {
+    // Support BOTH business and personal accounts
+    const { validateBusinessSession, getSessionUserEmail } = await import('@/lib/session');
+    const businessSession = await validateBusinessSession();
+    const sharedGmailEmail = await getSessionUserEmail(); // More robust than request helper
+
+    console.log('[SelectUser POST] businessSession:', !!businessSession, 'sharedGmailEmail:', sharedGmailEmail);
+
+    // Require EITHER business session OR personal session (gmail email)
+    if (!businessSession && !sharedGmailEmail) {
+      console.log('[SelectUser POST] No authentication found');
       return NextResponse.json(
         { error: 'Not authenticated. Please connect Gmail first.' },
         { status: 401 }
@@ -23,11 +31,30 @@ export async function POST(request: NextRequest) {
 
     // If creating a new user
     if (createNew && body.name && body.role) {
-      const newUser = await createUser({
+      // Prepare user creation data based on account type
+      const createData: any = {
         name: body.name,
         email: body.email || null,
         role: body.role,
-      });
+      };
+
+      // For business accounts: set businessId
+      // For personal accounts: set sharedGmailEmail
+      if (businessSession?.businessId) {
+        createData.businessId = businessSession.businessId;
+        console.log('[SelectUser POST] Creating user for business:', businessSession.businessId);
+      } else if (sharedGmailEmail) {
+        createData.sharedGmailEmail = sharedGmailEmail;
+        console.log('[SelectUser POST] Creating user for personal account:', sharedGmailEmail);
+      } else {
+        // This should never happen due to auth check above, but just in case
+        return NextResponse.json(
+          { error: 'Unable to determine account context' },
+          { status: 400 }
+        );
+      }
+
+      const newUser = await createUser(createData);
 
       if (!newUser) {
         return NextResponse.json(
@@ -36,12 +63,26 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // Don't automatically select the user - just return the created user
-      // User will need to explicitly select them
-      return NextResponse.json({ 
-        success: true, 
+      console.log('[SelectUser POST] Created new user:', newUser.id, 'role:', newUser.role);
+
+      // For first user (admin), auto-select them and set up session
+      if (body.role === 'admin') {
+        const response = NextResponse.json({
+          success: true,
+          user: newUser,
+          message: 'User created and selected successfully',
+          autoSelected: true
+        });
+        setCurrentUserIdInResponse(response, newUser.id);
+        console.log('[SelectUser POST] Auto-selected first admin');
+        return response;
+      }
+
+      // For other users, just return without auto-selecting
+      return NextResponse.json({
+        success: true,
         user: newUser,
-        message: 'User created successfully' 
+        message: 'User created successfully'
       });
     }
 
@@ -53,7 +94,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify user exists and belongs to this shared account
+    // Verify user exists
     const user = await getUserById(userId);
     if (!user) {
       return NextResponse.json(
@@ -62,11 +103,31 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (user.userEmail !== sharedGmailEmail) {
-      return NextResponse.json(
-        { error: 'User does not belong to this account' },
-        { status: 403 }
-      );
+    // Validate user belongs to the right context
+    if (businessSession) {
+      // Business account - verify user belongs to this business
+      if (user.businessId !== businessSession.businessId) {
+        console.log('[SelectUser POST] User businessId mismatch:', user.businessId, 'vs', businessSession.businessId);
+        return NextResponse.json(
+          { error: 'User does not belong to this business' },
+          { status: 403 }
+        );
+      }
+    } else if (sharedGmailEmail) {
+      // Personal account - verify user belongs to this account
+      // For personal accounts, we allow selecting if it matches any of the user's emails
+      const emailMatches = !user.userEmail ||
+        user.userEmail === sharedGmailEmail ||
+        user.email === sharedGmailEmail ||
+        (user as any).sharedGmailEmail === sharedGmailEmail;
+
+      if (!emailMatches && !user.businessId) {
+        console.log('[SelectUser POST] Email mismatch for personal account:', { userEmail: user.userEmail, sharedGmailEmail });
+        return NextResponse.json(
+          { error: 'User does not belong to this account' },
+          { status: 403 }
+        );
+      }
     }
 
     if (!user.isActive) {
@@ -77,12 +138,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Set user ID in session
-    const response = NextResponse.json({ 
-      success: true, 
+    const response = NextResponse.json({
+      success: true,
       user,
-      message: 'User selected successfully' 
+      message: 'User selected successfully'
     });
     setCurrentUserIdInResponse(response, userId);
+    console.log('[SelectUser POST] User selected:', userId);
     return response;
   } catch (error) {
     console.error('Error selecting user:', error);
@@ -95,16 +157,24 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    // Return list of available users for selection
-    const sharedGmailEmail = getSessionUserEmailFromRequest(request);
-    if (!sharedGmailEmail) {
+    // Support BOTH business and personal accounts
+    const { validateBusinessSession, getSessionUserEmail } = await import('@/lib/session');
+    const businessSession = await validateBusinessSession();
+    const sharedGmailEmail = await getSessionUserEmail();
+
+    console.log('[SelectUser GET] businessSession:', !!businessSession, 'sharedGmailEmail:', sharedGmailEmail);
+
+    // Require EITHER business session OR personal session
+    if (!businessSession && !sharedGmailEmail) {
+      console.log('[SelectUser GET] No authentication found');
       return NextResponse.json(
         { error: 'Not authenticated. Please connect Gmail first.' },
         { status: 401 }
       );
     }
 
-    const users = await getAllUsers();
+    const users = await getAllUsers(businessSession?.businessId, sharedGmailEmail);
+    console.log('[SelectUser GET] Found', users.length, 'users for context:', businessSession?.businessId || sharedGmailEmail);
     return NextResponse.json({ users });
   } catch (error) {
     console.error('Error fetching users for selection:', error);

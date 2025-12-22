@@ -5,7 +5,8 @@ import EmailList from "@/components/email-list"
 import EmailDetail from "@/components/email-detail"
 import ShopifySidebar from "@/components/shopify-sidebar"
 import { Button } from "@/components/ui/button"
-import { RefreshCw } from "lucide-react"
+import { RefreshCw, Mail } from "lucide-react"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 interface InboxViewProps {
   selectedEmail: string | null
@@ -20,9 +21,15 @@ interface InboxViewProps {
   }) => void
   onDraftGenerated?: () => void
   viewType?: "inbox" | "sent" | "spam" | "trash"
+  selectedAccount?: string | null  // NEW: Filter by account
 }
 
-export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerated, viewType = "inbox" }: InboxViewProps) {
+interface ConnectedAccount {
+  email: string
+  provider: string
+}
+
+export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerated, viewType = "inbox", selectedAccount: propSelectedAccount }: InboxViewProps) {
   const [listLoading, setListLoading] = useState(true)
   const [selectedEmailData, setSelectedEmailData] = useState<{
     subject?: string
@@ -37,8 +44,34 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
   const [ticketId, setTicketId] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [emailListRefresh, setEmailListRefresh] = useState<(() => void) | null>(null)
+  const [connectedAccounts, setConnectedAccounts] = useState<ConnectedAccount[]>([])
+  // Always start with 'all' - no localStorage persistence to avoid stale data issues
+  const [selectedAccount, setSelectedAccount] = useState<string>(propSelectedAccount || 'all')
   const showDetail = Boolean(selectedEmail)
-  
+
+  // Fetch connected accounts
+  useEffect(() => {
+    const fetchAccounts = async () => {
+      try {
+        // Add cache-busting and no-cache to prevent stale data after login/logout
+        const res = await fetch(`/api/auth/accounts?_=${Date.now()}`, {
+          cache: 'no-store',
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache'
+          }
+        })
+        if (res.ok) {
+          const data = await res.json()
+          setConnectedAccounts(data.accounts || [])
+        }
+      } catch (error) {
+        console.error('Failed to fetch accounts:', error)
+      }
+    }
+    fetchAccounts()
+  }, [])
+
   // Fetch ticket for the selected email
   useEffect(() => {
     const fetchTicket = async () => {
@@ -46,7 +79,7 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
         setTicketId(null)
         return
       }
-      
+
       try {
         console.log('Fetching ticket for threadId:', selectedEmailData.threadId)
         const response = await fetch(`/api/tickets?threadId=${encodeURIComponent(selectedEmailData.threadId)}`)
@@ -64,10 +97,10 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
         setTicketId(null)
       }
     }
-    
+
     fetchTicket()
   }, [selectedEmailData?.threadId])
-  
+
   // Listen for ticket updates from Send & Close
   useEffect(() => {
     const handleTicketUpdate = () => {
@@ -76,16 +109,16 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
         emailListRefresh()
       }
     }
-    
+
     window.addEventListener('ticketUpdated', handleTicketUpdate)
     window.addEventListener('ticketsForceRefresh', handleTicketUpdate)
-    
+
     return () => {
       window.removeEventListener('ticketUpdated', handleTicketUpdate)
       window.removeEventListener('ticketsForceRefresh', handleTicketUpdate)
     }
   }, [emailListRefresh])
-  
+
   // Handle email selection with data
   const handleSelectEmail = (id: string | null, emailData?: {
     subject?: string
@@ -114,32 +147,50 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
   return (
     <div className="flex flex-col md:flex-row h-full bg-muted/20 overflow-hidden">
       <div
-        className={`border-b md:border-b-0 md:border-r border-border bg-background overflow-hidden flex flex-col transition-all duration-300 flex-shrink-0 ${
-          showDetail ? "hidden md:flex md:w-96" : "flex w-full md:w-96"
-        }`}
+        className={`border-b md:border-b-0 md:border-r border-border bg-background overflow-hidden flex flex-col transition-all duration-300 flex-shrink-0 ${showDetail ? "hidden md:flex md:w-96" : "flex w-full md:w-96"
+          }`}
       >
         <div className="bg-card border-b border-border px-6 py-5 flex-shrink-0">
-          <div className="flex items-center justify-between">
-            <div>
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex-1">
               <h2 className="text-xl font-bold capitalize text-foreground">{viewType || "Inbox"}</h2>
               <p className="text-sm text-muted-foreground mt-1">Manage your messages</p>
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setRefreshing(true)
-                if (emailListRefresh) {
-                  emailListRefresh()
-                }
-                setTimeout(() => setRefreshing(false), 1000)
-              }}
-              disabled={refreshing}
-              className="h-8 w-8 p-0"
-              title="Refresh emails"
-            >
-              <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-            </Button>
+            <div className="flex items-center gap-2">
+              {/* Account Filter Dropdown */}
+              {connectedAccounts.length > 0 && (
+                <Select value={selectedAccount} onValueChange={setSelectedAccount}>
+                  <SelectTrigger className="w-[200px] h-9">
+                    <Mail className="w-4 h-4 mr-2" />
+                    <SelectValue placeholder="All Accounts" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Accounts</SelectItem>
+                    {connectedAccounts.map((account) => (
+                      <SelectItem key={account.email} value={account.email}>
+                        {account.email}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setRefreshing(true)
+                  if (emailListRefresh) {
+                    emailListRefresh()
+                  }
+                  setTimeout(() => setRefreshing(false), 1000)
+                }}
+                disabled={refreshing}
+                className="h-8 w-8 p-0"
+                title="Refresh emails"
+              >
+                <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+              </Button>
+            </div>
           </div>
         </div>
         <div className="flex-1 overflow-y-auto min-h-0">
@@ -149,6 +200,7 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
             onLoadingChange={setListLoading}
             viewType={viewType}
             onRefreshReady={handleRefreshReady}
+            selectedAccount={selectedAccount === 'all' ? undefined : selectedAccount}
           />
         </div>
       </div>

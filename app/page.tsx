@@ -17,6 +17,9 @@ import QuickRepliesView from "@/components/quick-replies-view"
 import AnalyticsDashboard from "@/components/analytics-dashboard"
 import ComposeView from "@/components/compose-view"
 import TeamManagement from "@/components/team-management"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
+import { User, Sparkles } from "lucide-react"
 
 type View = SidebarView
 
@@ -58,7 +61,7 @@ function PageContent() {
   const [hasAutoSynced, setHasAutoSynced] = useState(false)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [checkingUser, setCheckingUser] = useState(true)
-  const [currentUser, setCurrentUser] = useState<{ id: string; name: string; role: string } | null>(null)
+  const [currentUser, setCurrentUser] = useState<{ id: string; name: string; role: string; businessId?: string | null; businessName?: string | null } | null>(null)
   const [hasAdmin, setHasAdmin] = useState(false)
 
   const [syncStatus, setSyncStatus] = useState<SyncStats | null>(null)
@@ -73,6 +76,7 @@ function PageContent() {
   const [globalSearch, setGlobalSearch] = useState<string>("")
   const [deepLinkTicketId, setDeepLinkTicketId] = useState<string | null>(null)
   const [ticketNavKey, setTicketNavKey] = useState(0) // Force re-selection on navigation
+  const [showPersonalAccountDialog, setShowPersonalAccountDialog] = useState(false)
   const searchParams = useSearchParams()
 
   useEffect(() => {
@@ -87,21 +91,51 @@ function PageContent() {
       } catch {
         // Ignore localStorage errors (e.g. in private mode)
       }
+
+      if (params.get("newAccount") === "true") {
+        setShowPersonalAccountDialog(true)
+        // Trigger sync for new accounts after user selection
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem('trigger_sync_after_connect', 'true')
+        }
+      }
+
       window.history.replaceState({}, "", window.location.pathname)
       // After Gmail auth, check if user is selected
       checkUserSelection()
+      return
     }
-    
+
     // Check if user came from business auth
     const businessAuth = params.get("businessAuth")
     if (businessAuth === "true") {
-      // They just registered/logged in via business auth
-      // Mark as "connected" to bypass Gmail requirement
       setIsConnected(true)
-      // They should have a session cookie with user data
       checkUserSelection()
       window.history.replaceState({}, "", window.location.pathname)
+      return
     }
+
+    // Check if user just connected Gmail (from connect mode)
+    const justConnected = params.get("connected")
+    if (justConnected === "true") {
+      setIsConnected(true)
+      // Store flag to trigger sync after component is ready
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem('trigger_sync_after_connect', 'true')
+      }
+      window.history.replaceState({}, "", window.location.pathname)
+      return
+    }
+
+    // NEW: If a valid business session exists, set isConnected to true
+    fetch("/api/auth/current-user")
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data && data.user) {
+          setIsConnected(true)
+        }
+      })
+      .catch(() => { })
   }, [])
 
   // Listen to ticketId in the URL to deep-link into a specific ticket from notifications
@@ -156,14 +190,15 @@ function PageContent() {
     try {
       // Check for admin existence first
       await checkAdminExists()
-      
+
       // First check sessionStorage (per-tab)
       // But verify with API to ensure user belongs to current Gmail account
       if (typeof window !== "undefined") {
         const storedUserId = sessionStorage.getItem("current_user_id")
         const storedUserName = sessionStorage.getItem("current_user_name")
         const storedUserRole = sessionStorage.getItem("current_user_role")
-        
+        const storedBusinessId = sessionStorage.getItem("current_user_business_id")
+
         if (storedUserId && storedUserName && storedUserRole) {
           // Verify user still belongs to current account
           const verifyResponse = await fetch("/api/auth/current-user")
@@ -176,6 +211,7 @@ function PageContent() {
                 id: storedUserId,
                 name: storedUserName,
                 role: storedUserRole,
+                businessId: storedBusinessId || null,
               })
               setCheckingUser(false)
               return
@@ -187,23 +223,28 @@ function PageContent() {
           sessionStorage.removeItem("current_user_role")
         }
       }
-      
+
       // Fallback: Check API (cookie-based, shared across tabs)
       const response = await fetch("/api/auth/current-user")
       if (response.ok) {
         const data = await response.json()
+        console.log('[DEBUG] Current user API response:', data) // DEBUG
         if (data.user) {
+          console.log('[DEBUG] User businessId:', data.user.businessId) // DEBUG
           setCurrentUserId(data.user.id)
           setCurrentUser({
             id: data.user.id,
             name: data.user.name,
             role: data.user.role,
+            businessId: data.user.businessId || null,
           })
           // Store in sessionStorage for this tab
           if (typeof window !== "undefined") {
             sessionStorage.setItem("current_user_id", data.user.id)
             sessionStorage.setItem("current_user_name", data.user.name)
             sessionStorage.setItem("current_user_role", data.user.role)
+            sessionStorage.setItem("current_user_business_id", data.user.businessId || "")
+            console.log('[DEBUG] Stored businessId in sessionStorage:', data.user.businessId) // DEBUG
           }
         }
       } else if (response.status === 403 || response.status === 404) {
@@ -212,6 +253,7 @@ function PageContent() {
           sessionStorage.removeItem("current_user_id")
           sessionStorage.removeItem("current_user_name")
           sessionStorage.removeItem("current_user_role")
+          sessionStorage.removeItem("current_user_business_id")
         }
         setCurrentUserId(null)
         setCurrentUser(null)
@@ -225,43 +267,59 @@ function PageContent() {
   }
 
   const handleUserSelected = async (userId: string) => {
+    console.log('[DEBUG] handleUserSelected called with userId:', userId)
     setCurrentUserId(userId)
-    setCheckingUser(false)
-    
+
     // Fetch user details
     try {
       const response = await fetch(`/api/users/${userId}`)
       if (response.ok) {
         const data = await response.json()
+        console.log('[DEBUG] User data fetched:', data.user)
         if (data.user) {
-          setCurrentUser({
+          const user = {
             id: data.user.id,
             name: data.user.name,
             role: data.user.role,
-          })
+            businessId: data.user.businessId || null,
+          }
+
+          setCurrentUser(user)
+
           // Store in sessionStorage for this tab
           if (typeof window !== "undefined") {
             sessionStorage.setItem("current_user_id", data.user.id)
             sessionStorage.setItem("current_user_name", data.user.name)
             sessionStorage.setItem("current_user_role", data.user.role)
+            sessionStorage.setItem("current_user_business_id", data.user.businessId || "")
           }
-          
+
           // Refresh admin check after user selection
           await checkAdminExists()
-          
+
+          // CRITICAL: Set checkingUser to false AFTER all state updates
+          setCheckingUser(false)
+
           // After user selection, navigate to inbox (default view)
           setActiveView("inbox")
+
+          console.log('[DEBUG] User selected successfully, should show main app now')
+          return
         }
       }
-    } catch {
-      // Ignore errors
+      console.error('[DEBUG] Failed to fetch user data')
+    } catch (error) {
+      console.error('[DEBUG] Error in handleUserSelected:', error)
     }
+
+    // If we failed, still set checkingUser to false
+    setCheckingUser(false)
   }
 
   const handleSwitchUser = async (userId: string) => {
     // User switching - update state smoothly without page reload
     setCurrentUserId(userId)
-    
+
     // Fetch user details to update UI
     try {
       const response = await fetch(`/api/users/${userId}`)
@@ -272,12 +330,14 @@ function PageContent() {
             id: data.user.id,
             name: data.user.name,
             role: data.user.role,
+            businessId: data.user.businessId || null,
           })
           // Store in sessionStorage for this tab
           if (typeof window !== "undefined") {
             sessionStorage.setItem("current_user_id", data.user.id)
             sessionStorage.setItem("current_user_name", data.user.name)
             sessionStorage.setItem("current_user_role", data.user.role)
+            sessionStorage.setItem("current_user_business_id", data.user.businessId || "")
           }
           // Refresh admin check after user selection
           await checkAdminExists()
@@ -341,17 +401,10 @@ function PageContent() {
       setSyncInProgress(true)
       await fetchSyncStatus()
 
-      // If there are remaining emails, continue syncing automatically
-      // Safety: limit to 100 continuation calls to prevent infinite loops
-      if (data?.continue && data?.remaining > 0 && syncContinueCount < 100) {
-        setSyncContinueCount((prev) => prev + 1)
-        // Wait a moment before continuing to avoid rate limits
+      if (data?.continue) {
+        setSyncContinueCount(prev => prev + 1)
         setTimeout(() => {
-          startSync(maxResults).catch((err) => {
-            console.error('Error continuing sync:', err)
-            setSyncError(err.message)
-            setSyncContinueCount(0) // Reset on error
-          })
+          startSync(maxResults)
         }, 1000)
       } else if (!data?.continue) {
         // Reset counter when sync completes
@@ -360,6 +413,24 @@ function PageContent() {
     },
     [isConnected, syncStatus, fetchSyncStatus, syncTarget]
   )
+
+  // Separate effect to trigger sync after Gmail connection
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const shouldTriggerSync = sessionStorage.getItem('trigger_sync_after_connect')
+    if (shouldTriggerSync === 'true' && isConnected) {
+      console.log('[Auth] Gmail connected, triggering sync...')
+      sessionStorage.removeItem('trigger_sync_after_connect')
+
+      // Small delay to ensure everything is ready
+      setTimeout(() => {
+        startSync(500).catch(err => {
+          console.error('[Auth] Failed to trigger sync:', err)
+        })
+      }, 500)
+    }
+  }, [isConnected, startSync])
 
   useEffect(() => {
     if (isConnected) {
@@ -424,7 +495,7 @@ function PageContent() {
           setIsConnected(false)
           try {
             window.localStorage.removeItem(LOCAL_STORAGE_KEY)
-          } catch {}
+          } catch { }
         }
       }
 
@@ -473,6 +544,10 @@ function PageContent() {
         sessionStorage.removeItem("current_user_id")
         sessionStorage.removeItem("current_user_name")
         sessionStorage.removeItem("current_user_role")
+        sessionStorage.removeItem("current_user_business_id")
+        sessionStorage.removeItem("current_user_email")
+        // Clear localStorage items that may contain stale email references
+        localStorage.removeItem("inbox_selected_account")
       }
       setIsConnected(false)
       setCurrentUserId(null)
@@ -481,6 +556,14 @@ function PageContent() {
       setSelectedEmail(null)
       setUserProfile(null)
       setDraftsVersion((v) => v + 1)
+      // Reset sync state to prevent showing stale sync data
+      setSyncStatus(null)
+      setSyncInProgress(false)
+      setSyncTarget(null)
+      setSyncBaseline(0)
+      setSyncError(null)
+      setHideSyncToast(true)
+      setHasAutoSynced(false)
       // Keep the logging overlay visible briefly to show feedback
       setTimeout(() => setLoggingOut(false), 600)
     }
@@ -604,9 +687,8 @@ function PageContent() {
             <button
               key={tab.id}
               onClick={() => setActiveView(tab.id)}
-              className={`flex-1 py-3 text-sm font-medium ${
-                activeView === tab.id ? "text-primary border-b-2 border-primary" : "text-muted-foreground"
-              }`}
+              className={`flex-1 py-3 text-sm font-medium ${activeView === tab.id ? "text-primary border-b-2 border-primary" : "text-muted-foreground"
+                }`}
             >
               {tab.label}
             </button>
@@ -631,13 +713,13 @@ function PageContent() {
     }
     return embeddedCount > 0 ? embeddedCount : null
   })()
-  
+
   // Check if sync is complete (not processing and no pending emails)
-  const isSyncComplete = !syncStatus?.processing && !syncInProgress && 
-    pendingCount === 0 && 
+  const isSyncComplete = !syncStatus?.processing && !syncInProgress &&
+    pendingCount === 0 &&
     processedDisplay > 0 &&
     !syncError
-  
+
   // Auto-hide toast after 3 seconds when sync completes
   useEffect(() => {
     if (isSyncComplete && !hideSyncToast) {
@@ -648,79 +730,79 @@ function PageContent() {
       return () => clearTimeout(timer)
     }
   }, [isSyncComplete, hideSyncToast])
-  
+
   const showSyncToast = ((syncStatus?.processing ?? syncInProgress) || syncError || isSyncComplete) && !hideSyncToast
 
   return (
     <>
       {/* Only show full layout if user is selected, otherwise show UserSelector in a centered card */}
-      {(!isConnected || !currentUserId || (!hasAdmin && currentUser && currentUser.role !== "admin")) ? (
-      <div className="flex h-screen w-screen items-center justify-center bg-background text-foreground">
-        <div className="max-w-md w-full">
-          {checkingAuth || checkingUser ? (
-            <div className="flex items-center justify-center h-full">
-              <div className="flex flex-col items-center gap-3 animate-in fade-in duration-500">
-                <div className="flex gap-1.5">
-                  <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  {checkingAuth ? "Checking authentication..." : "Loading..."}
-                </p>
-              </div>
-            </div>
-          ) : !isConnected ? (
-            <div className="flex items-center justify-center h-full p-4">
-              {(() => {
-                // Redirect to welcome page
-                if (typeof window !== 'undefined') {
-                  window.location.href = '/welcome'
-                }
-                return (
-                  <div className="text-center">
-                    <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
-                    <p className="mt-4 text-muted-foreground">Redirecting...</p>
+      {(!isConnected || !currentUserId || (checkingUser && !currentUser)) ? (
+        <div className="flex h-screen w-screen items-center justify-center bg-background text-foreground">
+          <div className="max-w-md w-full">
+            {checkingAuth || checkingUser ? (
+              <div className="flex items-center justify-center h-full">
+                <div className="flex flex-col items-center gap-3 animate-in fade-in duration-500">
+                  <div className="flex gap-1.5">
+                    <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                   </div>
-                )
-              })()}
-            </div>
-          ) : (
-            <UserSelector 
-              onUserSelected={handleUserSelected}
-              currentUserId={currentUserId}
+                  <p className="text-sm text-muted-foreground">
+                    {checkingAuth ? "Checking authentication..." : "Loading..."}
+                  </p>
+                </div>
+              </div>
+            ) : !isConnected ? (
+              <div className="flex items-center justify-center h-full p-4">
+                {(() => {
+                  // Redirect to welcome page
+                  if (typeof window !== 'undefined') {
+                    window.location.href = '/welcome'
+                  }
+                  return (
+                    <div className="text-center">
+                      <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
+                      <p className="mt-4 text-muted-foreground">Redirecting...</p>
+                    </div>
+                  )
+                })()}
+              </div>
+            ) : (
+              <UserSelector
+                onUserSelected={handleUserSelected}
+                currentUserId={currentUserId}
+              />
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="flex h-screen bg-background text-foreground overflow-x-hidden">
+          {isConnected && (
+            <Sidebar
+              activeView={activeView}
+              setActiveView={setActiveView}
+              onLogout={handleLogout}
+              currentUser={currentUser}
             />
           )}
+          <div className="flex flex-col flex-1 min-h-0">
+            <TopNav
+              isConnected={isConnected}
+              userProfile={userProfile}
+              currentUser={currentUser}
+              onLogout={handleLogout}
+              onSwitchUser={handleSwitchUser}
+              onSearch={(query) => {
+                setGlobalSearch(query)
+              }}
+            />
+            {renderMobileTabs()}
+            <main className="flex-1 overflow-auto">
+              {renderView()}
+            </main>
+          </div>
         </div>
-      </div>
-    ) : (
-      <div className="flex h-screen bg-background text-foreground overflow-x-hidden">
-        {isConnected && (
-          <Sidebar 
-            activeView={activeView} 
-            setActiveView={setActiveView} 
-            onLogout={handleLogout}
-            currentUser={currentUser}
-          />
-        )}
-        <div className="flex flex-col flex-1 min-h-0">
-          <TopNav 
-            isConnected={isConnected} 
-            userProfile={userProfile} 
-            currentUser={currentUser}
-            onLogout={handleLogout}
-            onSwitchUser={handleSwitchUser}
-            onSearch={(query) => {
-              setGlobalSearch(query)
-            }}
-          />
-          {renderMobileTabs()}
-          <main className="flex-1 overflow-auto">
-            {renderView()}
-          </main>
-        </div>
-      </div>
-    )}
+      )}
 
       {loggingOut && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
@@ -745,6 +827,50 @@ function PageContent() {
           onDismiss={() => setHideSyncToast(true)}
         />
       )}
+
+      {/* Personal Account Welcome Dialog */}
+      <Dialog open={showPersonalAccountDialog} onOpenChange={setShowPersonalAccountDialog}>
+        <DialogContent className="max-w-md text-center p-8">
+          <DialogHeader>
+            <div className="mx-auto w-16 h-16 bg-blue-500/10 rounded-full flex items-center justify-center mb-4">
+              <User className="w-8 h-8 text-blue-500" />
+            </div>
+            <DialogTitle className="text-2xl font-bold">Welcome to Personal Account!</DialogTitle>
+            <DialogDescription className="text-base pt-2">
+              You've successfully created your personal MailAssist account. You can now manage your emails and tickets individually.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="bg-muted/50 rounded-xl p-4 my-6 text-left border border-border/50">
+            <h4 className="font-semibold text-sm mb-2 flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-amber-500" />
+              Upgrade to Business Plan
+            </h4>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Unlock powerful team collaboration, multiple Gmail connections, custom roles, and advanced AI automation by upgrading to our Business Plan.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-3">
+            <Button
+              className="w-full h-11 bg-blue-600 hover:bg-blue-700 font-semibold"
+              onClick={() => {
+                setActiveView('settings')
+                setShowPersonalAccountDialog(false)
+              }}
+            >
+              Go to Settings & Upgrade
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full h-11"
+              onClick={() => setShowPersonalAccountDialog(false)}
+            >
+              Continue with Personal Plan
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }

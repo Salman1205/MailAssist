@@ -20,6 +20,8 @@ export interface Ticket {
   lastAgentReplyAt?: string | null;
   createdAt: string;
   updatedAt: string;
+  ownerEmail?: string; // The account that this ticket belongs to
+  userEmail?: string; // Scoping email for this ticket
 }
 
 export interface TicketSeed {
@@ -60,6 +62,8 @@ function mapRowToTicket(row: any): Ticket {
     lastAgentReplyAt: row.last_agent_reply_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    ownerEmail: row.owner_email,
+    userEmail: row.user_email,
   };
 }
 
@@ -73,14 +77,12 @@ export async function getTicketByThreadId(
     .from('tickets')
     .select('*')
     .eq('thread_id', threadId)
-    .limit(1)
-    .maybeSingle();
 
   if (userEmail) {
-    query = query.eq('user_email', userEmail);
+    query = query.eq('user_email', userEmail)
   }
 
-  const { data, error } = await query;
+  const { data, error } = await query.limit(1).maybeSingle()
 
   if (error) {
     console.error('Error fetching ticket by thread_id:', error);
@@ -122,6 +124,7 @@ export async function getOrCreateTicketForThread(
     last_agent_reply_at: seed.lastAgentReplyAt ?? null,
     created_at: nowIso,
     updated_at: nowIso,
+    owner_email: userEmail, // Default to current user email as owner
   };
 
   if (userEmail) {
@@ -180,7 +183,7 @@ export async function ensureTicketForEmail(
       customerEmail,
       customerName: null,
       initialStatus: isFromAgent ? 'pending' : 'open',
-      priority: null, // Don't set priority for unassigned tickets
+      priority: undefined, // Don't set priority for unassigned tickets
       tags: [],
       lastCustomerReplyAt: isFromAgent ? undefined : dateIso,
       lastAgentReplyAt: isFromAgent ? dateIso : undefined,
@@ -221,11 +224,11 @@ export async function ensureTicketForEmail(
     .from('tickets')
     .update(updates)
     .eq('thread_id', threadId);
-  
+
   if (userEmail) {
     query = query.eq('user_email', userEmail);
   }
-  
+
   const { data, error } = await query
     .select('*')
     .maybeSingle();
@@ -263,7 +266,8 @@ export async function ensureTicketForEmail(
 export async function getTickets(
   currentUserId: string | null,
   canViewAll: boolean,
-  userEmail: string | null
+  userEmail: string | null,
+  accountFilter?: string
 ): Promise<Ticket[]> {
   if (!supabase) return [];
 
@@ -276,9 +280,14 @@ export async function getTickets(
       assignee:users!tickets_assignee_user_id_fkey(id, name)
     `);
 
-  // Filter by Gmail account
+  // Filter by Gmail account (the primary account scoping)
   if (userEmail) {
     query = query.eq('user_email', userEmail);
+  }
+
+  // Filter by specific connected account if provided
+  if (accountFilter) {
+    query = query.eq('owner_email', accountFilter);
   }
 
   // Role-based filtering
@@ -364,7 +373,7 @@ async function getTicketsFallback(
         .from('users')
         .select('id, name')
         .in('id', assigneeUserIds);
-      
+
       if (users) {
         users.forEach((user: any) => {
           assigneeMap.set(user.id, user.name);
@@ -399,15 +408,13 @@ export async function getTicketById(
     .from('tickets')
     .select('*')
     .eq('id', ticketId)
-    .limit(1)
-    .maybeSingle();
 
   // Filter by Gmail account
   if (userEmail) {
-    query = query.eq('user_email', userEmail);
+    query = query.eq('user_email', userEmail)
   }
 
-  const { data, error } = await query;
+  const { data, error } = await query.limit(1).maybeSingle()
 
   if (error) {
     console.error('Error fetching ticket by ID:', error);
@@ -426,7 +433,7 @@ export async function getTicketById(
   }
 
   const ticket = mapRowToTicket(data);
-  
+
   // Fetch assignee name if ticket is assigned
   if (data.assignee_user_id && supabase) {
     try {
@@ -436,7 +443,7 @@ export async function getTicketById(
         .eq('id', data.assignee_user_id)
         .limit(1)
         .maybeSingle();
-      
+
       if (user) {
         ticket.assigneeName = user.name;
       }
@@ -517,7 +524,7 @@ export async function assignTicket(
   } catch (err) {
     console.warn('Non-fatal: failed to create assignment notification', err)
   }
-  
+
   // Fetch assignee name if ticket is assigned
   if (data.assignee_user_id && supabase) {
     try {
@@ -527,7 +534,7 @@ export async function assignTicket(
         .eq('id', data.assignee_user_id)
         .limit(1)
         .maybeSingle();
-      
+
       if (user) {
         ticket.assigneeName = user.name;
       }
