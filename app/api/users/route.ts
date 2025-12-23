@@ -12,6 +12,15 @@ import { validateTextInput, isValidEmail, isValidUserRole } from '@/lib/validati
 
 export async function GET(request: NextRequest) {
   try {
+    // Check if Supabase client is initialized (env vars check)
+    const { supabase } = await import('@/lib/supabase');
+    if (!supabase) {
+      return NextResponse.json(
+        { error: 'Database configuration missing. Please check SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.' },
+        { status: 503 }
+      );
+    }
+
     const userId = getCurrentUserIdFromRequest(request);
 
     if (!userId) {

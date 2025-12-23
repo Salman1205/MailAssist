@@ -13,6 +13,15 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { userId, createNew } = body;
 
+    // Check if Supabase client is initialized (env vars check)
+    const { supabase } = await import('@/lib/supabase');
+    if (!supabase) {
+      return NextResponse.json(
+        { error: 'Database configuration missing. Please check SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.' },
+        { status: 503 }
+      );
+    }
+
     // Support BOTH business and personal accounts
     const { validateBusinessSession, getSessionUserEmail } = await import('@/lib/session');
     const businessSession = await validateBusinessSession();

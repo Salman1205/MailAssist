@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { User } from "lucide-react"
+import { User, AlertTriangle } from "lucide-react"
 import PromoteAdminDialog from "@/components/promote-admin-dialog"
 
 interface User {
@@ -28,6 +28,7 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [dialogError, setDialogError] = useState<string | null>(null) // Separate error for dialog
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [newUserName, setNewUserName] = useState("")
   const [newUserEmail, setNewUserEmail] = useState("")
@@ -39,6 +40,7 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
   const [showPromoteDialog, setShowPromoteDialog] = useState(false)
   const [hasAdmin, setHasAdmin] = useState(false)
   const [currentUser, setCurrentUser] = useState<User | null>(null)
+  const [configError, setConfigError] = useState(false)
 
   const getRoleColor = (role: string) => {
     switch (role) {
@@ -84,9 +86,23 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
       setLoading(true)
       const response = await fetch("/api/auth/select-user")
 
+      // If configuration error (503)
+      if (response.status === 503) {
+        setConfigError(true)
+        setError("Database configuration missing. Please check your environment variables.")
+        setLoading(false)
+        return
+      }
+
       // If 401 (not authenticated), treat as "no users yet" instead of error
       if (response.status === 401) {
+        // Redirect to welcome if not authenticated, don't show user selector
+        // But if we're here, we might be in a state where we just connected Gmail
+        // and need to create the first user.
+        // Let's check if we have a session cookie roughly
         setUsers([])
+        // Optional: redirect to welcome if this persists?
+        // window.location.href = '/welcome'
         setError(null)
         setLoading(false)
         return
@@ -97,6 +113,7 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
       }
       const data = await response.json()
       setUsers(data.users || [])
+      setConfigError(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load users")
     } finally {
@@ -134,7 +151,7 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
 
   const handleCreateUser = async () => {
     if (!newUserName.trim()) {
-      setError("Name is required")
+      setDialogError("Name is required")
       return
     }
 
@@ -143,7 +160,7 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
 
     try {
       setCreating(true)
-      setError(null)
+      setDialogError(null)
 
       const response = await fetch("/api/auth/select-user", {
         method: "POST",
@@ -183,7 +200,9 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
 
       setError(null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create user")
+      // Set the error on the dialog specifically
+      setDialogError(err instanceof Error ? err.message : "Failed to create user")
+      console.error("Create User Error:", err)
     } finally {
       setCreating(false)
     }
@@ -196,6 +215,38 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
           <p className="text-muted-foreground">Loading users...</p>
         </div>
+      </div>
+    )
+  }
+
+  if (configError) {
+    return (
+      <div className="fixed inset-0 flex items-center justify-center bg-gradient-to-br from-background via-muted/20 to-background p-4">
+        <Card className="w-full max-w-md shadow-2xl border-[var(--status-urgent)]/50 bg-card/95">
+          <CardHeader className="text-center pb-2">
+            <div className="mx-auto w-16 h-16 bg-[var(--status-urgent-bg)] rounded-full flex items-center justify-center mb-4">
+              <AlertTriangle className="w-8 h-8 text-[var(--status-urgent)]" />
+            </div>
+            <CardTitle className="text-2xl font-bold text-[var(--status-urgent)]">Configuration Error</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 text-center">
+            <p className="text-muted-foreground">
+              The database configuration is missing or invalid.
+            </p>
+            <div className="p-4 bg-muted rounded-lg text-sm font-mono text-left break-all">
+              SUPABASE_URL or SERVICE_KEY missing
+            </div>
+            <p className="text-sm">
+              Please check your deployment settings (Environment Variables) in Vercel.
+            </p>
+            <Button
+              className="w-full mt-4"
+              onClick={() => window.location.reload()}
+            >
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     )
   }
@@ -254,7 +305,13 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
                   Create the first user (will be Admin with full access)
                 </p>
               </div>
-              <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+              <Dialog open={showCreateDialog} onOpenChange={(open) => {
+                setShowCreateDialog(open)
+                if (!open) {
+                  setDialogError(null)
+                  setNewUserName("")
+                }
+              }}>
                 <DialogTrigger asChild>
                   <Button size="lg" className="w-full shadow-lg hover:shadow-xl transition-all h-12 text-base font-bold">
                     <User className="w-5 h-5 mr-2" />
@@ -273,6 +330,15 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
                       The first user will automatically be an Admin with full access
                     </DialogDescription>
                   </DialogHeader>
+
+                  {/* DISPLAY ERROR HERE FOR DIALOG */}
+                  {dialogError && (
+                    <div className="p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 rounded-lg text-sm text-red-600 dark:text-red-400 flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4" />
+                      {dialogError}
+                    </div>
+                  )}
+
                   <div className="space-y-5 pt-4">
                     <div className="space-y-2">
                       <Label htmlFor="name" className="text-sm font-semibold">Name *</Label>
@@ -282,6 +348,7 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
                         onChange={(e) => setNewUserName(e.target.value)}
                         placeholder="e.g., Salman"
                         className="shadow-sm h-11"
+                        autoFocus
                       />
                     </div>
                     <div className="space-y-2">
@@ -400,7 +467,13 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
               {/* Create new user button */}
               {(!hasAdmin || currentUser?.role === "admin") && (
                 <div className="pt-2">
-                  <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+                  <Dialog open={showCreateDialog} onOpenChange={(open) => {
+                    setShowCreateDialog(open)
+                    if (!open) {
+                      setDialogError(null)
+                      setNewUserName("")
+                    }
+                  }}>
                     <DialogTrigger asChild>
                       <Button
                         variant="outline"
@@ -424,6 +497,15 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
                             : "Add a new team member to this account"}
                         </DialogDescription>
                       </DialogHeader>
+
+                      {/* DISPLAY ERROR HERE FOR DIALOG */}
+                      {dialogError && (
+                        <div className="p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 rounded-lg text-sm text-red-600 dark:text-red-400 flex items-center gap-2">
+                          <AlertTriangle className="w-4 h-4" />
+                          {dialogError}
+                        </div>
+                      )}
+
                       <div className="space-y-5 pt-4">
                         <div className="space-y-2">
                           <Label htmlFor="new-name" className="text-sm font-semibold">Name *</Label>
@@ -540,4 +622,3 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
     </div>
   )
 }
-
