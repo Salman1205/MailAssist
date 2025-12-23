@@ -225,7 +225,7 @@ export default function TopNav({ isConnected, userProfile, currentUser, onLogout
           >
             <input
               name="global-search"
-              type="search"
+              type="text"
               placeholder="Search..."
               className="w-full h-10 px-4 pr-10 rounded-xl border-2 border-border bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all hover:border-primary/50 md:placeholder:text-[length:inherit]"
               style={{ fontSize: '14px' }}

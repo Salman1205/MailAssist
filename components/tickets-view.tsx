@@ -39,6 +39,9 @@ interface Ticket {
   lastAgentReplyAt?: string | null
   createdAt: string
   updatedAt: string
+  departmentId?: string | null
+  departmentName?: string | null
+  classificationConfidence?: number | null
   ownerEmail?: string
   userEmail?: string
 }
@@ -106,7 +109,9 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   const [customDateEnd, setCustomDateEnd] = useState<string>("")
   const [searchQuery, setSearchQuery] = useState<string>("")
   const [selectedAccount, setSelectedAccount] = useState<string>("all")
+  const [departmentFilter, setDepartmentFilter] = useState<string>("all")
   const [emails, setEmails] = useState<string[]>([]) // For account filter dropdown
+  const [departments, setDepartments] = useState<any[]>([]) // For department filter dropdown
 
   // Sync global search into local search field
   useEffect(() => {
@@ -114,6 +119,50 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       setSearchQuery(globalSearchTerm)
     }
   }, [globalSearchTerm])
+
+  // Auto-switch to tab containing search results when searching
+  useEffect(() => {
+    if (!searchQuery || tickets.length === 0) return
+
+    const query = searchQuery.toLowerCase()
+
+    // Find all tickets matching the search (ignoring tab filter)
+    const matchingTickets = tickets.filter(t =>
+      t.subject.toLowerCase().includes(query) ||
+      t.customerEmail.toLowerCase().includes(query) ||
+      (t.customerName && t.customerName.toLowerCase().includes(query))
+    )
+
+    if (matchingTickets.length === 0) return
+
+    // Helper to determine which tab a ticket belongs to
+    const getTicketTab = (t: Ticket): typeof activeTab => {
+      if (t.status === 'closed') return 'closed'
+      if (t.assigneeUserId === currentUserId) return 'assigned'
+      if (!t.assigneeUserId) return 'unassigned'
+      return 'open'
+    }
+
+    // Check if current tab has any matching tickets
+    const currentTabMatches = matchingTickets.filter(t => {
+      const tab = getTicketTab(t)
+      return tab === activeTab
+    })
+
+    // If current tab has matches, no need to switch
+    if (currentTabMatches.length > 0) return
+
+    // Find the best tab to switch to (prefer in order: assigned, unassigned, open, closed)
+    const tabPriority: (typeof activeTab)[] = ['assigned', 'unassigned', 'open', 'closed']
+    for (const tab of tabPriority) {
+      const hasMatch = matchingTickets.some(t => getTicketTab(t) === tab)
+      if (hasMatch) {
+        console.log(`[Search] Switching to "${tab}" tab where search results exist`)
+        setActiveTab(tab)
+        break
+      }
+    }
+  }, [searchQuery, tickets, currentUserId, activeTab])
 
   // Typing indicator state
   const [isTyping, setIsTyping] = useState(false)
@@ -790,6 +839,22 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     return () => clearInterval(interval)
   }, [selectedTicket])
 
+  // Fetch departments for filter dropdown
+  useEffect(() => {
+    const fetchDepartments = async () => {
+      try {
+        const response = await fetch('/api/departments')
+        if (response.ok) {
+          const data = await response.json()
+          setDepartments(data.departments || [])
+        }
+      } catch (err) {
+        console.error('Error fetching departments:', err)
+      }
+    }
+    fetchDepartments()
+  }, [])
+
   // Track selected ticket changes for comparison
   useEffect(() => {
     if (selectedTicket) {
@@ -1059,11 +1124,15 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       const data = await response.json()
 
       // Update with server response (confirms optimistic update)
-      setTickets((prev) => prev.map((t) => (t.id === ticketId ? data.ticket : t)))
+      if (data.ticket) {
+        setTickets((prev) => prev.map((t) => (t.id === ticketId ? data.ticket : t)))
 
-      // Update selected ticket if it's the one being assigned
-      if (selectedTicket?.id === ticketId) {
-        setSelectedTicket(data.ticket)
+        // Update selected ticket if it's the one being assigned
+        if (selectedTicket?.id === ticketId) {
+          setSelectedTicket(data.ticket)
+        }
+      } else {
+        console.warn('[Assign Ticket] No ticket data in response, keeping optimistic update')
       }
 
       // Close dialog and clear pending assignment BEFORE showing toast
@@ -1356,6 +1425,36 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }
 
+  const handleUpdateDepartment = async (departmentId: string | null) => {
+    if (!selectedTicket) return
+
+    try {
+      const response = await fetch(`/api/tickets/${selectedTicket.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ departmentId }),
+      })
+
+      if (!response.ok) throw new Error("Failed to update department")
+
+      const data = await response.json()
+      setSelectedTicket(data.ticket)
+      setTickets(prev => prev.map(t => t.id === selectedTicket.id ? data.ticket : t))
+
+      toast({
+        title: "Department updated",
+        description: departmentId ? "Ticket department has been updated" : "Ticket marked as unclassified",
+      })
+    } catch (error) {
+      console.error("Error updating department:", error)
+      toast({
+        title: "Error",
+        description: "Failed to update department",
+        variant: "destructive",
+      })
+    }
+  }
+
   const handleAddNote = async () => {
     if (!selectedTicket || !newNote.trim()) return
     try {
@@ -1630,6 +1729,11 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       filtered = filtered.filter(t => t.assigneeUserId === null)
     } else if (assigneeFilter !== "all") {
       filtered = filtered.filter(t => t.assigneeUserId === assigneeFilter)
+    }
+    if (departmentFilter === "unclassified") {
+      filtered = filtered.filter(t => !t.departmentId)
+    } else if (departmentFilter !== "all") {
+      filtered = filtered.filter(t => t.departmentName === departmentFilter)
     }
     if (searchQuery) {
       const query = searchQuery.toLowerCase()
@@ -1934,6 +2038,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                               setStatusFilter("all")
                               setPriorityFilter("all")
                               setAssigneeFilter("all")
+                              setDepartmentFilter("all")
                               setTagsFilter("all")
                               setDateFilter("all")
                               setShowUnreadOnly(false)
@@ -2098,6 +2203,26 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                           </Select>
                         </div>
 
+                        <div className="flex flex-col gap-1">
+                          <Label className="text-[10px] text-muted-foreground">Department</Label>
+                          <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
+                            <SelectTrigger className="h-7 text-xs">
+                              <SelectValue placeholder="All" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All Departments</SelectItem>
+                              <SelectItem value="unclassified">Unclassified</SelectItem>
+                              {departments
+                                .sort((a, b) => a.name.localeCompare(b.name))
+                                .map((dept) => (
+                                  <SelectItem key={dept.id} value={dept.name}>
+                                    {dept.name}
+                                  </SelectItem>
+                                ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
                         <div className="flex flex-col gap-1 justify-end">
                           <div className="flex items-center gap-1.5 h-7">
                             <Switch
@@ -2252,10 +2377,10 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                       <Card
                         key={ticket.id}
                         className={`m-2 cursor-pointer relative transition-all duration-300 ease-out animate-in fade-in slide-in-from-left-4 ${isSelected
-                          ? "border-primary border-2 bg-muted/30 shadow-lg ring-2 ring-primary/20 scale-[1.02]"
+                          ? "border-primary border-2 bg-muted/30 shadow-lg ring-2 ring-primary/20"
                           : isUnread
-                            ? "border-primary/60 bg-primary/5 hover:bg-primary/10 hover:shadow-md hover:scale-[1.01] hover:border-primary/80"
-                            : "border-border/50 hover:bg-muted/50 hover:shadow-md hover:scale-[1.01] hover:border-border"
+                            ? "border-primary/60 bg-primary/5 hover:bg-primary/10 hover:shadow-md hover:border-primary/80"
+                            : "border-border/50 hover:bg-muted/50 hover:shadow-md hover:border-border"
                           }`}
                         style={{ animationDelay: `${index * 30}ms` }}
                         onClick={(e) => {
@@ -2300,15 +2425,26 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                                   New
                                 </Badge>
                               )}
-                              <Badge className={`${getStatusColor(ticket.status)} text-white text-xs transition-all duration-200 hover:scale-105`}>
+                              <Badge className={`${getStatusColor(ticket.status)} text-white text-xs transition-all duration-200`}>
                                 {ticket.status}
                               </Badge>
                               {ticket.assigneeUserId && (
-                                <Badge className={`${getPriorityColor(ticket.priority)} text-white text-xs transition-all duration-200 hover:scale-105`}>
+                                <Badge className={`${getPriorityColor(ticket.priority)} text-white text-xs transition-all duration-200`}>
                                   {ticket.priority}
                                 </Badge>
                               )}
                             </div>
+                          </div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {ticket.departmentName ? (
+                              <Badge variant="outline" className="text-[10px] h-4 px-1.5 border-primary/30 text-primary bg-primary/5">
+                                {ticket.departmentName}
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-[10px] h-4 px-1.5 border-dashed text-muted-foreground">
+                                Unclassified
+                              </Badge>
+                            )}
                           </div>
                           <div className="flex items-center gap-2 text-xs text-muted-foreground min-w-0">
                             <Mail className="w-3 h-3 flex-shrink-0" />
@@ -2364,12 +2500,26 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                     <div className="space-y-2 flex-1 min-w-0 max-w-full overflow-hidden">
                       <h1 className="text-xl md:text-2xl font-bold break-words overflow-wrap-anywhere max-w-full">{selectedTicket.subject}</h1>
                       <div className="flex items-center gap-2 flex-wrap">
-                        <Badge className={`${getStatusColor(selectedTicket.status)} transition-all duration-300 ease-out hover:scale-110 hover:shadow-md`}>
+                        <Badge className={`${getStatusColor(selectedTicket.status)} transition-all duration-300 ease-out hover:shadow-md`}>
                           {selectedTicket.status}
                         </Badge>
                         {selectedTicket.assigneeUserId && selectedTicket.priority && (
-                          <Badge className={`${getPriorityColor(selectedTicket.priority)} transition-all duration-300 ease-out hover:scale-110 hover:shadow-md`}>
+                          <Badge className={`${getPriorityColor(selectedTicket.priority)} transition-all duration-300 ease-out hover:shadow-md`}>
                             {selectedTicket.priority}
+                          </Badge>
+                        )}
+                        {selectedTicket.departmentName ? (
+                          <Badge variant="secondary" className="bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-all duration-300">
+                            {selectedTicket.departmentName}
+                            {selectedTicket.classificationConfidence && (
+                              <span className="ml-1 text-[10px] opacity-70">
+                                ({Math.round(selectedTicket.classificationConfidence)}%)
+                              </span>
+                            )}
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="border-dashed text-muted-foreground">
+                            Unclassified
                           </Badge>
                         )}
                         {selectedTicket.tags.map((tag, idx) => (
@@ -2468,6 +2618,25 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                         <SelectItem value="pending">Pending</SelectItem>
                         <SelectItem value="on_hold">On Hold</SelectItem>
                         <SelectItem value="closed">Closed</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select
+                      value={selectedTicket.departmentId || "unclassified"}
+                      onValueChange={(v) => {
+                        const deptId = v === "unclassified" ? null : v
+                        handleUpdateDepartment(deptId)
+                      }}
+                    >
+                      <SelectTrigger className="w-32 h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="unclassified">Unclassified</SelectItem>
+                        {departments.map((dept) => (
+                          <SelectItem key={dept.id} value={dept.id}>
+                            {dept.name}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                     {selectedTicket.assigneeUserId ? (

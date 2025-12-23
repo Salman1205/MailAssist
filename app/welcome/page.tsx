@@ -57,22 +57,46 @@ export default function WelcomePage() {
       </div>
 
       {/* Header */}
-      <div className="relative border-b border-white/10 bg-black/30 backdrop-blur-xl shadow-lg">
+      <header className="sticky top-0 z-50 w-full border-b border-white/10 bg-black/40 backdrop-blur-md transition-all duration-300">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
-            <Logo size="default" showText={true} />
-            <div className="flex items-center gap-4">
-              <Button
-                variant="outline"
-                onClick={() => window.location.href = '/auth/landing?view=login'}
-                className="bg-white/5 border-white/20 text-white hover:bg-white/10 hover:border-white/30 h-10 px-6 text-sm font-medium transition-all duration-200 hover:scale-105"
-              >
-                Sign In
-              </Button>
+            <div className="flex items-center gap-2 group cursor-pointer transition-transform hover:scale-105 active:scale-95" onClick={() => window.location.reload()}>
+              <Logo size="default" showText={true} />
+            </div>
+            <div className="flex items-center gap-6">
+              <nav className="hidden md:flex items-center gap-8">
+                {['Features', 'Solutions', 'Pricing'].map((item) => (
+                  <a
+                    key={item}
+                    href={`#${item.toLowerCase()}`}
+                    className="text-sm font-medium text-slate-300 hover:text-white transition-colors relative group"
+                  >
+                    {item}
+                    <span className="absolute -bottom-1 left-0 w-0 h-0.5 bg-primary group-hover:w-full transition-all duration-300" />
+                  </a>
+                ))}
+              </nav>
+              <div className="h-6 w-px bg-white/10 hidden md:block" />
+              <div className="flex items-center gap-3">
+                <Button
+                  variant="ghost"
+                  onClick={() => window.location.href = '/auth/landing?view=login'}
+                  className="text-white hover:bg-white/5 h-10 px-4 text-sm font-medium transition-all"
+                >
+                  Sign In
+                </Button>
+                <Button
+                  onClick={handleGmailConnect}
+                  disabled={connecting}
+                  className="bg-primary hover:bg-primary/90 text-white shadow-lg shadow-primary/20 h-10 px-6 text-sm font-bold rounded-full transition-all hover:scale-105 active:scale-95 border-0"
+                >
+                  {connecting ? "Connecting..." : "Get Started"}
+                </Button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      </header>
 
       {/* Hero Section */}
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-20">

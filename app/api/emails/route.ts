@@ -172,6 +172,36 @@ export async function GET(request: NextRequest) {
       ).catch(err => console.error('Background ticket processing error:', err));
     }
 
+    // Enrich emails with department info if available
+    if (emails && emails.length > 0) {
+      const threadIds = Array.from(new Set(emails.map((e: any) => e.threadId)));
+      const { supabase } = await import('@/lib/supabase');
+
+      if (supabase) {
+        const { data: threadTickets } = await supabase
+          .from('tickets')
+          .select(`
+            thread_id,
+            department:departments(name)
+          `)
+          .in('thread_id', threadIds);
+
+        if (threadTickets) {
+          const deptMap = new Map();
+          threadTickets.forEach((t: any) => {
+            if (t.department?.name) {
+              deptMap.set(t.thread_id, t.department.name);
+            }
+          });
+
+          emails = emails.map((e: any) => ({
+            ...e,
+            departmentName: deptMap.get(e.threadId) || null
+          }));
+        }
+      }
+    }
+
     // Return emails immediately - ticket creation happens in background
     console.log(`[EMAILS] Successfully fetched ${emails.length} emails`);
     const response = NextResponse.json({ emails, count: emails.length });

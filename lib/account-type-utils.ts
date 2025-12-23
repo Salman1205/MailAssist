@@ -58,13 +58,31 @@ export async function getAccountInfo(email: string): Promise<AccountInfo> {
             };
         }
 
-        // No users found
+        // No users found in users table - check businesses table directly
+        // This handles the case where registration started but OTP wasn't verified
         if (!users || users.length === 0) {
+            const { data: business, error: businessError } = await supabase
+                .from('businesses')
+                .select('id, is_email_verified')
+                .eq('business_email', normalizedEmail)
+                .maybeSingle();
+
+            if (businessError || !business) {
+                return {
+                    exists: false,
+                    accountType: null,
+                    hasPassword: false,
+                    isVerified: false,
+                };
+            }
+
+            // Exists in businesses table but not users table
             return {
-                exists: false,
-                accountType: null,
-                hasPassword: false,
-                isVerified: false,
+                exists: true,
+                accountType: 'business',
+                businessId: business.id,
+                hasPassword: true, // Assume it has a password if it reached business creation
+                isVerified: business.is_email_verified || false,
             };
         }
 

@@ -21,7 +21,8 @@ interface InboxViewProps {
   }) => void
   onDraftGenerated?: () => void
   viewType?: "inbox" | "sent" | "spam" | "trash"
-  selectedAccount?: string | null  // NEW: Filter by account
+  selectedAccount?: string | null  // Filter by account
+  globalSearchTerm?: string  // Global search from top nav
 }
 
 interface ConnectedAccount {
@@ -29,7 +30,7 @@ interface ConnectedAccount {
   provider: string
 }
 
-export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerated, viewType = "inbox", selectedAccount: propSelectedAccount }: InboxViewProps) {
+export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerated, viewType = "inbox", selectedAccount: propSelectedAccount, globalSearchTerm }: InboxViewProps) {
   const [listLoading, setListLoading] = useState(true)
   const [selectedEmailData, setSelectedEmailData] = useState<{
     subject?: string
@@ -47,7 +48,16 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
   const [connectedAccounts, setConnectedAccounts] = useState<ConnectedAccount[]>([])
   // Always start with 'all' - no localStorage persistence to avoid stale data issues
   const [selectedAccount, setSelectedAccount] = useState<string>(propSelectedAccount || 'all')
+  const [searchQuery, setSearchQuery] = useState<string>('')
+  const [lastRefreshTime, setLastRefreshTime] = useState<number>(Date.now())
   const showDetail = Boolean(selectedEmail)
+
+  // Sync global search to local search query
+  useEffect(() => {
+    if (globalSearchTerm !== undefined) {
+      setSearchQuery(globalSearchTerm)
+    }
+  }, [globalSearchTerm])
 
   // Fetch connected accounts
   useEffect(() => {
@@ -139,6 +149,18 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
     onSelectEmail(null)
   }, [viewType, onSelectEmail])
 
+  // Auto-refresh every 30 seconds to pick up department classifications
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (emailListRefresh && !listLoading) {
+        emailListRefresh()
+        setLastRefreshTime(Date.now())
+      }
+    }, 30000) // 30 seconds
+
+    return () => clearInterval(interval)
+  }, [emailListRefresh, listLoading])
+
   // Memoized callback to prevent infinite loops
   const handleRefreshReady = useCallback((refreshFn: () => void) => {
     setEmailListRefresh(() => refreshFn)
@@ -201,6 +223,7 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
             viewType={viewType}
             onRefreshReady={handleRefreshReady}
             selectedAccount={selectedAccount === 'all' ? undefined : selectedAccount}
+            searchQuery={searchQuery}
           />
         </div>
       </div>
@@ -246,14 +269,16 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
       </div>
 
       {/* Shopify Sidebar */}
-      {showShopifySidebar && selectedEmailData && (
-        <div className="w-80 border-l border-border bg-background overflow-hidden flex-shrink-0">
-          <ShopifySidebar
-            customerEmail={selectedEmailData.from || ''}
-            onClose={() => setShowShopifySidebar(false)}
-          />
-        </div>
-      )}
-    </div>
+      {
+        showShopifySidebar && selectedEmailData && (
+          <div className="w-80 border-l border-border bg-background overflow-hidden flex-shrink-0">
+            <ShopifySidebar
+              customerEmail={selectedEmailData.from || ''}
+              onClose={() => setShowShopifySidebar(false)}
+            />
+          </div>
+        )
+      }
+    </div >
   )
 }

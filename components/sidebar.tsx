@@ -17,6 +17,7 @@ export type SidebarView =
   | "quick-replies"
   | "analytics"
   | "team"
+  | "departments"
 
 interface SidebarProps {
   activeView: SidebarView
@@ -38,8 +39,8 @@ const NAV_ITEMS = [
 ] as const
 
 const ADMIN_NAV_ITEMS = [
-  { id: "users", label: "Team", icon: UsersIcon },
   { id: "team", label: "Team Management", icon: UsersIcon },
+  { id: "departments", label: "Departments", icon: DepartmentsIcon },
 ] as const
 
 const AI_NAV_ITEMS = [
@@ -208,10 +209,9 @@ function NavButton({ isActive, isCollapsed, icon, label, onClick }: NavButtonPro
         group relative w-full flex items-center justify-center rounded-lg
         transition-all duration-200 ease-out
         ${isCollapsed ? "h-11 px-2" : "h-10 px-3 gap-3"}
-        ${
-          isActive
-            ? "bg-primary text-primary-foreground shadow-sm"
-            : "text-foreground hover:bg-secondary/80 hover:text-primary"
+        ${isActive
+          ? "bg-primary text-primary-foreground shadow-sm"
+          : "text-foreground hover:bg-secondary/80 hover:text-primary"
         }
         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
       `}
@@ -223,7 +223,7 @@ function NavButton({ isActive, isCollapsed, icon, label, onClick }: NavButtonPro
       {!isCollapsed && (
         <span className="text-sm font-medium flex-1 text-left truncate">{label}</span>
       )}
-      
+
       {/* Tooltip for collapsed state */}
       {isCollapsed && (
         <div
@@ -365,6 +365,17 @@ function AnalyticsIcon(props: React.SVGProps<SVGSVGElement>) {
       <line x1="18" y1="20" x2="18" y2="10" />
       <line x1="12" y1="20" x2="12" y2="4" />
       <line x1="6" y1="20" x2="6" y2="14" />
+    </svg>
+  )
+}
+
+function DepartmentsIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" {...props}>
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="14" width="7" height="7" rx="1" />
+      <rect x="3" y="14" width="7" height="7" rx="1" />
     </svg>
   )
 }

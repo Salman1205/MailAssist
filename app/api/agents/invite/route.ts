@@ -16,14 +16,14 @@ export async function POST(request: NextRequest) {
   try {
     // 1. Validate user session and check if admin
     const sessionUser = await validateBusinessSession()
-    
+
     if (!sessionUser) {
       return NextResponse.json(
         { error: 'Unauthorized - please log in' },
         { status: 401 }
       )
     }
-    
+
     if (sessionUser.role !== 'admin' && sessionUser.role !== 'manager') {
       return NextResponse.json(
         { error: 'Only admins and managers can invite agents' },
@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
 
     // 2. Parse request body
     const body = await request.json()
-    const { name, email, role = 'agent' } = body
+    const { name, email, role = 'agent', departmentIds = [] } = body
 
     if (!name || !email) {
       return NextResponse.json(
@@ -110,6 +110,7 @@ export async function POST(request: NextRequest) {
         token: invitationToken, // for backward compatibility
         status: 'pending',
         expires_at: expiresAt.toISOString(),
+        department_ids: departmentIds, // Store department IDs for assignment after acceptance
       })
       .select()
       .single()
@@ -125,7 +126,7 @@ export async function POST(request: NextRequest) {
     // 7. Send invitation email
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
     const inviteUrl = `${appUrl}/invite/${invitationToken}`
-    
+
     const companyName = process.env.COMPANY_NAME || 'Mail Assistant'
 
     try {
@@ -229,13 +230,13 @@ export async function POST(request: NextRequest) {
       console.log('[InviteAgent] Invitation email sent successfully');
     } catch (emailError) {
       console.error('[InviteAgent] Error sending invitation email:', emailError)
-      
+
       // Delete the invitation if email fails
       await supabase
         .from('agent_invitations')
         .delete()
         .eq('id', invitation.id)
-      
+
       return NextResponse.json(
         { error: 'Failed to send invitation email. Please try again.' },
         { status: 500 }

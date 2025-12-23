@@ -9,11 +9,14 @@ import { getTickets } from '@/lib/tickets';
 import { getCurrentUserIdFromRequest } from '@/lib/permissions';
 import { canViewAllTickets } from '@/lib/permissions';
 import { getCurrentUserEmail } from '@/lib/storage';
+import { validateBusinessSession } from '@/lib/session';
 
 export async function GET(request: NextRequest) {
   try {
     const userId = getCurrentUserIdFromRequest(request);
     const userEmail = await getCurrentUserEmail();
+    const businessSession = await validateBusinessSession();
+    const businessId = businessSession?.businessId || null;
 
     if (!userId) {
       return NextResponse.json(
@@ -36,7 +39,7 @@ export async function GET(request: NextRequest) {
     const accountFilter = request.nextUrl.searchParams.get('account') || undefined;
 
     // Get tickets with role-based filtering and optional account scope
-    const tickets = await getTickets(userId, canViewAll, userEmail, accountFilter);
+    const tickets = await getTickets(userId, canViewAll, userEmail, accountFilter, businessId);
 
     return NextResponse.json({ tickets });
   } catch (error) {

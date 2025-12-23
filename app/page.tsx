@@ -17,6 +17,7 @@ import QuickRepliesView from "@/components/quick-replies-view"
 import AnalyticsDashboard from "@/components/analytics-dashboard"
 import ComposeView from "@/components/compose-view"
 import TeamManagement from "@/components/team-management"
+import DepartmentsView from "@/components/departments-view"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { User, Sparkles } from "lucide-react"
@@ -613,6 +614,8 @@ function PageContent() {
         )
       case "ai-settings":
         return <AISettings />
+      case "departments":
+        return <DepartmentsView />
       case "analytics":
         return (
           <div className="p-6">
@@ -626,6 +629,7 @@ function PageContent() {
             onSelectEmail={setSelectedEmail}
             onDraftGenerated={handleDraftGenerated}
             viewType="sent"
+            globalSearchTerm={globalSearch}
           />
         )
       case "spam":
@@ -635,6 +639,7 @@ function PageContent() {
             onSelectEmail={setSelectedEmail}
             onDraftGenerated={handleDraftGenerated}
             viewType="spam"
+            globalSearchTerm={globalSearch}
           />
         )
       case "trash":
@@ -644,6 +649,7 @@ function PageContent() {
             onSelectEmail={setSelectedEmail}
             onDraftGenerated={handleDraftGenerated}
             viewType="trash"
+            globalSearchTerm={globalSearch}
           />
         )
       default:
@@ -653,6 +659,7 @@ function PageContent() {
             onSelectEmail={setSelectedEmail}
             onDraftGenerated={handleDraftGenerated}
             viewType="inbox"
+            globalSearchTerm={globalSearch}
           />
         )
     }

@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@/lib/supabase-client'
 import { hashPassword, generateSession } from '@/lib/auth-utils'
+import { updateUserDepartments } from '@/lib/departments'
 import { cookies } from 'next/headers'
 
 export async function POST(request: NextRequest) {
@@ -133,13 +134,22 @@ export async function POST(request: NextRequest) {
     // 10. Update invitation status
     await supabase
       .from('agent_invitations')
-      .update({ 
+      .update({
         status: 'accepted',
         accepted_at: new Date().toISOString()
       })
       .eq('id', invitation.id)
 
-    // 11. Set session cookies
+    // 11. Assign departments if specified in invitation
+    if (invitation.department_ids && Array.isArray(invitation.department_ids) && invitation.department_ids.length > 0) {
+      console.log('[AcceptInvite] Assigning departments:', invitation.department_ids)
+      const departmentsAssigned = await updateUserDepartments(newUser.id, invitation.department_ids)
+      if (!departmentsAssigned) {
+        console.warn('[AcceptInvite] Failed to assign departments, but user was created successfully')
+      }
+    }
+
+    // 12. Set session cookies
     const cookieStore = await cookies()
     cookieStore.set('session_token', sessionToken, {
       httpOnly: true,
@@ -167,7 +177,7 @@ export async function POST(request: NextRequest) {
 
     console.log('[AcceptInvite] User created and session established')
 
-    // 12. Return success
+    // 13. Return success
     return NextResponse.json({
       success: true,
       message: 'Account created successfully! Welcome aboard.',

@@ -22,6 +22,9 @@ export interface Ticket {
   updatedAt: string;
   ownerEmail?: string; // The account that this ticket belongs to
   userEmail?: string; // Scoping email for this ticket
+  departmentId?: string | null; // Department assignment
+  departmentName?: string | null; // Department name (for display)
+  classificationConfidence?: number | null; // AI classification confidence (0-100)
 }
 
 export interface TicketSeed {
@@ -64,6 +67,9 @@ function mapRowToTicket(row: any): Ticket {
     updatedAt: row.updated_at,
     ownerEmail: row.owner_email,
     userEmail: row.user_email,
+    departmentId: row.department_id || null,
+    departmentName: row.department_name || null, // Joined from departments table
+    classificationConfidence: row.classification_confidence || null,
   };
 }
 
@@ -96,7 +102,8 @@ export async function getTicketByThreadId(
 
 export async function getOrCreateTicketForThread(
   threadId: string,
-  seed: TicketSeed
+  seed: TicketSeed,
+  emailBody?: string // Optional: email body for classification
 ): Promise<Ticket | null> {
   if (!supabase) return null;
 
@@ -149,8 +156,96 @@ export async function getOrCreateTicketForThread(
   }
 
   console.log(`[Ticket] Successfully created ticket ${data.id} for thread ${threadId}`);
-  return mapRowToTicket(data);
+
+  const ticket = mapRowToTicket(data);
+
+  // 2) Classify ticket to department (async, non-blocking)
+  // DISABLED: AI classification temporarily disabled
+  /*
+  if (emailBody) {
+    classifyTicketToDepartmentAsync(ticket.id, seed.subject, emailBody, userEmail).catch(err => {
+      console.error('[Ticket] Department classification failed (non-blocking):', err);
+    });
+  }
+  */
+
+  return ticket;
 }
+
+/**
+ * Classify a ticket to a department using AI (async, non-blocking)
+ * This runs in the background and updates the ticket after classification
+ */
+async function classifyTicketToDepartmentAsync(
+  ticketId: string,
+  subject: string,
+  body: string,
+  userEmail: string | null
+): Promise<void> {
+  try {
+    // Determine account scope
+    const { getCurrentUser } = await import('./session');
+    const currentUser = await getCurrentUser();
+    const businessId = currentUser?.businessId || null;
+    const scopeEmail = businessId ? null : (userEmail || null);
+
+    // Get all departments for this account
+    const { getAllDepartments } = await import('./departments');
+    const departments = await getAllDepartments(scopeEmail, businessId);
+
+    if (!departments || departments.length === 0) {
+      console.log('[Ticket] No departments configured, skipping classification');
+      return;
+    }
+
+    // Get Groq API key for classification
+    const { getGroqApiKey, classifyEmailWithFallback } = await import('./department-classifier');
+    const groqApiKey = getGroqApiKey();
+
+    if (!groqApiKey) {
+      console.warn('[Ticket] GROQ_API_KEY not configured, skipping AI classification');
+      return;
+    }
+
+    // Perform classification
+    const result = await classifyEmailWithFallback(
+      { subject, body },
+      departments,
+      groqApiKey
+    );
+
+    console.log('[Ticket] Classification result:', result);
+
+    // Update ticket with department assignment
+    if (result.departmentId) {
+      await supabase
+        ?.from('tickets')
+        .update({
+          department_id: result.departmentId,
+          classification_confidence: result.confidence,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', ticketId);
+
+      console.log(`[Ticket] Assigned ticket ${ticketId} to department ${result.departmentName} (${result.confidence}% confidence)`);
+    } else {
+      // Store classification attempt even if no department matched
+      await supabase
+        ?.from('tickets')
+        .update({
+          classification_confidence: result.confidence,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', ticketId);
+
+      console.log(`[Ticket] Ticket ${ticketId} left unclassified (low confidence: ${result.confidence}%)`);
+    }
+  } catch (error) {
+    console.error('[Ticket] Error in async department classification:', error);
+    // Don't throw - this is a background task and shouldn't break ticket creation
+  }
+}
+
 
 /**
  * Ensure there is a ticket row for a given email, and update
@@ -267,7 +362,8 @@ export async function getTickets(
   currentUserId: string | null,
   canViewAll: boolean,
   userEmail: string | null,
-  accountFilter?: string
+  accountFilter?: string,
+  businessId?: string | null
 ): Promise<Ticket[]> {
   if (!supabase) return [];
 
@@ -277,7 +373,8 @@ export async function getTickets(
     .from('tickets')
     .select(`
       *,
-      assignee:users!tickets_assignee_user_id_fkey(id, name)
+      assignee:users!tickets_assignee_user_id_fkey(id, name),
+      department:departments(id, name)
     `);
 
   // Filter by Gmail account (the primary account scoping)
@@ -292,8 +389,25 @@ export async function getTickets(
 
   // Role-based filtering
   if (!canViewAll && currentUserId) {
-    // Agent: only see own tickets + unassigned
-    query = query.or(`assignee_user_id.eq.${currentUserId},assignee_user_id.is.null`);
+    // Agent filtering logic:
+    // 1. Tickets specifically assigned to this agent
+    // 2. Unassigned tickets that belong to one of the agent's departments
+
+    // First, fetch the user's assigned departments
+    const { data: userDepts } = await supabase
+      .from('user_departments')
+      .select('department_id')
+      .eq('user_id', currentUserId);
+
+    const deptIds = userDepts?.map(ud => ud.department_id) || [];
+
+    if (deptIds.length > 0) {
+      // If agent has departments, they see: (assigned to them) OR (unassigned AND in their dept)
+      query = query.or(`assignee_user_id.eq.${currentUserId},and(assignee_user_id.is.null,department_id.in.(${deptIds.join(',')}))`);
+    } else {
+      // If agent has no departments, they only see tickets assigned to them
+      query = query.eq('assignee_user_id', currentUserId);
+    }
   }
   // Admin/Manager: see all (no additional filter)
 
@@ -321,10 +435,12 @@ export async function getTickets(
   return data.map((row: any) => {
     const ticket = mapRowToTicket(row);
     // Extract assignee name from joined users table
-    if (row.assignee && Array.isArray(row.assignee) && row.assignee.length > 0) {
-      ticket.assigneeName = row.assignee[0].name || null;
-    } else if (row.assignee && typeof row.assignee === 'object' && row.assignee.name) {
+    if (row.assignee && typeof row.assignee === 'object' && row.assignee.name) {
       ticket.assigneeName = row.assignee.name;
+    }
+    // Extract department name from joined departments table
+    if (row.department && typeof row.department === 'object' && row.department.name) {
+      ticket.departmentName = row.department.name;
     }
     return ticket;
   });
@@ -406,7 +522,10 @@ export async function getTicketById(
 
   let query = supabase
     .from('tickets')
-    .select('*')
+    .select(`
+      *,
+      department:departments(id, name)
+    `)
     .eq('id', ticketId)
 
   // Filter by Gmail account
@@ -433,6 +552,11 @@ export async function getTicketById(
   }
 
   const ticket = mapRowToTicket(data);
+
+  // Extract department name from JOIN
+  if (data.department && typeof data.department === 'object' && data.department.name) {
+    ticket.departmentName = data.department.name;
+  }
 
   // Fetch assignee name if ticket is assigned
   if (data.assignee_user_id && supabase) {

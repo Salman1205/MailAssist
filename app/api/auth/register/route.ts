@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
         )
       } else {
         // Business exists but not verified - allow re-registration
-        // Delete old unverified business
+        // Delete old unverified business and its OTP tokens
         const { data: existingBusiness } = await supabase
           .from('businesses')
           .select('id')
@@ -77,12 +77,19 @@ export async function POST(req: NextRequest) {
           .maybeSingle()
 
         if (existingBusiness) {
+          // Delete OTP tokens first (foreign key constraint)
+          await supabase
+            .from('email_verification_tokens')
+            .delete()
+            .eq('business_id', existingBusiness.id)
+
+          // Then delete the business
           await supabase
             .from('businesses')
             .delete()
             .eq('id', existingBusiness.id)
 
-          console.log('[Register] Deleted unverified business:', existingBusiness.id)
+          console.log('[Register] Deleted unverified business and OTP tokens:', existingBusiness.id)
         }
       }
     }
