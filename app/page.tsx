@@ -607,6 +607,7 @@ function PageContent() {
             currentUserId={currentUserId}
             currentUserRole={currentUser?.role as "admin" | "manager" | "agent" | null}
             globalSearchTerm={globalSearch}
+            onClearGlobalSearch={() => setGlobalSearch("")}
             refreshKey={ticketsVersion}
             initialTicketId={deepLinkTicketId || undefined}
             ticketNavKey={ticketNavKey}

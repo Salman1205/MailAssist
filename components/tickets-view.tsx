@@ -85,12 +85,13 @@ interface TicketsViewProps {
   currentUserId: string | null
   currentUserRole: "admin" | "manager" | "agent" | null
   globalSearchTerm?: string
+  onClearGlobalSearch?: () => void
   refreshKey?: number
   initialTicketId?: string
   ticketNavKey?: number
 }
 
-export default function TicketsView({ currentUserId, currentUserRole, globalSearchTerm, refreshKey, initialTicketId, ticketNavKey }: TicketsViewProps) {
+export default function TicketsView({ currentUserId, currentUserRole, globalSearchTerm, onClearGlobalSearch, refreshKey, initialTicketId, ticketNavKey }: TicketsViewProps) {
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
@@ -98,6 +99,23 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   const [error, setError] = useState<string | null>(null)
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null)
   const [activeTab, setActiveTab] = useState<"assigned" | "unassigned" | "open" | "closed">("unassigned")
+
+  // Clear global search on unmount
+  useEffect(() => {
+    return () => {
+      onClearGlobalSearch?.()
+    }
+  }, [onClearGlobalSearch])
+
+  // Clear global search when changing tabs manually (but NOT when auto-switching due to search)
+  const handleTabChange = (value: string) => {
+    setActiveTab(value as typeof activeTab)
+    // Only clear if we are NOT currently searching (or if we want to clear search on tab switch)
+    // User requested: "when ichaneg tab in tickets page remov filter fro mtop navabr"
+    if (globalSearchTerm) {
+      onClearGlobalSearch?.()
+    }
+  }
 
   // Filters
   const [statusFilter, setStatusFilter] = useState<string>("all")
@@ -913,7 +931,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       setConversationSummary("")
       setSummaryExpanded(false)
     }
-  }, [selectedTicket, users]) // Add users as dependency so we can match names
+  }, [selectedTicket?.id]) // Only re-fetch when the actual ticket changes, not when its status updates
 
   const updateTypingStatus = async (typing: boolean) => {
     if (!selectedTicket || !currentUserId) return
@@ -1901,6 +1919,22 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                 </div>
                 <div className="flex items-center gap-2">
                   <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      setRefreshing(true)
+                      fetchTickets({ silent: true })
+                      setTimeout(() => setRefreshing(false), 1000)
+                    }}
+                    disabled={refreshing}
+                    className="h-7 w-7 p-0 flex-shrink-0"
+                    title="Refresh tickets"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+                  </Button>
+                  <Button
                     variant={isSelectMode ? "default" : "outline"}
                     size="sm"
                     onClick={() => {
@@ -1917,7 +1951,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
               </div>
 
               {/* Tabs with counts */}
-              <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
+              <Tabs value={activeTab} onValueChange={handleTabChange}>
                 <TabsList className="grid w-full grid-cols-4 h-8 text-[11px] gap-0.5">
                   <TabsTrigger value="assigned" className="relative px-1 min-w-0">
                     <span className="flex items-center gap-1 truncate">
@@ -1973,51 +2007,6 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                   </TabsTrigger>
                 </TabsList>
               </Tabs>
-
-              {/* Search */}
-              <div className="relative flex items-center gap-2">
-                <div className="relative flex-1">
-                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground transition-colors duration-300" />
-                  <Input
-                    placeholder="Search tickets..."
-                    ref={searchInputRef}
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="h-9 pl-8 pr-8 text-sm transition-all duration-300 ease-out focus:ring-2 focus:ring-primary/20 focus:border-primary/50"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Escape') {
-                        setSearchQuery('')
-                        e.currentTarget.blur()
-                      }
-                    }}
-                  />
-                  {searchQuery && (
-                    <button
-                      onClick={() => setSearchQuery('')}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-md hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
-                      aria-label="Clear search"
-                    >
-                      <XCircle className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={(e) => {
-                    e.preventDefault()
-                    setRefreshing(true)
-                    fetchTickets({ silent: true })
-                    setTimeout(() => setRefreshing(false), 1000)
-                  }}
-                  disabled={refreshing}
-                  className="h-9 w-9 p-0 flex-shrink-0"
-                  title="Refresh tickets"
-                >
-                  <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-                </Button>
-              </div>
 
               {/* Collapsible Filters */}
               <Accordion type="single" collapsible value={filtersExpanded ? "filters" : undefined}>
@@ -2494,7 +2483,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
             style={{ contain: 'layout' }}
           >
             {selectedTicket ? (
-              <div className="flex flex-col h-full w-full animate-in fade-in slide-in-from-right-4 duration-500 ease-out max-w-full" style={{ contain: 'layout' }}>
+              <div key={selectedTicket.id} className="flex flex-col h-full w-full max-w-full" style={{ contain: 'layout' }}>
                 <div className="p-4 md:p-6 border-b border-border/50 space-y-4 flex-shrink-0 w-full max-w-full animate-in fade-in slide-in-from-top-2 duration-300">
                   <div className="flex items-start justify-between gap-4 w-full max-w-full">
                     <div className="space-y-2 flex-1 min-w-0 max-w-full overflow-hidden">
@@ -2882,7 +2871,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                               return (
                                 <div
                                   key={key}
-                                  className="rounded-lg border border-border/50 bg-background/60 shadow-sm p-4 transition-all duration-300 ease-out hover:bg-muted/40 hover:shadow-lg hover:scale-[1.01] animate-in fade-in slide-in-from-left-4 w-full max-w-full overflow-hidden"
+                                  className="rounded-lg border border-border/50 bg-background/60 shadow-sm p-4 transition-all duration-300 ease-out hover:bg-muted/40 animate-in fade-in slide-in-from-left-4 w-full max-w-full overflow-hidden"
                                   style={{ animationDelay: `${idx * 50}ms` }}
                                 >
                                   <div className="flex items-start gap-3 w-full max-w-full">

@@ -68,7 +68,102 @@ export async function GET(
   }
 }
 
+/**
+ * PATCH /api/tickets/[id] - Update ticket (e.g., department)
+ */
+export async function PATCH(
+  request: NextRequest,
+  context: RouteContext
+) {
+  try {
+    const paramsData = await Promise.resolve((context as any).params);
+    const ticketId = paramsData?.id;
 
+    if (!ticketId) {
+      return NextResponse.json(
+        { error: 'Missing ticket ID' },
+        { status: 400 }
+      );
+    }
 
+    const userId = getCurrentUserIdFromRequest(request);
+    const userEmail = await getCurrentUserEmail();
 
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'Not authenticated' },
+        { status: 401 }
+      );
+    }
+
+    if (!userEmail) {
+      return NextResponse.json(
+        { error: 'No Gmail account connected' },
+        { status: 400 }
+      );
+    }
+
+    const body = await request.json();
+    const { departmentId } = body;
+
+    // Import supabase for the update
+    const { createServerClient } = await import('@/lib/supabase-client');
+    const supabase = createServerClient();
+
+    // Update the ticket's department
+    const { data: ticket, error: updateError } = await supabase
+      .from('tickets')
+      .update({
+        department_id: departmentId || null,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', ticketId)
+      .eq('user_email', userEmail)
+      .select(`
+        *,
+        departments:department_id (
+          id,
+          name
+        )
+      `)
+      .single();
+
+    if (updateError) {
+      console.error('Error updating ticket department:', updateError);
+      return NextResponse.json(
+        { error: 'Failed to update ticket', details: updateError.message },
+        { status: 500 }
+      );
+    }
+
+    // Transform to match expected format
+    const transformedTicket = {
+      ...ticket,
+      id: ticket.id,
+      emailId: ticket.email_id,
+      threadId: ticket.thread_id,
+      subject: ticket.subject,
+      customerEmail: ticket.customer_email,
+      customerName: ticket.customer_name,
+      status: ticket.status,
+      priority: ticket.priority,
+      tags: ticket.tags || [],
+      assigneeUserId: ticket.assignee_user_id,
+      userEmail: ticket.user_email,
+      createdAt: ticket.created_at,
+      updatedAt: ticket.updated_at,
+      lastCustomerReplyAt: ticket.last_customer_reply_at,
+      departmentId: ticket.department_id,
+      departmentName: ticket.departments?.name || null,
+    };
+
+    return NextResponse.json({ ticket: transformedTicket });
+  } catch (error) {
+    console.error('Error updating ticket:', error);
+    return NextResponse.json(
+      { error: 'Failed to update ticket', details: (error as Error).message },
+      { status: 500 }
+    );
+  }
+}
 
