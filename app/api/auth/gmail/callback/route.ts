@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getTokensFromCode, getUserProfile } from '@/lib/gmail';
 import { saveTokens } from '@/lib/storage';
-import { setSessionUserEmailInResponse } from '@/lib/session';
+import { setSessionUserEmailInResponse, setCurrentUserIdInResponse } from '@/lib/session';
 import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import { canLoginWithGoogle, getAccountInfo } from '@/lib/account-type-utils';
@@ -201,18 +201,23 @@ export async function GET(request: NextRequest) {
         path: '/',
       });
 
-      response.cookies.set('current_user_id', userId!, {
-        path: '/',
-        maxAge: 30 * 24 * 60 * 60,
-      });
+      // Use helper to set current_user_id with proper flags
+      setCurrentUserIdInResponse(response, userId!);
 
-      // Set legacy cookie for backward compatibility
+      // Set gmail_user_email cookie for session management
       setSessionUserEmailInResponse(response, gmailEmail);
 
       // 5. Save Tokens (Linked to this user's business if they have one)
       await saveTokens(tokens, businessId || undefined);
 
-      console.log('Login successful for:', gmailEmail, 'businessId:', businessId);
+      console.log('[OAuth Callback] Login successful for:', gmailEmail, 'businessId:', businessId);
+      console.log('[OAuth Callback] Cookies set:', {
+        session_token: !!sessionToken,
+        current_user_id: userId,
+        gmail_user_email: gmailEmail,
+        env: process.env.NODE_ENV,
+        isVercel: process.env.VERCEL === '1'
+      });
       return response;
     }
 

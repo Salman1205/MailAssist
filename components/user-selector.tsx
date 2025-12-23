@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { User, AlertTriangle } from "lucide-react"
+import { User, AlertTriangle, Loader2 } from "lucide-react"
 import PromoteAdminDialog from "@/components/promote-admin-dialog"
 
 interface User {
@@ -210,10 +210,11 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex items-center justify-center min-h-screen bg-background text-foreground">
         <div className="text-center space-y-4">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
-          <p className="text-muted-foreground">Loading users...</p>
+          {/* Use Loader2 with blue color as requested */}
+          <Loader2 className="h-12 w-12 animate-spin text-blue-500 mx-auto" />
+          <p className="text-muted-foreground animate-pulse">Loading users...</p>
         </div>
       </div>
     )
@@ -284,13 +285,13 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
             <div className="text-center py-16 space-y-6">
               <div className="flex justify-center">
                 <div className="relative">
-                  <div className="w-16 h-16 border-4 border-primary/20 border-t-primary rounded-full animate-spin" />
+                  <Loader2 className="h-16 w-16 animate-spin text-blue-500/80" />
                   <div className="absolute inset-0 flex items-center justify-center">
-                    <User className="w-6 h-6 text-primary/40" />
+                    <User className="w-6 h-6 text-blue-500/40" />
                   </div>
                 </div>
               </div>
-              <p className="text-sm text-muted-foreground font-medium">Loading your accounts...</p>
+              <p className="text-sm text-muted-foreground font-medium animate-pulse">Loading your accounts...</p>
             </div>
           ) : users.length === 0 ? (
             <div className="text-center py-10 space-y-8">
@@ -392,7 +393,7 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
                     >
                       {creating ? (
                         <>
-                          <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2" />
+                          <Loader2 className="w-4 h-4 animate-spin mr-2" />
                           Creating Admin User...
                         </>
                       ) : (
