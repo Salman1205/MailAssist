@@ -37,28 +37,35 @@ export default function AuthLandingPage() {
 function AuthLandingContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  // Default to login if view=login in URL, else landing
-  const [currentView, setCurrentView] = useState<ViewType>(() => {
-    if (typeof window !== 'undefined') {
-      if (window.location.search.includes('view=login')) return 'login';
-      if (window.location.search.includes('view=register')) return 'register';
-      if (window.location.search.includes('view=register-personal')) return 'register-personal';
-    }
-    return 'landing';
-  })
+  // Start with null to show loading state while parsing URL
+  const [currentView, setCurrentView] = useState<ViewType | null>(null)
+  const [isInitialized, setIsInitialized] = useState(false)
 
-  // Keep in sync with URL param if it changes
+  // Initialize view from URL params on mount
   useEffect(() => {
     const view = searchParams.get('view')
-    if (view === 'login' || view === 'register' || view === 'register-personal') {
+    if (view === 'login' || view === 'register' || view === 'register-personal' || view === 'verify-otp') {
       setCurrentView(view as ViewType)
+    } else {
+      setCurrentView('landing')
     }
+    setIsInitialized(true)
   }, [searchParams])
+
   const [verificationData, setVerificationData] = useState<{
     email: string
     verificationToken: string
     businessId: string
   } | null>(null)
+
+  // Show loading state until initialized
+  if (!isInitialized) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-950">
+        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
+  }
 
   const handleRegistrationSuccess = (data: {
     email: string

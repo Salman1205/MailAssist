@@ -64,33 +64,12 @@ export default function WelcomePage() {
               <Logo size="default" showText={true} />
             </div>
             <div className="flex items-center gap-6">
-              <nav className="hidden md:flex items-center gap-8">
-                {['Features', 'Solutions', 'Pricing'].map((item) => (
-                  <a
-                    key={item}
-                    href={`#${item.toLowerCase()}`}
-                    className="text-sm font-medium text-slate-300 hover:text-white transition-colors relative group"
-                  >
-                    {item}
-                    <span className="absolute -bottom-1 left-0 w-0 h-0.5 bg-primary group-hover:w-full transition-all duration-300" />
-                  </a>
-                ))}
-              </nav>
-              <div className="h-6 w-px bg-white/10 hidden md:block" />
               <div className="flex items-center gap-3">
                 <Button
-                  variant="ghost"
                   onClick={() => window.location.href = '/auth/landing?view=login'}
-                  className="text-white hover:bg-white/5 h-10 px-4 text-sm font-medium transition-all"
-                >
-                  Sign In
-                </Button>
-                <Button
-                  onClick={handleGmailConnect}
-                  disabled={connecting}
                   className="bg-primary hover:bg-primary/90 text-white shadow-lg shadow-primary/20 h-10 px-6 text-sm font-bold rounded-full transition-all hover:scale-105 active:scale-95 border-0"
                 >
-                  {connecting ? "Connecting..." : "Get Started"}
+                  Sign In
                 </Button>
               </div>
             </div>
