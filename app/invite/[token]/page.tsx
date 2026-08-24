@@ -2,20 +2,34 @@
 
 import { useEffect, useState, Suspense } from "react"
 import { useParams, useRouter } from "next/navigation"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Lock, Eye, EyeOff, CheckCircle2, Mail, Building2, UserPlus, XCircle } from "lucide-react"
+
+/* Shared branded frame — matches /welcome, /auth/landing and error.tsx (logo, Fraunces, teal). */
+function InviteFrame({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="inv-root">
+      <style>{INV_CSS}</style>
+      <div className="inv-glow" aria-hidden />
+      <a className="inv-brand" href="/welcome" aria-label="MailAssist home">
+        <img src="/amanii_logo.png" alt="MailAssist" className="inv-logo" />
+        <span className="inv-word">MailAssist</span>
+      </a>
+      <main className="inv-center">{children}</main>
+    </div>
+  )
+}
+
+function InviteLoader() {
+  return (
+    <InviteFrame>
+      <div className="inv-spin" aria-label="Loading" role="status" />
+    </InviteFrame>
+  )
+}
 
 export default function AcceptInvitationPage() {
   return (
-    <Suspense fallback={
-      <div className="flex h-screen w-screen items-center justify-center bg-slate-950">
-        <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
-      </div>
-    }>
+    <Suspense fallback={<InviteLoader />}>
       <AcceptInvitationContent />
     </Suspense>
   )
@@ -116,166 +130,224 @@ function AcceptInvitationContent() {
 
   if (validating) {
     return (
-      <div className="flex h-screen w-screen items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 animate-in fade-in duration-500">
-        <Card className="w-full max-w-md bg-slate-900/50 border-slate-800 backdrop-blur shadow-2xl animate-in slide-in-from-bottom-4 duration-500">
-          <CardContent className="pt-8">
-            <div className="flex flex-col items-center gap-4">
-              <div className="flex gap-1.5">
-                <div className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                <div className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                <div className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-              </div>
-              <p className="text-sm text-slate-400">Validating invitation...</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      <InviteFrame>
+        <div className="inv-card inv-card-center">
+          <div className="inv-spin" aria-label="Loading" role="status" />
+          <p className="inv-muted">Validating invitation...</p>
+        </div>
+      </InviteFrame>
     )
   }
 
   if (error && !invitation) {
     return (
-      <div className="flex h-screen w-screen items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 animate-in fade-in duration-500">
-        <Card className="w-full max-w-md bg-slate-900/50 border-slate-800 backdrop-blur shadow-2xl animate-in slide-in-from-bottom-4 duration-500">
-          <CardHeader className="text-center">
-            <div className="mx-auto w-16 h-16 bg-red-950/30 rounded-full flex items-center justify-center mb-4 border border-red-900/50">
-              <XCircle className="h-8 w-8 text-red-400" />
-            </div>
-            <CardTitle className="text-2xl text-white">Invalid Invitation</CardTitle>
-            <CardDescription className="text-slate-400">
-              This invitation link is invalid or has expired
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Alert className="bg-red-950/30 border-red-900/50">
-              <AlertDescription className="text-red-300">{error}</AlertDescription>
-            </Alert>
-            <Button
-              onClick={() => router.push("/welcome")}
-              className="w-full mt-6 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 shadow-lg shadow-purple-500/20 hover:shadow-purple-500/40 transition-all duration-200"
-            >
-              Go to Home
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
+      <InviteFrame>
+        <div className="inv-card inv-card-center">
+          <div className="inv-badge inv-badge-danger" aria-hidden>
+            <XCircle />
+          </div>
+          <h1 className="inv-h1">Invalid Invitation</h1>
+          <p className="inv-muted">This invitation link is invalid or has expired</p>
+          <div className="inv-alert" role="alert">{error}</div>
+          <button className="inv-btn inv-btn-primary inv-btn-block" onClick={() => router.push("/welcome")}>
+            Go to Home
+          </button>
+        </div>
+      </InviteFrame>
     )
   }
 
   return (
-    <div className="flex h-screen w-screen items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 animate-in fade-in duration-500">
-      <Card className="w-full max-w-md bg-slate-900/50 border-slate-800 backdrop-blur shadow-2xl animate-in slide-in-from-bottom-4 duration-500">
-        <CardHeader className="text-center space-y-2">
-          <div className="mx-auto w-16 h-16 bg-gradient-to-br from-purple-600 to-purple-800 rounded-2xl flex items-center justify-center mb-2 shadow-lg shadow-purple-500/30 relative overflow-hidden group">
-            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
-            <UserPlus className="w-8 h-8 text-white relative z-10" />
+    <InviteFrame>
+      <div className="inv-card">
+        <div className="inv-head">
+          <div className="inv-badge" aria-hidden>
+            <UserPlus />
           </div>
-          <CardTitle className="text-2xl text-white font-bold">Welcome to the Team!</CardTitle>
-          <CardDescription className="text-slate-400">
-            Create your password to complete your account setup
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {invitation && (
-            <div className="mb-6 p-4 bg-gradient-to-br from-slate-800/50 to-slate-800/30 rounded-lg border border-slate-700 space-y-3 animate-in slide-in-from-top-2 duration-500">
-              <div className="flex items-center gap-3 text-sm group hover:bg-slate-700/30 p-2 rounded transition-colors">
-                <div className="w-8 h-8 bg-purple-950/50 rounded-full flex items-center justify-center border border-purple-800/30">
-                  <Mail className="w-4 h-4 text-purple-400" />
-                </div>
-                <span className="text-slate-300 font-medium">{invitation.email}</span>
-              </div>
-              <div className="flex items-center gap-3 text-sm group hover:bg-slate-700/30 p-2 rounded transition-colors">
-                <div className="w-8 h-8 bg-purple-950/50 rounded-full flex items-center justify-center border border-purple-800/30">
-                  <Building2 className="w-4 h-4 text-purple-400" />
-                </div>
-                <span className="text-slate-300 font-medium">{invitation.business_name}</span>
-              </div>
-              <div className="flex items-center gap-3 text-sm group hover:bg-slate-700/30 p-2 rounded transition-colors">
-                <div className="w-8 h-8 bg-purple-950/50 rounded-full flex items-center justify-center border border-purple-800/30">
-                  <CheckCircle2 className="w-4 h-4 text-purple-400" />
-                </div>
-                <span className="text-slate-300 font-medium">Role: <span className="text-purple-400">{invitation.role}</span></span>
-              </div>
+          <h1 className="inv-h1">Welcome to the Team!</h1>
+          <p className="inv-muted">Create your password to complete your account setup</p>
+        </div>
+
+        {invitation && (
+          <div className="inv-details">
+            <div className="inv-detail-row">
+              <span className="inv-detail-ic"><Mail /></span>
+              <span className="inv-detail-val">{invitation.email}</span>
             </div>
+            <div className="inv-detail-row">
+              <span className="inv-detail-ic"><Building2 /></span>
+              <span className="inv-detail-val">{invitation.business_name}</span>
+            </div>
+            <div className="inv-detail-row">
+              <span className="inv-detail-ic"><CheckCircle2 /></span>
+              <span className="inv-detail-val">Role: <span className="inv-accent">{invitation.role}</span></span>
+            </div>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="inv-form">
+          <div className="inv-field">
+            <label htmlFor="password" className="inv-label">Password</label>
+            <div className="inv-input-wrap">
+              <Lock className="inv-input-ic-left" />
+              <input
+                id="password"
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="inv-input"
+                placeholder="Create a strong password"
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="inv-input-toggle"
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? <EyeOff /> : <Eye />}
+              </button>
+            </div>
+            <p className="inv-hint">
+              <CheckCircle2 />
+              Minimum 8 characters
+            </p>
+          </div>
+
+          <div className="inv-field">
+            <label htmlFor="confirmPassword" className="inv-label">Confirm Password</label>
+            <div className="inv-input-wrap">
+              <Lock className="inv-input-ic-left" />
+              <input
+                id="confirmPassword"
+                type={showConfirmPassword ? "text" : "password"}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                className="inv-input"
+                placeholder="Confirm your password"
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                className="inv-input-toggle"
+                aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+              >
+                {showConfirmPassword ? <EyeOff /> : <Eye />}
+              </button>
+            </div>
+          </div>
+
+          {error && (
+            <div className="inv-alert" role="alert">{error}</div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="password" className="text-slate-300 font-medium">Password</Label>
-              <div className="relative group">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-purple-400 transition-colors" />
-                <Input
-                  id="password"
-                  type={showPassword ? "text" : "password"}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="pl-10 pr-10 bg-slate-800/50 border-slate-700 text-white placeholder:text-slate-500 h-12 focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 transition-all"
-                  placeholder="Create a strong password"
-                  required
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-300 transition-colors"
-                >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-              <p className="text-xs text-slate-500 flex items-center gap-1.5">
-                <CheckCircle2 className="w-3 h-3" />
-                Minimum 8 characters
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="confirmPassword" className="text-slate-300 font-medium">Confirm Password</Label>
-              <div className="relative group">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-purple-400 transition-colors" />
-                <Input
-                  id="confirmPassword"
-                  type={showConfirmPassword ? "text" : "password"}
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="pl-10 pr-10 bg-slate-800/50 border-slate-700 text-white placeholder:text-slate-500 h-12 focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 transition-all"
-                  placeholder="Confirm your password"
-                  required
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-300"
-                >
-                  {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
-
-            {error && (
-              <Alert className="bg-red-950/30 border-red-900/50">
-                <AlertDescription className="text-red-300">{error}</AlertDescription>
-              </Alert>
+          <button type="submit" disabled={loading} className="inv-btn inv-btn-primary inv-btn-block">
+            {loading ? (
+              <span className="inv-btn-loading">
+                <span className="inv-spin inv-spin-sm" />
+                Creating account...
+              </span>
+            ) : (
+              <>
+                <span>Create Account &amp; Sign In</span>
+                <CheckCircle2 className="inv-btn-ic" />
+              </>
             )}
-
-            <Button
-              type="submit"
-              disabled={loading}
-              className="w-full h-12 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white font-medium transition-all duration-200 shadow-lg shadow-purple-500/30 hover:shadow-purple-500/50 hover:scale-[1.02] active:scale-[0.98] group"
-            >
-              {loading ? (
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Creating account...
-                </div>
-              ) : (
-                <>
-                  <span>Create Account & Sign In</span>
-                  <CheckCircle2 className="w-4 h-4 ml-2 group-hover:scale-110 transition-transform" />
-                </>
-              )}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
-    </div>
+          </button>
+        </form>
+      </div>
+    </InviteFrame>
   )
 }
+
+const INV_CSS = `
+.inv-root{
+  --ink:#0E1216; --ink-2:#161B22; --paper:#EAEDF1; --muted:#98A0AA; --teal:#0C8B99; --teal-2:#3fbfae;
+  --line:rgba(255,255,255,.1); --line-2:rgba(255,255,255,.16);
+  --serif:var(--font-fraunces),Georgia,serif; --sans:var(--font-geist),ui-sans-serif,system-ui,sans-serif;
+  position:absolute; inset:0; height:100vh; overflow-y:auto; overflow-x:hidden;
+  background:radial-gradient(1100px 560px at 80% -10%, rgba(12,139,153,.14), transparent 60%), var(--ink);
+  color:var(--paper); font-family:var(--sans); letter-spacing:-.011em;
+  display:flex; flex-direction:column;
+}
+.inv-glow{position:absolute; inset:0; pointer-events:none; background:radial-gradient(700px 400px at 10% 110%, rgba(63,191,174,.08), transparent 60%);}
+.inv-brand{position:relative; z-index:2; display:inline-flex; align-items:center; gap:9px; padding:20px 26px; color:var(--paper); text-decoration:none; font-weight:600; font-size:15px; letter-spacing:-.02em; align-self:flex-start;}
+.inv-logo{height:24px; width:auto; display:block;}
+.inv-center{position:relative; z-index:2; flex:1; display:flex; align-items:center; justify-content:center; padding:20px 20px 56px;}
+
+.inv-spin{width:34px; height:34px; border-radius:50%; border:3px solid rgba(255,255,255,.15); border-top-color:var(--teal-2); animation:invspin .8s linear infinite;}
+.inv-spin-sm{width:16px; height:16px; border-width:2px;}
+@keyframes invspin{to{transform:rotate(360deg);}}
+
+.inv-card{
+  width:100%; max-width:440px; background:rgba(22,27,34,.7); backdrop-filter:blur(10px);
+  border:1px solid var(--line); border-radius:18px; padding:30px 28px;
+  box-shadow:0 30px 60px -30px rgba(0,0,0,.7);
+  animation:invfade .5s cubic-bezier(.2,.7,.2,1) both;
+}
+.inv-card-center{display:flex; flex-direction:column; align-items:center; gap:16px; text-align:center;}
+
+.inv-head{text-align:center; display:flex; flex-direction:column; align-items:center; gap:8px; margin-bottom:22px;}
+.inv-badge{width:56px; height:56px; border-radius:16px; display:grid; place-items:center; background:rgba(12,139,153,.16); color:var(--teal-2); border:1px solid rgba(12,139,153,.4); margin-bottom:6px;}
+.inv-badge svg{width:26px; height:26px;}
+.inv-badge-danger{background:rgba(220,38,38,.12); color:#f87171; border-color:rgba(220,38,38,.35);}
+.inv-h1{font-family:var(--serif); font-weight:500; font-size:27px; letter-spacing:-.02em; margin:0;}
+.inv-muted{color:var(--muted); font-size:14.5px; line-height:1.55; margin:0;}
+.inv-accent{color:var(--teal-2);}
+
+.inv-details{
+  margin:0 0 22px; padding:14px; border:1px solid var(--line); border-radius:12px;
+  background:rgba(255,255,255,.02); display:flex; flex-direction:column; gap:4px;
+  animation:invfade .5s cubic-bezier(.2,.7,.2,1) both;
+}
+.inv-detail-row{display:flex; align-items:center; gap:12px; padding:6px 4px; font-size:14px;}
+.inv-detail-ic{width:32px; height:32px; flex:none; border-radius:999px; display:grid; place-items:center; background:rgba(12,139,153,.14); color:var(--teal-2); border:1px solid rgba(12,139,153,.28);}
+.inv-detail-ic svg{width:15px; height:15px;}
+.inv-detail-val{color:var(--paper); font-weight:500; overflow-wrap:anywhere;}
+
+.inv-form{display:flex; flex-direction:column; gap:16px;}
+.inv-field{display:flex; flex-direction:column; gap:8px;}
+.inv-label{font-size:13.5px; font-weight:560; color:var(--paper);}
+.inv-input-wrap{position:relative; display:flex; align-items:center;}
+.inv-input-ic-left{position:absolute; left:12px; width:16px; height:16px; color:var(--muted); pointer-events:none; transition:color .2s;}
+.inv-input-wrap:focus-within .inv-input-ic-left{color:var(--teal-2);}
+.inv-input{
+  width:100%; background:var(--ink-2); border:1px solid var(--line-2); border-radius:10px;
+  padding:11px 40px 11px 38px; color:var(--paper); font:inherit; font-size:14.5px;
+  transition:border-color .2s, box-shadow .2s;
+}
+.inv-input::placeholder{color:#6b7480;}
+.inv-input:focus{outline:none; border-color:var(--teal); box-shadow:0 0 0 3px rgba(12,139,153,.18);}
+.inv-input-toggle{position:absolute; right:10px; background:none; border:0; padding:4px; cursor:pointer; color:var(--muted); display:grid; place-items:center; transition:color .2s;}
+.inv-input-toggle:hover{color:var(--paper);}
+.inv-input-toggle svg{width:16px; height:16px;}
+.inv-hint{display:flex; align-items:center; gap:6px; margin:0; font-size:12px; color:var(--muted);}
+.inv-hint svg{width:12px; height:12px;}
+
+.inv-alert{
+  background:rgba(220,38,38,.12); border:1px solid rgba(220,38,38,.35); color:#fca5a5;
+  border-radius:10px; padding:11px 13px; font-size:13.5px; line-height:1.5; width:100%; text-align:left;
+}
+
+.inv-btn{
+  font:inherit; font-size:14.5px; font-weight:560; border-radius:999px; padding:12px 22px; cursor:pointer;
+  border:1px solid transparent; transition:transform .16s, border-color .2s, box-shadow .2s, opacity .2s;
+  display:inline-flex; align-items:center; justify-content:center; gap:8px;
+}
+.inv-btn-block{width:100%;}
+.inv-btn-primary{background:#fff; color:#14171B;}
+.inv-btn-primary:hover:not(:disabled){transform:translateY(-2px); box-shadow:0 12px 26px -12px rgba(0,0,0,.6);}
+.inv-btn:disabled{opacity:.7; cursor:default;}
+.inv-btn-ic{width:16px; height:16px;}
+.inv-btn-loading{display:inline-flex; align-items:center; gap:8px;}
+
+@keyframes invfade{from{opacity:0; transform:translateY(14px);} to{opacity:1; transform:none;}}
+
+@media (prefers-reduced-motion: reduce){
+  .inv-card,.inv-details{animation:none !important;}
+  .inv-btn,.inv-input,.inv-input-toggle,.inv-input-ic-left{transition:none !important;}
+  .inv-btn-primary:hover:not(:disabled){transform:none;}
+  .inv-spin{animation-duration:1.4s;}
+}
+`

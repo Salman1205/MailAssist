@@ -1,10 +1,23 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { ArrowRight, ArrowUpRight, Check } from "lucide-react"
+import { ArrowRight, ArrowUpRight, Check, Moon, Sun } from "lucide-react"
 
 export default function WelcomePage() {
   const [connecting, setConnecting] = useState(false)
+  const [theme, setTheme] = useState<"light" | "dark">("light")
+
+  // Respect the app/system preference on first paint, still user-toggleable.
+  useEffect(() => {
+    try {
+      const prefersDark =
+        document.documentElement.classList.contains("dark") ||
+        window.matchMedia?.("(prefers-color-scheme: dark)").matches
+      setTheme(prefersDark ? "dark" : "light")
+    } catch {
+      /* keep light */
+    }
+  }, [])
 
   // Scroll-triggered reveals (Apple-style: subtle, once).
   useEffect(() => {
@@ -49,19 +62,26 @@ export default function WelcomePage() {
   }
 
   return (
-    <div className="ma-root">
+    <div className="ma-root" data-theme={theme}>
       <style>{CSS}</style>
 
       {/* Top bar */}
       <header className="ma-bar">
         <div className="ma-wrap ma-bar-in">
           <div className="ma-brand">
-            <span className="ma-mark" aria-hidden>◧</span>
+            <img src="/amanii_logo.png" alt="MailAssist" className="ma-logo" />
             <span className="ma-word">MailAssist</span>
           </div>
           <nav className="ma-nav">
             <a className="ma-link" href="#how">How it works</a>
             <a className="ma-link" href="#plans">Plans</a>
+            <button
+              className="ma-theme"
+              onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+              aria-label="Toggle theme"
+            >
+              {theme === "dark" ? <Sun className="ma-theme-i" /> : <Moon className="ma-theme-i" />}
+            </button>
             <button className="ma-signin" onClick={go("/auth/landing?view=login")}>Sign in</button>
           </nav>
         </div>
@@ -82,7 +102,7 @@ export default function WelcomePage() {
             that guarantees no customer email ever goes missing.
           </p>
           <div className="ma-cta load load-6">
-            <button className="ma-btn ma-btn-primary" onClick={go("/auth/landing")}>
+            <button className="ma-btn ma-btn-primary" onClick={go("/auth/landing?view=register")}>
               Set up your team <ArrowRight className="ma-btn-i" />
             </button>
             <button className="ma-btn ma-btn-ghost" onClick={go("/auth/landing?view=register-personal")}>
@@ -195,7 +215,7 @@ export default function WelcomePage() {
                 <li key={f}><Check className="ma-check ma-check-teal" /> {f}</li>
               ))}
             </ul>
-            <button className="ma-btn ma-btn-primary ma-plan-btn" onClick={go("/auth/landing")}>
+            <button className="ma-btn ma-btn-primary ma-plan-btn" onClick={go("/auth/landing?view=register")}>
               Set up your team <ArrowRight className="ma-btn-i" />
             </button>
           </div>
@@ -207,7 +227,7 @@ export default function WelcomePage() {
         <div className="ma-wrap ma-final-in">
           <h2 className="ma-final-h">Give your inbox back to your customers.</h2>
           <div className="ma-cta">
-            <button className="ma-btn ma-btn-onDark" onClick={go("/auth/landing")}>
+            <button className="ma-btn ma-btn-onDark" onClick={go("/auth/landing?view=register")}>
               Set up your team <ArrowRight className="ma-btn-i" />
             </button>
             <button className="ma-btn ma-btn-onDark-ghost" onClick={handleGmailConnect} disabled={connecting}>
@@ -218,7 +238,7 @@ export default function WelcomePage() {
       </section>
 
       <footer className="ma-wrap ma-foot">
-        <span className="ma-brand"><span className="ma-mark" aria-hidden>◧</span> MailAssist</span>
+        <span className="ma-brand"><img src="/amanii_logo.png" alt="MailAssist" className="ma-logo" /> MailAssist</span>
         <span className="ma-foot-r">The self-healing shared inbox.</span>
       </footer>
     </div>
@@ -229,6 +249,7 @@ const CSS = `
 .ma-root{
   --paper:#F6F5F1; --paper-2:#FFFFFF; --ink:#15181C; --muted:#5B6169; --faint:#8B9099;
   --line:#E4E1D9; --line-2:#D8D4CA; --teal:#0C8B99; --teal-deep:#0A6E79; --amber:#C9803A;
+  --btn-bg:#15181C; --btn-fg:#FFFFFF; --bar-bg:rgba(246,245,241,.82);
   --console:#0E1116; --console-2:#171C24; --console-line:rgba(255,255,255,.08);
   --serif:var(--font-fraunces),"Fraunces",Georgia,"Times New Roman",serif;
   --sans:var(--font-geist),ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
@@ -240,13 +261,16 @@ const CSS = `
 .ma-wrap{max-width:1160px; margin:0 auto; padding-left:28px; padding-right:28px;}
 
 /* Top bar */
-.ma-bar{position:sticky; top:0; z-index:40; background:rgba(246,245,241,.82); backdrop-filter:blur(12px); border-bottom:1px solid var(--line);}
+.ma-bar{position:sticky; top:0; z-index:40; background:var(--bar-bg); backdrop-filter:blur(12px); border-bottom:1px solid var(--line);}
 .ma-bar-in{display:flex; align-items:center; justify-content:space-between; height:62px;}
 .ma-brand{display:inline-flex; align-items:center; gap:9px; font-weight:600; font-size:16px; letter-spacing:-0.02em;}
-.ma-mark{color:var(--teal); font-size:17px; transform:translateY(1px);}
-.ma-nav{display:flex; align-items:center; gap:26px;}
+.ma-logo{height:26px; width:auto; display:block;}
+.ma-nav{display:flex; align-items:center; gap:22px;}
 .ma-link{color:var(--muted); font-size:14px; text-decoration:none; transition:color .18s;}
 .ma-link:hover{color:var(--ink);}
+.ma-theme{display:grid; place-items:center; width:36px; height:36px; border-radius:999px; border:1px solid var(--line-2); background:transparent; color:var(--muted); cursor:pointer; transition:all .18s;}
+.ma-theme:hover{color:var(--ink); border-color:var(--ink);}
+.ma-theme-i{width:16px; height:16px;}
 .ma-signin{border:1px solid var(--line-2); background:var(--paper-2); color:var(--ink); font:inherit; font-size:14px; font-weight:520; padding:8px 16px; border-radius:999px; cursor:pointer; transition:all .18s;}
 .ma-signin:hover{border-color:var(--ink); transform:translateY(-1px);}
 @media(max-width:640px){ .ma-nav .ma-link{display:none;} }
@@ -262,7 +286,7 @@ const CSS = `
 .ma-cta{display:flex; gap:12px; margin-top:30px; flex-wrap:wrap;}
 .ma-btn{display:inline-flex; align-items:center; gap:9px; font:inherit; font-size:15px; font-weight:560; border-radius:999px; padding:12px 22px; cursor:pointer; border:1px solid transparent; transition:transform .16s, box-shadow .2s, background .2s, border-color .2s;}
 .ma-btn-i{width:16px; height:16px;}
-.ma-btn-primary{background:var(--ink); color:#fff; box-shadow:0 1px 2px rgba(0,0,0,.18);}
+.ma-btn-primary{background:var(--btn-bg); color:var(--btn-fg); box-shadow:0 1px 2px rgba(0,0,0,.18);}
 .ma-btn-primary:hover{transform:translateY(-2px); box-shadow:0 10px 24px -12px rgba(0,0,0,.5);}
 .ma-btn-ghost{background:transparent; color:var(--ink); border-color:var(--line-2);}
 .ma-btn-ghost:hover{border-color:var(--ink); transform:translateY(-2px);}
@@ -332,11 +356,11 @@ const CSS = `
 .ma-check-teal{color:var(--teal);}
 .ma-plan-btn{width:100%; justify-content:center;}
 
-/* Final CTA */
-.ma-final{background:var(--ink); color:#fff; padding:76px 0;}
+/* Final CTA — always a dark band (fixed colors, theme-independent) */
+.ma-final{background:#0B0E12; color:#fff; padding:76px 0;}
 .ma-final-in{text-align:center; display:flex; flex-direction:column; align-items:center; gap:26px;}
-.ma-final-h{font-family:var(--serif); font-weight:500; font-size:clamp(28px,4vw,46px); line-height:1.08; letter-spacing:-.02em; max-width:16em; margin:0;}
-.ma-btn-onDark{background:#fff; color:var(--ink);}
+.ma-final-h{font-family:var(--serif); font-weight:500; font-size:clamp(28px,4vw,46px); line-height:1.08; letter-spacing:-.02em; max-width:16em; margin:0; color:#fff;}
+.ma-btn-onDark{background:#fff; color:#14171B;}
 .ma-btn-onDark:hover{transform:translateY(-2px); box-shadow:0 12px 28px -12px rgba(0,0,0,.6);}
 .ma-btn-onDark-ghost{background:transparent; color:#fff; border-color:rgba(255,255,255,.28);}
 .ma-btn-onDark-ghost:hover{border-color:#fff; transform:translateY(-2px);}
@@ -358,6 +382,19 @@ const CSS = `
 @keyframes maTkIn{to{opacity:1; transform:none;}}
 @keyframes mablink{50%{opacity:0;}}
 @keyframes mapulse{0%{box-shadow:0 0 0 0 rgba(63,191,174,.5);} 70%{box-shadow:0 0 0 7px rgba(63,191,174,0);} 100%{box-shadow:0 0 0 0 rgba(63,191,174,0);}}
+
+/* ---------- Dark mode ---------- */
+.ma-root[data-theme="dark"]{
+  --paper:#0E1216; --paper-2:#161B22; --ink:#EAEDF1; --muted:#98A0AA; --faint:#6B7280;
+  --line:rgba(255,255,255,.09); --line-2:rgba(255,255,255,.17);
+  --btn-bg:#FFFFFF; --btn-fg:#14171B; --bar-bg:rgba(14,18,22,.82);
+}
+.ma-root[data-theme="dark"] .ma-eyebrow{background:rgba(12,139,153,.16); border-color:rgba(12,139,153,.3); color:#4fc4d2;}
+.ma-root[data-theme="dark"] .ma-signin{background:rgba(255,255,255,.05);}
+.ma-root[data-theme="dark"] .ma-plan-feature{box-shadow:0 24px 50px -30px rgba(12,139,153,.55);}
+.ma-root[data-theme="dark"] .ma-console{box-shadow:0 40px 80px -32px rgba(0,0,0,.7);}
+.ma-root[data-theme="dark"] .ma-h1 em,
+.ma-root[data-theme="dark"] .ma-band-p em{color:#3fbfae;}
 
 @media (prefers-reduced-motion: reduce){
   .load,[data-reveal],.ma-raw,.ma-tk,.ma-draft{animation:none !important; opacity:1 !important; transform:none !important; transition:none !important;}
