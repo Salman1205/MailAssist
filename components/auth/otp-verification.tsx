@@ -215,7 +215,7 @@ export default function OTPVerification({
         <CardHeader className="space-y-4 pb-6">
           <div className="flex justify-center">
             <div className="relative">
-              <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary via-purple-500 to-pink-500 flex items-center justify-center shadow-2xl animate-pulse">
+              <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-[#0C8B99] to-[#14B8A6] flex items-center justify-center shadow-2xl animate-pulse">
                 <Mail className="w-10 h-10 text-white" />
               </div>
               <div className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-green-500 flex items-center justify-center border-2 border-background">

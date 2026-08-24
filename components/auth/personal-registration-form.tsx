@@ -19,14 +19,14 @@ export default function PersonalRegistrationForm({ onSuccess, onLoginClick }: Pe
                 {/* Left side - Marketing content */}
                 <div className="hidden lg:flex flex-col justify-center space-y-8 px-8">
                     <div className="space-y-4">
-                        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-400 text-sm font-semibold">
+                        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[#0C8B99]/10 border border-[#0C8B99]/20 text-[#0C8B99] text-sm font-semibold">
                             <Sparkles className="w-4 h-4" />
                             Personal Account
                         </div>
                         <h1 className="text-5xl font-bold leading-tight">
                             AI Email Assistant
                             <br />
-                            <span className="bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
+                            <span className="bg-gradient-to-r from-[#0C8B99] to-[#14B8A6] bg-clip-text text-transparent">
                                 For Everyone
                             </span>
                         </h1>
@@ -43,8 +43,8 @@ export default function PersonalRegistrationForm({ onSuccess, onLoginClick }: Pe
                             { icon: CheckCircle2, text: "Always free for personal use" },
                         ].map((feature, index) => (
                             <div key={index} className="flex items-center gap-3">
-                                <div className="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center flex-shrink-0">
-                                    <feature.icon className="w-4 h-4 text-purple-400" />
+                                <div className="w-8 h-8 rounded-lg bg-[#0C8B99]/10 flex items-center justify-center flex-shrink-0">
+                                    <feature.icon className="w-4 h-4 text-[#0C8B99]" />
                                 </div>
                                 <span className="text-base text-foreground/80">{feature.text}</span>
                             </div>

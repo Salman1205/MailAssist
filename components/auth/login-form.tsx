@@ -211,7 +211,7 @@ export default function LoginForm({ onSuccess, onRegisterClick, onPersonalRegist
           <h1 className="text-5xl font-bold leading-tight">
             Welcome Back to
             <br />
-            <span className="bg-gradient-to-r from-primary via-purple-500 to-pink-500 bg-clip-text text-transparent">
+            <span className="bg-gradient-to-r from-[#0C8B99] to-[#14B8A6] bg-clip-text text-transparent">
               Smart Email Support
             </span>
           </h1>
@@ -456,8 +456,8 @@ export default function LoginForm({ onSuccess, onRegisterClick, onPersonalRegist
           {step === "personal-invite" && (
             <div className="space-y-6">
               <div className="text-center space-y-2">
-                <div className="w-16 h-16 bg-purple-50 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Sparkles className="w-8 h-8 text-purple-500" />
+                <div className="w-16 h-16 bg-[#0C8B99]/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Sparkles className="w-8 h-8 text-[#0C8B99]" />
                 </div>
                 <h3 className="text-lg font-semibold">No account found</h3>
                 <p className="text-sm text-muted-foreground">
@@ -470,7 +470,7 @@ export default function LoginForm({ onSuccess, onRegisterClick, onPersonalRegist
               <div className="space-y-3">
                 <Button
                   onClick={onPersonalRegisterClick}
-                  className="w-full h-12 text-base font-semibold bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white shadow-sm"
+                  className="w-full h-12 text-base font-semibold bg-[#0C8B99] hover:bg-[#0A7885] text-white shadow-sm"
                 >
                   Create Personal Account
                 </Button>
