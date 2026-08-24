@@ -169,11 +169,11 @@ const AUTH_CSS = `
 .auth-spin{width:34px; height:34px; border-radius:50%; border:3px solid var(--line-2); border-top-color:var(--teal); animation:authspin .8s linear infinite;}
 @keyframes authspin{to{transform:rotate(360deg);}}
 
-/* Collapse each form's built-in "marketing hero + card" grid into one centered
-   card, and drop the always-hidden marketing column. Forms keep their own
-   shadcn styling, which already follows the global light/dark theme. */
-.auth-center [class*="grid-cols-2"]{ grid-template-columns:1fr !important; max-width:440px !important; width:100%; margin:0 auto !important; min-height:0 !important; padding:0 !important; gap:0 !important; }
-.auth-center [class*="grid-cols-2"] > .hidden{ display:none !important; }
+/* The forms ship their own two-column "marketing hero + card" layout, which
+   we keep intact (the hero copy on the left is part of the sign-in screen).
+   The only fix needed is to stop each form's inner min-h-screen from stacking
+   a second full viewport on top of the frame's own height, which is what had
+   squished the hero and overlapped it with the card. */
 .auth-center [class*="min-h-screen"]{ min-height:0 !important; }
 
 /* Choice screen */
