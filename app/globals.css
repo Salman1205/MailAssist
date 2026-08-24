@@ -184,6 +184,8 @@ body {
 @theme inline {
   --font-sans: "Geist", "Geist Fallback";
   --font-mono: "Geist Mono", "Geist Mono Fallback";
+  /* Display serif — the same face the welcome page uses for its headings. */
+  --font-serif: var(--font-fraunces), Georgia, "Times New Roman", serif;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -239,7 +241,8 @@ body {
     background-attachment: fixed;
   }
 
-  /* Improved typography */
+  /* Improved typography — headings use the welcome page's Fraunces serif so
+     the whole app shares one typographic identity. */
   h1,
   h2,
   h3,
@@ -247,6 +250,27 @@ body {
   h5,
   h6 {
     @apply font-semibold tracking-tight;
+    font-family: var(--font-fraunces), Georgia, "Times New Roman", serif;
+    letter-spacing: -0.02em;
+  }
+
+  /* shadcn title primitives render as <div>, not heading tags, so bring them
+     into the serif family too — these are the app's real page/section titles. */
+  [data-slot="card-title"],
+  [data-slot="dialog-title"],
+  [data-slot="alert-dialog-title"],
+  [data-slot="drawer-title"],
+  [data-slot="sheet-title"],
+  [data-slot="empty-title"] {
+    font-family: var(--font-fraunces), Georgia, "Times New Roman", serif;
+    letter-spacing: -0.02em;
+  }
+
+  /* Email content is user-authored — keep its headings neutral (sans), never
+     restyled into our display serif. */
+  .prose :is(h1, h2, h3, h4, h5, h6) {
+    font-family: var(--font-sans);
+    letter-spacing: normal;
   }
 
   /* Better link styling */
