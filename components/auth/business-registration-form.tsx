@@ -122,7 +122,7 @@ export default function BusinessRegistrationForm({ onSuccess, onLoginClick }: Bu
             <h1 className="text-5xl font-bold leading-tight">
               Transform Your
               <br />
-              <span className="bg-gradient-to-r from-primary via-purple-500 to-pink-500 bg-clip-text text-transparent">
+              <span className="bg-gradient-to-r from-[#0C8B99] to-[#14B8A6] bg-clip-text text-transparent">
                 Customer Support
               </span>
             </h1>
