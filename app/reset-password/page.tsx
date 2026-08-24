@@ -2,12 +2,6 @@
 
 import { useState, useEffect, Suspense } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Lock, Eye, EyeOff, ArrowRight, CheckCircle2, KeyRound, AlertCircle } from "lucide-react"
-import { Alert, AlertDescription } from "@/components/ui/alert"
 
 function ResetPasswordContent() {
     const router = useRouter()
@@ -79,68 +73,71 @@ function ResetPasswordContent() {
 
     if (success) {
         return (
-            <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
-                <Card className="w-full max-w-md shadow-2xl border-border/60 backdrop-blur-sm">
-                    <CardContent className="pt-8 pb-8">
-                        <div className="text-center space-y-4">
-                            <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mx-auto">
-                                <CheckCircle2 className="w-8 h-8 text-green-500" />
-                            </div>
-                            <h2 className="text-2xl font-bold text-foreground">Password Reset!</h2>
-                            <p className="text-muted-foreground">
-                                Your password has been successfully reset. You can now log in with your new password.
-                            </p>
-                            <Button
-                                onClick={() => router.push("/auth/landing?view=login")}
-                                className="w-full h-12 text-base font-semibold mt-4"
-                            >
-                                Go to Login
-                                <ArrowRight className="w-4 h-4 ml-2" />
-                            </Button>
+            <div className="rp-root">
+                <style>{RP_CSS}</style>
+                <a href="/welcome" className="rp-brand">
+                    <img src="/amanii_logo.png" alt="MailAssist" className="rp-logo" />
+                    <span className="rp-brand-name">MailAssist</span>
+                </a>
+                <div className="rp-shell">
+                    <div className="rp-card rp-card-center">
+                        <div className="rp-check" aria-hidden>
+                            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#3fbfae" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M20 6 9 17l-5-5" />
+                            </svg>
                         </div>
-                    </CardContent>
-                </Card>
+                        <h1 className="rp-h">Password reset!</h1>
+                        <p className="rp-p">
+                            Your password has been successfully reset. You can now log in with your new password.
+                        </p>
+                        <button
+                            onClick={() => router.push("/auth/landing?view=login")}
+                            className="rp-btn rp-btn-primary rp-btn-full"
+                        >
+                            Go to Login
+                        </button>
+                    </div>
+                </div>
             </div>
         )
     }
 
     return (
-        <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
-            <Card className="w-full max-w-md shadow-2xl border-border/60 backdrop-blur-sm">
-                <CardHeader className="space-y-2 pb-6">
-                    <div className="flex justify-center">
-                        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-lg">
-                            <KeyRound className="w-8 h-8 text-white" />
-                        </div>
+        <div className="rp-root">
+            <style>{RP_CSS}</style>
+            <a href="/welcome" className="rp-brand">
+                <img src="/amanii_logo.png" alt="MailAssist" className="rp-logo" />
+                <span className="rp-brand-name">MailAssist</span>
+            </a>
+            <div className="rp-shell">
+                <div className="rp-card">
+                    <div className="rp-head">
+                        <h1 className="rp-h">Reset password</h1>
+                        <p className="rp-p">Enter your new password below</p>
                     </div>
-                    <CardTitle className="text-3xl font-bold text-center">Reset Password</CardTitle>
-                    <CardDescription className="text-center text-base">
-                        Enter your new password below
-                    </CardDescription>
-                </CardHeader>
 
-                <CardContent>
                     {error && (
-                        <Alert variant="destructive" className="mb-6 animate-in slide-in-from-top-2">
-                            <AlertCircle className="h-4 w-4" />
-                            <AlertDescription>{error}</AlertDescription>
-                        </Alert>
+                        <div className="rp-alert" role="alert">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <circle cx="12" cy="12" r="10" />
+                                <line x1="12" y1="8" x2="12" y2="12" />
+                                <line x1="12" y1="16" x2="12.01" y2="16" />
+                            </svg>
+                            <span>{error}</span>
+                        </div>
                     )}
 
-                    <form onSubmit={handleSubmit} className="space-y-4">
-                        <div className="space-y-2">
-                            <Label htmlFor="password" className="text-sm font-medium">
-                                New Password
-                            </Label>
-                            <div className="relative">
-                                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                                <Input
+                    <form onSubmit={handleSubmit} className="rp-form">
+                        <div className="rp-field">
+                            <label htmlFor="password" className="rp-label">New Password</label>
+                            <div className="rp-input-wrap">
+                                <input
                                     id="password"
                                     type={showPassword ? "text" : "password"}
                                     placeholder="Enter new password"
                                     value={formData.password}
                                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                                    className="h-11 pl-10 pr-10"
+                                    className="rp-input"
                                     disabled={loading || !token}
                                     required
                                     autoComplete="new-password"
@@ -149,28 +146,26 @@ function ResetPasswordContent() {
                                 <button
                                     type="button"
                                     onClick={() => setShowPassword(!showPassword)}
-                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                                    className="rp-eye"
                                     disabled={loading}
                                     tabIndex={-1}
+                                    aria-label={showPassword ? "Hide password" : "Show password"}
                                 >
-                                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                    {showPassword ? <EyeOffIcon /> : <EyeIcon />}
                                 </button>
                             </div>
                         </div>
 
-                        <div className="space-y-2">
-                            <Label htmlFor="confirmPassword" className="text-sm font-medium">
-                                Confirm Password
-                            </Label>
-                            <div className="relative">
-                                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                                <Input
+                        <div className="rp-field">
+                            <label htmlFor="confirmPassword" className="rp-label">Confirm Password</label>
+                            <div className="rp-input-wrap">
+                                <input
                                     id="confirmPassword"
                                     type={showConfirmPassword ? "text" : "password"}
                                     placeholder="Confirm new password"
                                     value={formData.confirmPassword}
                                     onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
-                                    className="h-11 pl-10 pr-10"
+                                    className="rp-input"
                                     disabled={loading || !token}
                                     required
                                     autoComplete="new-password"
@@ -178,56 +173,142 @@ function ResetPasswordContent() {
                                 <button
                                     type="button"
                                     onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                                    className="rp-eye"
                                     disabled={loading}
                                     tabIndex={-1}
+                                    aria-label={showConfirmPassword ? "Hide password" : "Show password"}
                                 >
-                                    {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                    {showConfirmPassword ? <EyeOffIcon /> : <EyeIcon />}
                                 </button>
                             </div>
                         </div>
 
-                        <Button
+                        <button
                             type="submit"
-                            className="w-full h-12 text-base font-semibold group"
+                            className="rp-btn rp-btn-primary rp-btn-full"
                             disabled={loading || !token}
                         >
                             {loading ? (
                                 <>
-                                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2" />
+                                    <span className="rp-spinner" aria-hidden />
                                     Resetting...
                                 </>
                             ) : (
-                                <>
-                                    Reset Password
-                                    <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" />
-                                </>
+                                "Reset Password"
                             )}
-                        </Button>
+                        </button>
                     </form>
 
-                    <div className="mt-6 text-center">
+                    <div className="rp-footer">
                         <button
                             onClick={() => router.push("/auth/landing?view=login")}
-                            className="text-sm text-primary hover:underline font-medium"
+                            className="rp-link"
                         >
                             Back to Login
                         </button>
                     </div>
-                </CardContent>
-            </Card>
+                </div>
+            </div>
         </div>
+    )
+}
+
+function EyeIcon() {
+    return (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+            <circle cx="12" cy="12" r="3" />
+        </svg>
+    )
+}
+
+function EyeOffIcon() {
+    return (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9.88 9.88a3 3 0 0 0 4.24 4.24" />
+            <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+            <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+            <line x1="2" y1="2" x2="22" y2="22" />
+        </svg>
     )
 }
 
 export default function ResetPasswordPage() {
     return (
         <Suspense fallback={
-            <div className="min-h-screen flex items-center justify-center bg-slate-950">
-                <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+            <div className="rp-root rp-root-fallback">
+                <style>{RP_CSS}</style>
+                <span className="rp-spinner rp-spinner-lg" aria-hidden />
             </div>
         }>
             <ResetPasswordContent />
         </Suspense>
     )
 }
+
+const RP_CSS = `
+.rp-root{
+  --ink:#0E1216; --paper:#EAEDF1; --muted:#98A0AA; --teal:#0C8B99; --teal-2:#3fbfae; --line:rgba(255,255,255,.12);
+  --serif:var(--font-fraunces),Georgia,serif; --sans:var(--font-geist),ui-sans-serif,system-ui,sans-serif;
+  position:absolute; inset:0; height:100vh; overflow-y:auto;
+  background:radial-gradient(900px 480px at 80% -10%, rgba(12,139,153,.14), transparent 60%), var(--ink);
+  color:var(--paper); font-family:var(--sans); letter-spacing:-.011em;
+}
+.rp-root-fallback{display:flex; align-items:center; justify-content:center;}
+.rp-brand{position:absolute; top:22px; left:24px; display:inline-flex; align-items:center; gap:9px; text-decoration:none; z-index:2;}
+.rp-logo{height:24px; width:auto; opacity:.95;}
+.rp-brand-name{font-family:var(--serif); font-weight:500; font-size:17px; letter-spacing:-.02em; color:var(--paper);}
+.rp-shell{min-height:100%; display:flex; align-items:center; justify-content:center; padding:96px 24px 48px;}
+.rp-card{width:100%; max-width:420px; display:flex; flex-direction:column; gap:20px;
+  background:rgba(255,255,255,.02); border:1px solid var(--line); border-radius:16px; padding:32px 30px;}
+.rp-card-center{text-align:center; align-items:center; gap:14px;}
+.rp-head{display:flex; flex-direction:column; gap:6px; text-align:center;}
+.rp-h{font-family:var(--serif); font-weight:500; font-size:28px; letter-spacing:-.02em; margin:0;}
+.rp-p{color:var(--muted); font-size:14.5px; line-height:1.6; margin:0;}
+.rp-check{width:60px; height:60px; border-radius:999px; display:flex; align-items:center; justify-content:center;
+  background:rgba(63,191,174,.14); border:1px solid rgba(63,191,174,.35);}
+.rp-alert{display:flex; align-items:center; gap:9px; padding:11px 13px; border-radius:10px;
+  background:rgba(220,80,80,.1); border:1px solid rgba(220,80,80,.35); color:#f2b8b8; font-size:13.5px; line-height:1.4;}
+.rp-alert svg{flex:0 0 auto;}
+.rp-form{display:flex; flex-direction:column; gap:16px;}
+.rp-field{display:flex; flex-direction:column; gap:7px;}
+.rp-label{font-size:13px; font-weight:560; color:var(--paper);}
+.rp-input-wrap{position:relative; display:flex;}
+.rp-input{
+  width:100%; background:#161B22; border:1px solid var(--line); border-radius:10px;
+  padding:11px 42px 11px 13px; color:var(--paper); font:inherit; font-size:14.5px; letter-spacing:-.011em;
+  transition:border-color .18s, box-shadow .18s;
+}
+.rp-input::placeholder{color:#6c757e;}
+.rp-input:focus{outline:none; border-color:var(--teal); box-shadow:0 0 0 3px rgba(12,139,153,.18);}
+.rp-input:disabled{opacity:.55; cursor:not-allowed;}
+.rp-eye{
+  position:absolute; right:11px; top:50%; transform:translateY(-50%);
+  display:flex; align-items:center; justify-content:center; padding:0; background:none; border:none;
+  color:var(--muted); cursor:pointer; transition:color .16s;
+}
+.rp-eye:hover{color:var(--paper);}
+.rp-eye:disabled{cursor:not-allowed; opacity:.6;}
+.rp-btn{
+  font:inherit; font-size:14.5px; font-weight:560; border-radius:999px; padding:12px 22px; cursor:pointer;
+  border:1px solid transparent; transition:transform .16s, border-color .2s, box-shadow .2s, opacity .2s;
+  display:inline-flex; align-items:center; justify-content:center; gap:9px;
+}
+.rp-btn-full{width:100%;}
+.rp-btn-primary{background:#fff; color:#14171B;}
+.rp-btn-primary:hover:not(:disabled){transform:translateY(-2px); box-shadow:0 12px 26px -12px rgba(0,0,0,.6);}
+.rp-btn:disabled{opacity:.6; cursor:not-allowed;}
+.rp-footer{text-align:center;}
+.rp-link{background:none; border:none; font:inherit; font-size:13.5px; font-weight:560; color:var(--teal-2); cursor:pointer;}
+.rp-link:hover{text-decoration:underline;}
+.rp-spinner{
+  width:16px; height:16px; border-radius:999px; border:3px solid rgba(20,23,27,.25); border-top-color:#14171B;
+  animation:rp-spin .8s linear infinite;
+}
+.rp-spinner-lg{width:34px; height:34px; border:3px solid rgba(255,255,255,.15); border-top-color:var(--teal-2);}
+@keyframes rp-spin{to{transform:rotate(360deg);}}
+@media (prefers-reduced-motion: reduce){
+  .rp-spinner, .rp-spinner-lg{animation:none;}
+  .rp-btn-primary:hover:not(:disabled){transform:none;}
+}
+`

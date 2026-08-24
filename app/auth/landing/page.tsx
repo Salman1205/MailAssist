@@ -1,34 +1,41 @@
 "use client"
 
 import { useState, useEffect, Suspense } from "react"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import {
-  Sparkles,
-  Mail,
-  Users,
-  BarChart3,
-  Zap,
-  Shield,
-  CheckCircle2,
-  ArrowRight,
-  Building2
-} from "lucide-react"
+import { useRouter, useSearchParams } from "next/navigation"
+import { ArrowRight, Building2, User } from "lucide-react"
 import BusinessRegistrationForm from "@/components/auth/business-registration-form"
 import LoginForm from "@/components/auth/login-form"
 import OTPVerification from "@/components/auth/otp-verification"
 import PersonalRegistrationForm from "@/components/auth/personal-registration-form"
-import { useRouter, useSearchParams } from "next/navigation"
 
 type ViewType = "landing" | "login" | "register" | "verify-otp" | "register-personal"
 
+/* Shared branded frame — matches the /welcome homepage (logo, Fraunces, teal). */
+function AuthFrame({ children, narrow = true }: { children: React.ReactNode; narrow?: boolean }) {
+  return (
+    <div className="auth-frame">
+      <style>{AUTH_CSS}</style>
+      <div className="auth-glow" aria-hidden />
+      <a className="auth-brand" href="/welcome" aria-label="MailAssist home">
+        <img src="/amanii_logo.png" alt="" className="auth-logo" />
+        <span className="auth-word">MailAssist</span>
+      </a>
+      <main className={`auth-center ${narrow ? "auth-narrow" : ""}`}>{children}</main>
+    </div>
+  )
+}
+
+function AuthLoader() {
+  return (
+    <AuthFrame>
+      <div className="auth-spin" aria-label="Loading" role="status" />
+    </AuthFrame>
+  )
+}
+
 export default function AuthLandingPage() {
   return (
-    <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center bg-slate-950">
-        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-      </div>
-    }>
+    <Suspense fallback={<AuthLoader />}>
       <AuthLandingContent />
     </Suspense>
   )
@@ -37,227 +44,95 @@ export default function AuthLandingPage() {
 function AuthLandingContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  // Start with null to show loading state while parsing URL
   const [currentView, setCurrentView] = useState<ViewType | null>(null)
   const [isInitialized, setIsInitialized] = useState(false)
-
-  // Initialize view from URL params on mount
-  useEffect(() => {
-    const view = searchParams.get('view')
-    if (view === 'login' || view === 'register' || view === 'register-personal' || view === 'verify-otp') {
-      setCurrentView(view as ViewType)
-    } else {
-      setCurrentView('landing')
-    }
-    setIsInitialized(true)
-  }, [searchParams])
-
   const [verificationData, setVerificationData] = useState<{
     email: string
     verificationToken: string
     businessId: string
   } | null>(null)
 
-  // Show loading state until initialized
-  if (!isInitialized) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-950">
-        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-      </div>
-    )
-  }
+  useEffect(() => {
+    const view = searchParams.get("view")
+    if (view === "login" || view === "register" || view === "register-personal" || view === "verify-otp") {
+      setCurrentView(view as ViewType)
+    } else {
+      setCurrentView("landing")
+    }
+    setIsInitialized(true)
+  }, [searchParams])
 
-  const handleRegistrationSuccess = (data: {
-    email: string
-    verificationToken: string
-    businessId: string
-  }) => {
+  if (!isInitialized) return <AuthLoader />
+
+  const handleRegistrationSuccess = (data: { email: string; verificationToken: string; businessId: string }) => {
     setVerificationData(data)
     setCurrentView("verify-otp")
   }
+  const handleLoginSuccess = () => router.push("/")
+  const handleOTPSuccess = () => router.push("/")
+  const handlePersonalRegistrationSuccess = () => router.push("/")
 
-  const handleLoginSuccess = () => {
-    // After business auth login, redirect to main tool
-    router.push("/")
-  }
-
-  const handleOTPSuccess = () => {
-    // After business registration + OTP verification, redirect to main app
-    router.push("/")
-  }
-
-  const handlePersonalRegistrationSuccess = () => {
-    // After personal registration, redirect to main app
-    router.push("/")
-  }
-
-  // Landing Page View
+  // Choice screen (direct visits to /auth/landing) — homepage CTAs deep-link past this.
   if (currentView === "landing") {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 relative overflow-hidden">
-        {/* Animated background gradients */}
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute top-0 left-1/4 w-96 h-96 bg-primary/10 rounded-full blur-3xl animate-pulse" />
-          <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }} />
-        </div>
-        <div className="relative z-10">
-          <div className="w-full max-w-7xl">
-            {/* Hero Section */}
-            <div className="text-center space-y-6 mb-12">
-              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/20 border border-primary/30 text-primary text-sm font-semibold backdrop-blur-xl shadow-lg shadow-primary/10">
-                <Sparkles className="w-4 h-4 animate-pulse" />
-                AI-Powered Email Support Platform
-              </div>
-
-              <h1 className="text-5xl md:text-6xl font-bold leading-tight">
-                <span className="text-white">Transform Your</span>
-                <br />
-                <span className="bg-gradient-to-r from-cyan-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">
-                  Customer Support
-                </span>
-              </h1>
-
-              <p className="text-lg md:text-xl text-slate-300 max-w-2xl mx-auto">
-                Manage customer emails with AI-powered drafts, team collaboration, and smart automation.
-                Start your free trial today.
-              </p>
-
-              {/* CTA Buttons */}
-              <div className="flex flex-col sm:flex-row gap-4 justify-center items-center pt-4">
-                <Button
-                  size="lg"
-                  onClick={() => setCurrentView("register")}
-                  className="h-14 px-8 text-lg font-semibold group shadow-lg hover:shadow-xl transition-all hover:scale-105 bg-gradient-to-r from-primary via-purple-500 to-pink-500"
-                >
-                  Get Started Free
-                  <ArrowRight className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" />
-                </Button>
-                <Button
-                  size="lg"
-                  variant="outline"
-                  onClick={() => setCurrentView("login")}
-                  className="h-14 px-8 text-lg font-semibold hover:scale-105 transition-all border-white/20 text-white hover:bg-white/10"
-                >
-                  Sign In
-                </Button>
-              </div>
-
-              <div className="pt-2">
-                <button
-                  onClick={() => setCurrentView("register-personal")}
-                  className="text-sm text-slate-400 hover:text-white hover:underline transition-colors"
-                >
-                  Looking for personal use? Create a free personal account
-                </button>
-              </div>
-            </div>
-
-            {/* Features Grid */}
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 mt-16">
-              {[
-                {
-                  icon: Sparkles,
-                  title: "AI-Generated Responses",
-                  description: "Let AI draft professional email responses based on your tone and style",
-                  color: "from-blue-500 to-cyan-500"
-                },
-                {
-                  icon: Users,
-                  title: "Team Collaboration",
-                  description: "Invite agents, assign roles, and manage permissions across your team",
-                  color: "from-purple-500 to-pink-500"
-                },
-                {
-                  icon: Mail,
-                  title: "Multi-Email Support",
-                  description: "Connect multiple email accounts from Gmail, Outlook, and more",
-                  color: "from-green-500 to-emerald-500"
-                },
-                {
-                  icon: BarChart3,
-                  title: "Analytics & Insights",
-                  description: "Track response times, team performance, and customer satisfaction",
-                  color: "from-orange-500 to-red-500"
-                },
-                {
-                  icon: Shield,
-                  title: "Smart Guardrails",
-                  description: "Set content filters and approval workflows to maintain quality",
-                  color: "from-indigo-500 to-purple-500"
-                },
-                {
-                  icon: Zap,
-                  title: "Quick Replies",
-                  description: "Create and share templates for common customer questions",
-                  color: "from-yellow-500 to-orange-500"
-                }
-              ].map((feature, index) => (
-                <Card key={index} className="relative group border-slate-700/50 bg-slate-900/50 backdrop-blur-xl hover:border-primary/50 hover:shadow-xl hover:shadow-primary/10 transition-all duration-300 hover:scale-105">
-                  <CardHeader>
-                    <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${feature.color} flex items-center justify-center mb-4 group-hover:scale-110 transition-transform shadow-lg`}>
-                      <feature.icon className="w-6 h-6 text-white" />
-                    </div>
-                    <CardTitle className="text-xl text-white">{feature.title}</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <CardDescription className="text-base text-slate-400">
-                      {feature.description}
-                    </CardDescription>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-
-
+      <AuthFrame narrow={false}>
+        <div className="auth-choose">
+          <h1 className="auth-h1">Get started with MailAssist</h1>
+          <p className="auth-sub">Bring your own Gmail. Upgrade to a team whenever you're ready.</p>
+          <div className="auth-choose-grid">
+            <button className="auth-choice" onClick={() => setCurrentView("register")}>
+              <span className="auth-choice-ic"><Building2 /></span>
+              <span className="auth-choice-t">Business &amp; teams</span>
+              <span className="auth-choice-d">A shared helpdesk for the whole support team.</span>
+              <span className="auth-choice-go">Create a team account <ArrowRight /></span>
+            </button>
+            <button className="auth-choice" onClick={() => setCurrentView("register-personal")}>
+              <span className="auth-choice-ic"><User /></span>
+              <span className="auth-choice-t">Just me</span>
+              <span className="auth-choice-d">AI drafts for your own inbox, no setup.</span>
+              <span className="auth-choice-go">Create a personal account <ArrowRight /></span>
+            </button>
           </div>
+          <button className="auth-signin-link" onClick={() => setCurrentView("login")}>
+            Already have an account? Sign in
+          </button>
         </div>
-      </div>
+      </AuthFrame>
     )
   }
 
-  // Login View
   if (currentView === "login") {
-    const errorParam = searchParams.get('error')
     return (
-      <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 animate-in fade-in duration-300">
+      <AuthFrame>
         <LoginForm
           onSuccess={handleLoginSuccess}
           onRegisterClick={() => setCurrentView("register")}
           onPersonalRegisterClick={() => setCurrentView("register-personal")}
-          initialError={errorParam}
+          initialError={searchParams.get("error")}
         />
-      </div>
+      </AuthFrame>
     )
   }
 
-  // Registration View
   if (currentView === "register") {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 animate-in fade-in duration-300">
-        <BusinessRegistrationForm
-          onSuccess={handleRegistrationSuccess}
-          onLoginClick={() => setCurrentView("login")}
-        />
-      </div>
+      <AuthFrame>
+        <BusinessRegistrationForm onSuccess={handleRegistrationSuccess} onLoginClick={() => setCurrentView("login")} />
+      </AuthFrame>
     )
   }
 
-  // Personal Registration View
   if (currentView === "register-personal") {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 animate-in fade-in duration-300">
-        <PersonalRegistrationForm
-          onSuccess={handlePersonalRegistrationSuccess}
-          onLoginClick={() => setCurrentView("login")}
-        />
-      </div>
+      <AuthFrame>
+        <PersonalRegistrationForm onSuccess={handlePersonalRegistrationSuccess} onLoginClick={() => setCurrentView("login")} />
+      </AuthFrame>
     )
   }
 
-  // OTP Verification View
   if (currentView === "verify-otp" && verificationData) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 animate-in fade-in duration-300">
+      <AuthFrame>
         <OTPVerification
           email={verificationData.email}
           verificationToken={verificationData.verificationToken}
@@ -265,9 +140,51 @@ function AuthLandingContent() {
           onSuccess={handleOTPSuccess}
           onBack={() => setCurrentView("register")}
         />
-      </div>
+      </AuthFrame>
     )
   }
 
-  return null
+  return <AuthLoader />
 }
+
+const AUTH_CSS = `
+.auth-frame{
+  --ink:#0E1216; --ink-2:#161B22; --paper:#EAEDF1; --muted:#98A0AA; --teal:#0C8B99; --teal-2:#3fbfae;
+  --line:rgba(255,255,255,.1); --line-2:rgba(255,255,255,.16);
+  --serif:var(--font-fraunces),Georgia,serif; --sans:var(--font-geist),ui-sans-serif,system-ui,sans-serif;
+  position:absolute; inset:0; height:100vh; overflow-y:auto; overflow-x:hidden;
+  background:radial-gradient(1100px 560px at 80% -10%, rgba(12,139,153,.14), transparent 60%), var(--ink);
+  color:var(--paper); font-family:var(--sans); letter-spacing:-.011em;
+  display:flex; flex-direction:column;
+}
+.auth-glow{position:absolute; inset:0; pointer-events:none; background:radial-gradient(700px 400px at 10% 110%, rgba(63,191,174,.08), transparent 60%);}
+.auth-brand{position:relative; z-index:2; display:inline-flex; align-items:center; gap:9px; padding:20px 26px; color:var(--paper); text-decoration:none; font-weight:600; font-size:15px; letter-spacing:-.02em; align-self:flex-start;}
+.auth-logo{height:24px; width:auto; display:block;}
+.auth-center{position:relative; z-index:2; flex:1; display:flex; align-items:center; justify-content:center; padding:20px 20px 56px;}
+.auth-narrow{}
+.auth-spin{width:34px; height:34px; border-radius:50%; border:3px solid rgba(255,255,255,.15); border-top-color:var(--teal-2); animation:authspin .8s linear infinite;}
+@keyframes authspin{to{transform:rotate(360deg);}}
+
+/* Choice screen */
+.auth-choose{width:100%; max-width:760px; text-align:center; animation:authfade .5s cubic-bezier(.2,.7,.2,1) both;}
+.auth-h1{font-family:var(--serif); font-weight:500; font-size:clamp(28px,4.4vw,40px); letter-spacing:-.02em; margin:0;}
+.auth-sub{color:var(--muted); font-size:15.5px; margin:12px 0 30px;}
+.auth-choose-grid{display:grid; grid-template-columns:1fr 1fr; gap:16px;}
+@media(max-width:640px){ .auth-choose-grid{grid-template-columns:1fr;} }
+.auth-choice{text-align:left; background:var(--ink-2); border:1px solid var(--line); border-radius:16px; padding:24px 22px; cursor:pointer; color:var(--paper); font:inherit; display:flex; flex-direction:column; gap:8px; transition:transform .16s, border-color .2s, box-shadow .2s;}
+.auth-choice:hover{transform:translateY(-3px); border-color:rgba(12,139,153,.5); box-shadow:0 22px 44px -26px rgba(12,139,153,.6);}
+.auth-choice-ic{width:42px; height:42px; border-radius:11px; display:grid; place-items:center; background:rgba(12,139,153,.16); color:var(--teal-2); margin-bottom:6px;}
+.auth-choice-ic svg{width:20px; height:20px;}
+.auth-choice-t{font-family:var(--serif); font-size:21px; font-weight:500; letter-spacing:-.02em;}
+.auth-choice-d{color:var(--muted); font-size:14px; line-height:1.5; flex:1;}
+.auth-choice-go{display:inline-flex; align-items:center; gap:7px; color:var(--teal-2); font-size:13.5px; font-weight:560; margin-top:6px;}
+.auth-choice-go svg{width:15px; height:15px;}
+.auth-signin-link{margin-top:26px; background:none; border:0; color:var(--muted); font:inherit; font-size:14px; cursor:pointer; text-decoration:underline; text-underline-offset:3px;}
+.auth-signin-link:hover{color:var(--paper);}
+@keyframes authfade{from{opacity:0; transform:translateY(14px);} to{opacity:1; transform:none;}}
+
+@media (prefers-reduced-motion: reduce){
+  .auth-choose,.auth-choice{animation:none !important; transition:none !important;}
+  .auth-spin{animation-duration:1.4s;}
+}
+`

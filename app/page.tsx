@@ -1125,22 +1125,20 @@ function PageContent() {
           <div className="max-w-md w-full">
             {checkingAuth || checkingUser ? (
               <div className="flex items-center justify-center h-full">
-                <div className="flex flex-col items-center gap-3 animate-in fade-in duration-500">
-                  <div className="flex gap-1.5">
-                    <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    {checkingAuth ? "Checking authentication..." : "Loading..."}
+                <div className="flex flex-col items-center gap-4 animate-in fade-in duration-500">
+                  <img src="/amanii_logo.png" alt="MailAssist" className="h-9 w-auto opacity-95" />
+                  <div className="w-7 h-7 rounded-full border-[3px] border-primary/25 border-t-primary animate-spin" />
+                  <p className="text-sm text-muted-foreground tracking-tight">
+                    {checkingAuth ? "Checking your account…" : "Loading your inbox…"}
                   </p>
                 </div>
               </div>
             ) : !isConnected ? (
               <div className="flex items-center justify-center h-full p-4">
-                <div className="text-center">
-                  <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
-                  <p className="mt-4 text-muted-foreground">Redirecting...</p>
+                <div className="text-center flex flex-col items-center gap-4">
+                  <img src="/amanii_logo.png" alt="MailAssist" className="h-9 w-auto opacity-95" />
+                  <div className="w-7 h-7 rounded-full border-[3px] border-primary/25 border-t-primary animate-spin" />
+                  <p className="text-sm text-muted-foreground">Taking you in…</p>
                 </div>
               </div>
             ) : (
@@ -1189,13 +1187,10 @@ function PageContent() {
 
       {loggingOut && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
-          <div className="flex flex-col items-center gap-3 animate-in fade-in duration-300">
-            <div className="flex gap-1.5">
-              <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-              <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-              <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-            </div>
-            <p className="text-sm text-muted-foreground">Logging you out...</p>
+          <div className="flex flex-col items-center gap-4 animate-in fade-in duration-300">
+            <img src="/amanii_logo.png" alt="MailAssist" className="h-8 w-auto opacity-90" />
+            <div className="w-7 h-7 rounded-full border-[3px] border-primary/25 border-t-primary animate-spin" />
+            <p className="text-sm text-muted-foreground">Signing you out…</p>
           </div>
         </div>
       )}
