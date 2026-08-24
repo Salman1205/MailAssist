@@ -1,23 +1,17 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useTheme } from "next-themes"
 import { ArrowRight, ArrowUpRight, Check, Moon, Sun } from "lucide-react"
 
 export default function WelcomePage() {
   const [connecting, setConnecting] = useState(false)
-  const [theme, setTheme] = useState<"light" | "dark">("light")
-
-  // Respect the app/system preference on first paint, still user-toggleable.
-  useEffect(() => {
-    try {
-      const prefersDark =
-        document.documentElement.classList.contains("dark") ||
-        window.matchMedia?.("(prefers-color-scheme: dark)").matches
-      setTheme(prefersDark ? "dark" : "light")
-    } catch {
-      /* keep light */
-    }
-  }, [])
+  // Drive the GLOBAL theme so every page (auth, etc.) stays consistent —
+  // dark mode here means dark everywhere.
+  const { resolvedTheme, setTheme: setGlobalTheme } = useTheme()
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+  const theme: "light" | "dark" = mounted && resolvedTheme === "dark" ? "dark" : "light"
 
   // Scroll-triggered reveals (Apple-style: subtle, once).
   useEffect(() => {
@@ -77,7 +71,7 @@ export default function WelcomePage() {
             <a className="ma-link" href="#plans">Plans</a>
             <button
               className="ma-theme"
-              onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+              onClick={() => setGlobalTheme(theme === "dark" ? "light" : "dark")}
               aria-label="Toggle theme"
             >
               {theme === "dark" ? <Sun className="ma-theme-i" /> : <Moon className="ma-theme-i" />}
