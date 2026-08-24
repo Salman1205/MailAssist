@@ -13,11 +13,9 @@ export const metadata: Metadata = {
   title: "MailAssist — The self-healing shared inbox",
   description: "Turn your team's Gmail into one calm, AI-drafted helpdesk. Every email sorted, assigned, and answered — nothing missed.",
   icons: {
-    icon: [
-      { url: "/icon.svg", type: "image/svg+xml" },
-      { url: "/icon-light-32x32.png", sizes: "32x32", type: "image/png" },
-    ],
-    apple: "/apple-icon.png",
+    icon: [{ url: "/amanii_logo.png", type: "image/png" }],
+    shortcut: "/amanii_logo.png",
+    apple: "/amanii_logo.png",
   },
 }
 
