@@ -49,6 +49,29 @@ export async function GET(request: NextRequest) {
         // Check if user can view all tickets
         const canViewAll = await canViewAllTickets(userId);
 
+        // Resolve the set of mailboxes this history should span. A customer's past
+        // tickets can live under ANY connected mailbox of the business (e.g. one email
+        // arrived at help@, another at support@). Scoping to a single "current" email is
+        // brittle: getUserEmailForTickets() can resolve to a different mailbox between
+        // requests, which makes past conversations appear and disappear. Scope by ALL of
+        // the business's connected mailboxes instead — the same approach the ticket list uses.
+        const { validateBusinessSession } = await import('@/lib/session');
+        const businessSession = await validateBusinessSession();
+        let scopeEmails: string[] = [];
+        if (businessSession?.businessId) {
+            try {
+                const { loadBusinessTokens } = await import('@/lib/storage');
+                const connected = await loadBusinessTokens(businessSession.businessId, businessSession?.email || undefined);
+                scopeEmails = connected.map((a: any) => a.email).filter(Boolean);
+            } catch (e) {
+                console.error('[customer-history] Failed to load business mailboxes, falling back to single mailbox:', e);
+            }
+        }
+        // Fallback (personal accounts, or if resolution failed): the single current mailbox.
+        if (scopeEmails.length === 0 && userEmail) {
+            scopeEmails = [userEmail];
+        }
+
         // Build query for customer's previous tickets
         let query = supabase
             .from('tickets')
@@ -73,7 +96,7 @@ export async function GET(request: NextRequest) {
         )
       `)
             .eq('customer_email', customerEmail)
-            .eq('user_email', userEmail)
+            .in('user_email', scopeEmails)
             .order('last_customer_reply_at', { ascending: false, nullsFirst: false })
             .limit(50);
 

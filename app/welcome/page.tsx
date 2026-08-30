@@ -56,7 +56,7 @@ export default function WelcomePage() {
   }
 
   return (
-    <div className="ma-root" data-theme={theme}>
+    <div className="ma-root">
       <style>{CSS}</style>
 
       {/* Top bar */}
@@ -378,17 +378,17 @@ const CSS = `
 @keyframes mapulse{0%{box-shadow:0 0 0 0 rgba(63,191,174,.5);} 70%{box-shadow:0 0 0 7px rgba(63,191,174,0);} 100%{box-shadow:0 0 0 0 rgba(63,191,174,0);}}
 
 /* ---------- Dark mode ---------- */
-.ma-root[data-theme="dark"]{
+.dark .ma-root{
   --paper:#0E1216; --paper-2:#161B22; --ink:#EAEDF1; --muted:#98A0AA; --faint:#6B7280;
   --line:rgba(255,255,255,.09); --line-2:rgba(255,255,255,.17);
   --btn-bg:#FFFFFF; --btn-fg:#14171B; --bar-bg:rgba(14,18,22,.82);
 }
-.ma-root[data-theme="dark"] .ma-eyebrow{background:rgba(12,139,153,.16); border-color:rgba(12,139,153,.3); color:#4fc4d2;}
-.ma-root[data-theme="dark"] .ma-signin{background:rgba(255,255,255,.05);}
-.ma-root[data-theme="dark"] .ma-plan-feature{box-shadow:0 24px 50px -30px rgba(12,139,153,.55);}
-.ma-root[data-theme="dark"] .ma-console{box-shadow:0 40px 80px -32px rgba(0,0,0,.7);}
-.ma-root[data-theme="dark"] .ma-h1 em,
-.ma-root[data-theme="dark"] .ma-band-p em{color:#3fbfae;}
+.dark .ma-root .ma-eyebrow{background:rgba(12,139,153,.16); border-color:rgba(12,139,153,.3); color:#4fc4d2;}
+.dark .ma-root .ma-signin{background:rgba(255,255,255,.05);}
+.dark .ma-root .ma-plan-feature{box-shadow:0 24px 50px -30px rgba(12,139,153,.55);}
+.dark .ma-root .ma-console{box-shadow:0 40px 80px -32px rgba(0,0,0,.7);}
+.dark .ma-root .ma-h1 em,
+.dark .ma-root .ma-band-p em{color:#3fbfae;}
 
 @media (prefers-reduced-motion: reduce){
   .load,[data-reveal],.ma-raw,.ma-tk,.ma-draft{animation:none !important; opacity:1 !important; transform:none !important; transition:none !important;}
