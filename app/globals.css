@@ -6,6 +6,16 @@
 html {
   height: 100vh;
   overflow: hidden;
+  /* Paint a themed ground on the very first frame (before the body gradient
+     loads) so a hard refresh never flashes white. next-themes sets/removes
+     .dark before paint, so these resolve to the correct theme immediately. */
+  background: #0E1216;
+  color-scheme: dark;
+}
+
+html:not(.dark) {
+  background: #F6F5F1;
+  color-scheme: light;
 }
 
 body {
