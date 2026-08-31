@@ -34,26 +34,74 @@ function normalizeCase(token: string): string {
   return token;
 }
 
+/** First name token from a clean display name ("Enrique Espinoza" -> "Enrique"). */
+function firstNameFromDisplay(display: string): string | null {
+  const token = display
+    .split(/\s+/)[0]
+    .replace(/^[^\p{L}\p{M}]+|[^\p{L}\p{M}'’-]+$/gu, '');
+  return token ? normalizeCase(token) : null;
+}
+
 /**
- * Derive a usable first name from a customer's display name (preferred) or,
- * failing that, fall back to a neutral greeting word so a template never sends
- * a literal "[Customer Name]".
+ * Split a value that may be a bare email, a bare name, or a raw From-style
+ * header ("Enrique Espinoza <enrique@x.com>") into its display + address parts.
+ * Customer info in the DB frequently arrives in the raw "Name <addr>" form, so
+ * we must handle it here rather than assume a clean split.
+ */
+function parseNameAndAddress(raw?: string | null): { display: string; address: string } {
+  const s = (raw || '').trim();
+  if (!s) return { display: '', address: '' };
+
+  const angle = s.match(/^\s*"?([^"<]*?)"?\s*<\s*([^>]+?)\s*>\s*$/);
+  if (angle) return { display: angle[1].trim(), address: angle[2].trim() };
+
+  if (s.includes('@')) return { display: '', address: s };
+  return { display: s, address: '' };
+}
+
+/**
+ * Try to make a plausible first name from an email local-part, but ONLY when it
+ * splits cleanly on separators (john.doe -> John, mary_jane -> Mary). A single
+ * concatenated blob like "enriqueespinoza1980" can't be split reliably, so we
+ * refuse to guess and let the caller fall back to a neutral greeting.
+ */
+function firstNameFromEmail(address: string): string | null {
+  const local = (address.split('@')[0] || '').trim();
+  if (!local) return null;
+
+  const parts = local
+    .split(/[._\-+]+/)
+    .map((p) => p.replace(/\d+/g, ''))
+    .filter((p) => p.length >= 2 && /[A-Za-z]/.test(p));
+
+  // Require an actual separator (more than one chunk) before trusting the split.
+  if (parts.length >= 2) return normalizeCase(parts[0]);
+  return null;
+}
+
+/**
+ * Derive a usable first name from whatever customer info we have. Both inputs may
+ * be a clean value OR a raw "Name <addr>" string, so we parse both and prefer, in
+ * order: an explicit display name -> a display name embedded in the address field
+ * -> a cleanly-splittable email local-part -> a neutral fallback greeting.
  */
 export function extractFirstName(
   name?: string | null,
   email?: string | null,
   fallback: string = 'there',
 ): string {
-  const clean = (name || '').trim();
+  const fromName = parseNameAndAddress(name);
+  const fromEmail = parseNameAndAddress(email);
 
-  // A real display name that isn't just the email address.
-  if (clean && !clean.includes('@')) {
-    // First whitespace-delimited token, minus surrounding punctuation/quotes.
-    const firstToken = clean
-      .split(/\s+/)[0]
-      .replace(/^[^\p{L}\p{M}]+|[^\p{L}\p{M}'’-]+$/gu, '');
-    if (firstToken) return normalizeCase(firstToken);
+  const display = fromName.display || fromEmail.display;
+  if (display) {
+    const first = firstNameFromDisplay(display);
+    if (first) return first;
   }
+
+  const address = fromName.address || fromEmail.address;
+  const fromLocal = firstNameFromEmail(address);
+  if (fromLocal) return fromLocal;
 
   // No usable name — neutral fallback keeps the greeting natural ("Hi there,").
   return fallback;
