@@ -112,6 +112,11 @@ export function extractBareEmail(raw?: string | null): string {
   return parseNameAndAddress(raw).address;
 }
 
+/** The display name out of a value that may be "Name <addr>" or "addr" ("" if none). */
+export function extractDisplayName(raw?: string | null): string {
+  return parseNameAndAddress(raw).display;
+}
+
 const NAME_PLACEHOLDER_RE = /[\[{]{1,2}\s*([A-Za-z][A-Za-z _]*?)\s*[\]}]{1,2}/g;
 
 /** True when `content` contains at least one recognized customer-name placeholder. */
