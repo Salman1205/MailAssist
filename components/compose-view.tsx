@@ -11,6 +11,7 @@ import { useToast } from "@/components/ui/use-toast"
 import { Loader2, Sparkles, Send, CheckCircle, RotateCcw, X, MessageSquare } from "lucide-react"
 import RichTextEditor from "@/components/rich-text-editor"
 import QuickRepliesSidebar from "@/components/quick-replies-sidebar"
+import { fillCustomerPlaceholders } from "@/lib/personalize-template"
 
 interface ComposeViewProps {
   currentUserId: string | null
@@ -174,16 +175,23 @@ export default function ComposeView({ currentUserId, onEmailSent, setActiveView 
     }
   }
 
-  const handleSelectQuickReply = useCallback((content: string) => {
+  const handleSelectQuickReply = useCallback((rawContent: string) => {
+    // Personalize: swap placeholders like "[Customer Name]" for the recipient's
+    // first name so the agent doesn't have to edit it by hand.
+    const content = fillCustomerPlaceholders(rawContent, {
+      name: recipientName,
+      email: recipient,
+    })
+
     // Convert newlines to HTML
     const htmlContent = content
       .split('\n\n')
       .map((para: string) => `<p>${para.replace(/\n/g, '<br>')}</p>`)
       .join('')
-      
+
     setBodyHtml(prev => prev ? `${prev}${htmlContent}` : htmlContent)
     setBodyText(prev => prev ? `${prev}\n\n${content}` : content)
-  }, [])
+  }, [recipientName, recipient])
 
   const handlePolish = async () => {
     if (!bodyText.trim() || isPolishing) return

@@ -22,6 +22,7 @@ import { supabaseBrowser } from "@/lib/supabase-client"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import QuickRepliesSidebar from "@/components/quick-replies-sidebar"
+import { fillCustomerPlaceholders } from "@/lib/personalize-template"
 import ShopifySidebar from "@/components/shopify-sidebar"
 import RichTextEditor from "@/components/rich-text-editor"
 import { EmailContentViewer } from "@/components/email-content-viewer"
@@ -1107,10 +1108,17 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   // Removed derived ticketCounts useMemo - now using state
 
   // Handle quick reply selection
-  const handleSelectQuickReply = (content: string) => {
+  const handleSelectQuickReply = (rawContent: string) => {
     // Append to existing content or replace? Usually append is safer.
     // Actually user asked for "one click... automatically copies it to the chat box"
     // We'll append it to the current reply text
+
+    // Personalize: swap placeholders like "[Customer Name]" for the customer's
+    // actual first name so the agent doesn't have to edit it by hand.
+    const content = fillCustomerPlaceholders(rawContent, {
+      name: selectedTicket?.customerName,
+      email: selectedTicket?.customerEmail,
+    });
 
     // Check if we're using RichTextEditor (HTML) or simple textarea
     setReplyHtml(prev => {
