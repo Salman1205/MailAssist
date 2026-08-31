@@ -12,7 +12,20 @@ test('extractFirstName preserves intentional internal casing', () => {
   assert.equal(extractFirstName('McDonald Reyes'), 'McDonald');
 });
 
+test('extractFirstName parses a raw "Name <addr>" From header', () => {
+  // This is how customer info is actually stored (display name kept in the field).
+  assert.equal(extractFirstName(null, 'Enrique Espinoza <enriqueespinoza1980@yahoo.com>'), 'Enrique');
+  assert.equal(extractFirstName('Enrique Espinoza <e@x.com>', null), 'Enrique');
+  assert.equal(extractFirstName(null, '"John Smith" <john@x.com>'), 'John');
+});
+
+test('extractFirstName derives from a cleanly-split email local-part', () => {
+  assert.equal(extractFirstName(null, 'john.doe@example.com'), 'John');
+  assert.equal(extractFirstName(null, 'mary_jane@example.com'), 'Mary');
+});
+
 test('extractFirstName falls back to "there" when no usable name', () => {
+  // Concatenated blob with no clean split -> refuse to guess.
   assert.equal(extractFirstName('', 'enriqueespinoza1980@yahoo.com'), 'there');
   assert.equal(extractFirstName(null, null), 'there');
   // A name that is actually just the email address is not usable.

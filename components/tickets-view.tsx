@@ -22,7 +22,7 @@ import { supabaseBrowser } from "@/lib/supabase-client"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import QuickRepliesSidebar from "@/components/quick-replies-sidebar"
-import { fillCustomerPlaceholders } from "@/lib/personalize-template"
+import { extractFirstName, extractBareEmail, hasNamePlaceholder, fillPlaceholdersWithFirstName } from "@/lib/personalize-template"
 import ShopifySidebar from "@/components/shopify-sidebar"
 import RichTextEditor from "@/components/rich-text-editor"
 import { EmailContentViewer } from "@/components/email-content-viewer"
@@ -1108,17 +1108,31 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   // Removed derived ticketCounts useMemo - now using state
 
   // Handle quick reply selection
-  const handleSelectQuickReply = (rawContent: string) => {
-    // Append to existing content or replace? Usually append is safer.
-    // Actually user asked for "one click... automatically copies it to the chat box"
-    // We'll append it to the current reply text
+  // Look up a customer's first name from Shopify when we can't get it from the
+  // email itself. Returns null on any failure or if Shopify isn't configured.
+  const fetchShopifyFirstName = async (customerEmailRaw?: string | null): Promise<string | null> => {
+    const bare = extractBareEmail(customerEmailRaw)
+    if (!bare) return null
+    try {
+      const res = await fetch(`/api/shopify/customer?email=${encodeURIComponent(bare)}`)
+      if (!res.ok) return null
+      const data = await res.json()
+      const first = (data?.customer?.firstName || "").trim()
+      return first || null
+    } catch {
+      return null
+    }
+  }
 
+  const handleSelectQuickReply = async (rawContent: string) => {
     // Personalize: swap placeholders like "[Customer Name]" for the customer's
     // actual first name so the agent doesn't have to edit it by hand.
-    const content = fillCustomerPlaceholders(rawContent, {
-      name: selectedTicket?.customerName,
-      email: selectedTicket?.customerEmail,
-    });
+    // Priority: name/email on the ticket -> Shopify customer -> neutral "there".
+    let firstName = extractFirstName(selectedTicket?.customerName, selectedTicket?.customerEmail, "")
+    if (!firstName && hasNamePlaceholder(rawContent)) {
+      firstName = (await fetchShopifyFirstName(selectedTicket?.customerEmail)) || ""
+    }
+    const content = fillPlaceholdersWithFirstName(rawContent, firstName || "there")
 
     // Check if we're using RichTextEditor (HTML) or simple textarea
     setReplyHtml(prev => {
