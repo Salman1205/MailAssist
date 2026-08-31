@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { getCurrentUserEmail } from './storage';
+import { extractDisplayName } from './personalize-template';
 import { isAIAutomationEnabled } from './ai-config';
 
 export type TicketStatus = 'open' | 'pending' | 'on_hold' | 'closed';
@@ -453,6 +454,9 @@ export async function ensureTicketForEmail(
 
   // Guess customer email based on direction
   const customerEmail = isFromAgent ? email.to : email.from;
+  // Capture the customer's display name from the raw From/To header
+  // (e.g. "Enrique Espinoza <enrique@x.com>") so replies can greet them by name.
+  const customerName = extractDisplayName(customerEmail) || null;
 
   // Try to find existing ticket with the correct user scope
   let ticket = await getTicketByThreadId(threadId, resolvedUserEmail);
@@ -463,7 +467,7 @@ export async function ensureTicketForEmail(
     ticket = await getOrCreateTicketForThread(threadId, {
       subject: email.subject,
       customerEmail,
-      customerName: null,
+      customerName,
       initialStatus: isFromAgent ? 'pending' : 'open',
       priority: undefined, // Don't set priority for unassigned tickets
       tags: isSpam ? ['spam'] : [],
