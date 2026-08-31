@@ -107,6 +107,38 @@ export function extractFirstName(
   return fallback;
 }
 
+/** The bare email address out of a value that may be "Name <addr>" or "addr". */
+export function extractBareEmail(raw?: string | null): string {
+  return parseNameAndAddress(raw).address;
+}
+
+const NAME_PLACEHOLDER_RE = /[\[{]{1,2}\s*([A-Za-z][A-Za-z _]*?)\s*[\]}]{1,2}/g;
+
+/** True when `content` contains at least one recognized customer-name placeholder. */
+export function hasNamePlaceholder(content: string): boolean {
+  if (!content) return false;
+  NAME_PLACEHOLDER_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = NAME_PLACEHOLDER_RE.exec(content)) !== null) {
+    const key = m[1].toLowerCase().replace(/[\s_]/g, '');
+    if (NAME_PLACEHOLDER_KEYS.has(key)) return true;
+  }
+  return false;
+}
+
+/**
+ * Replace recognized customer-name placeholders with an already-resolved first
+ * name. Use this when the name came from an async source (e.g. Shopify).
+ * Unrecognized placeholders are left untouched.
+ */
+export function fillPlaceholdersWithFirstName(content: string, firstName: string): string {
+  if (!content) return content;
+  return content.replace(NAME_PLACEHOLDER_RE, (match, inner: string) => {
+    const key = inner.toLowerCase().replace(/[\s_]/g, '');
+    return NAME_PLACEHOLDER_KEYS.has(key) ? firstName : match;
+  });
+}
+
 /**
  * Replace recognized customer-name placeholders in `content` with the customer's
  * first name. Unrecognized placeholders are left untouched.
@@ -121,14 +153,6 @@ export function fillCustomerPlaceholders(
   fallback: string = 'there',
 ): string {
   if (!content) return content;
-
   const firstName = extractFirstName(customer.name, customer.email, fallback);
-
-  return content.replace(
-    /[\[{]{1,2}\s*([A-Za-z][A-Za-z _]*?)\s*[\]}]{1,2}/g,
-    (match, inner: string) => {
-      const key = inner.toLowerCase().replace(/[\s_]/g, '');
-      return NAME_PLACEHOLDER_KEYS.has(key) ? firstName : match;
-    },
-  );
+  return fillPlaceholdersWithFirstName(content, firstName);
 }
