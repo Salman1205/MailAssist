@@ -489,6 +489,34 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
         </html>
     `
 
+    // Write the email HTML into the iframe imperatively rather than via srcDoc.
+    // srcDoc has a race: the iframe frequently finishes loading BEFORE React binds
+    // the onLoad handler, so the "reveal the iframe once loaded" step never fires
+    // and the user is left looking at the blank canvas behind a still-hidden frame
+    // (seen first on Edge, then intermittently everywhere). Writing to the
+    // same-origin document from the parent is synchronous and reliable in every
+    // browser, and does not depend on any load event.
+    useEffect(() => {
+        const iframe = iframeRef.current
+        if (!iframe) return
+        try {
+            const doc = iframe.contentDocument || iframe.contentWindow?.document
+            if (!doc) return
+            doc.open()
+            doc.write(iframeHtml)
+            doc.close()
+            // Content is in the DOM now — clear the loading veil immediately and
+            // measure on the next frame so layout has settled.
+            setLoading(false)
+            requestAnimationFrame(measureHeight)
+        } catch (error) {
+            console.error('Error writing email iframe content:', error)
+            setLoading(false)
+        }
+        // iframeHtml is a plain string derived from content/theme; React compares it
+        // by value, so this only re-runs when the rendered HTML actually changes.
+    }, [iframeHtml])
+
     return (
         <div
             className={cn(
@@ -525,14 +553,14 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                             <div className="h-3 w-3/5 rounded animate-pulse" style={{ background: shimmer, animationDelay: '240ms' }} />
                         </div>
                     )}
+                    {/* Content is written imperatively via contentDocument (see effect
+                        above), NOT srcDoc — this avoids the onLoad race that left the
+                        frame invisible. The iframe is always visible; the loading veil
+                        above covers it only until the write completes. */}
                     <iframe
                         ref={iframeRef}
                         sandbox="allow-same-origin"
-                        srcDoc={iframeHtml}
-                        className={cn(
-                            "w-full border-0 block transition-opacity duration-200",
-                            loading ? "opacity-0" : "opacity-100"
-                        )}
+                        className="w-full border-0 block"
                         style={{
                             height: `${iframeHeight}px`,
                             minHeight: '48px',
