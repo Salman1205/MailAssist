@@ -45,14 +45,14 @@ export default function SyncToast({ syncing, status, processed, target, error, o
         <div className="flex items-center justify-between gap-4">
           <div>
             <p className="text-sm font-semibold text-foreground">
-              {error ? "Embedding failed" : isComplete ? "Embedding complete!" : syncing ? "Processing your sent emails" : "Embedding complete"}
+              {error ? "Sync failed" : isComplete ? "Your emails are ready" : syncing ? "Learning your writing style" : "Your emails are ready"}
             </p>
             <p className="text-xs text-muted-foreground">
               {error
                 ? error
                 : isComplete
-                ? `Successfully embedded ${effectiveProcessed} emails.`
-                : "We're learning your tone so drafts match how you write."}
+                ? `Analyzed ${effectiveProcessed} emails so drafts match your style.`
+                : "We're learning your tone so drafts sound like you."}
             </p>
           </div>
           {onDismiss && (
@@ -71,7 +71,7 @@ export default function SyncToast({ syncing, status, processed, target, error, o
             <Progress value={progress * 100} />
             <div className="flex justify-between text-xs text-muted-foreground">
               <span>
-                {effectiveProcessed} embedded
+                {effectiveProcessed} processed
                 {status?.pendingReplies !== undefined && status.pendingReplies > 0 ? ` · ${status.pendingReplies} pending` : ""}
               </span>
               <span>
