@@ -137,6 +137,12 @@ export async function GET(request: NextRequest) {
 
                 console.log(`[CRON] ${userEmail}: ${messageIds.length} new messages to process`);
 
+                // Track whether the whole batch set was processed so we do not
+                // advance the sync cursor past messages we never got to (early
+                // time-out) or that failed to become tickets.
+                let batchProcessingComplete = true;
+                let ticketFailures = 0;
+
                 if (messageIds.length > 0) {
                     // Get agent emails (connected accounts for this business)
                     const { data: businessTokens } = await adminClient
@@ -166,6 +172,7 @@ export async function GET(request: NextRequest) {
                     for (const [batchIndex, batchIds] of batches.entries()) {
                         if (isTimeRunningOut()) {
                             console.log(`[CRON] Time running out during batch ${batchIndex + 1}/${batches.length}, stopping ticket creation`);
+                            batchProcessingComplete = false; // do not advance cursor past unprocessed batches
                             break;
                         }
 
@@ -203,18 +210,27 @@ export async function GET(request: NextRequest) {
                                     result.ticketsCreated++;
                                     totalTickets++;
                                 } catch (emailError) {
+                                    ticketFailures++;
                                     console.warn(`[CRON] Error processing email ${email.id}:`, emailError);
                                 }
                             }
                         } catch (batchError) {
+                            batchProcessingComplete = false; // batch fetch failed — its messages were not processed
                             console.error(`[CRON] Error processing batch ${batchIndex}:`, batchError);
                         }
                     }
                 }
 
-                // Update sync state with latest historyId
-                if (latestHistoryId) {
+                // Update sync state with latest historyId — but ONLY when the
+                // whole batch set was processed without failures. If we broke early
+                // for time or any message/batch failed, keep the previous cursor so
+                // the History API (or the reconcile safety net) re-sees the missed
+                // messages next run. ensureTicketForEmail dedupes by threadId, so
+                // reprocessing is safe. Favor re-processing over skipping.
+                if (latestHistoryId && batchProcessingComplete && ticketFailures === 0) {
                     await updateSyncState(userEmail, latestHistoryId);
+                } else if (latestHistoryId) {
+                    console.log(`[CRON] ${userEmail}: NOT advancing sync cursor (complete=${batchProcessingComplete}, failures=${ticketFailures}) so missed messages are re-seen`);
                 }
 
                 // Run classification for this account's new tickets (limit to 5 per run for speed)

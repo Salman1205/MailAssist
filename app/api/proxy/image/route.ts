@@ -4,8 +4,47 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { validateBusinessSession } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
+
+// A 1x1 transparent GIF returned instead of proxying when a request is rejected.
+const TRANSPARENT_GIF = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
+const transparentPixel = (extraHeaders: Record<string, string> = {}) =>
+    new NextResponse(TRANSPARENT_GIF, {
+        status: 200,
+        headers: { 'Content-Type': 'image/gif', 'Cache-Control': 'no-store', ...extraHeaders },
+    });
+
+/**
+ * SSRF guard: reject hosts that point at the local machine, the cloud metadata
+ * service, or private/link-local network ranges. Without this the proxy will
+ * happily fetch http://169.254.169.254/... or internal services and return the
+ * response to any caller.
+ */
+function isBlockedHost(hostname: string): boolean {
+    const host = hostname.toLowerCase().replace(/^\[|\]$/g, ''); // strip IPv6 brackets
+    if (!host) return true;
+    if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.internal') || host.endsWith('.local')) return true;
+    if (host === 'metadata.google.internal') return true;
+    if (host === '::1' || host === '0.0.0.0') return true;
+    // IPv4 literal in a private / loopback / link-local / reserved range.
+    const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (m) {
+        const [a, b] = [parseInt(m[1], 10), parseInt(m[2], 10)];
+        if (a === 10) return true;                          // 10.0.0.0/8
+        if (a === 127) return true;                         // loopback
+        if (a === 0) return true;                           // 0.0.0.0/8
+        if (a === 169 && b === 254) return true;            // link-local / cloud metadata
+        if (a === 172 && b >= 16 && b <= 31) return true;   // 172.16.0.0/12
+        if (a === 192 && b === 168) return true;            // 192.168.0.0/16
+        if (a === 100 && b >= 64 && b <= 127) return true;  // carrier-grade NAT 100.64/10
+        if (a >= 224) return true;                          // multicast / reserved
+    }
+    // IPv6 unique-local / link-local literals.
+    if (host.startsWith('fc') || host.startsWith('fd') || host.startsWith('fe80')) return true;
+    return false;
+}
 
 // Blocklist of known tracking domains (Gmail blocks these)
 const TRACKING_DOMAINS = [
@@ -20,6 +59,13 @@ const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
 
 export async function GET(request: NextRequest) {
     try {
+        // AUTH: only logged-in users may use the proxy. Without this, anyone on the
+        // internet could use our server to fetch arbitrary URLs (SSRF / open proxy).
+        const session = await validateBusinessSession();
+        if (!session) {
+            return new NextResponse('Unauthorized', { status: 401 });
+        }
+
         const url = request.nextUrl.searchParams.get('url');
 
         if (!url) {
@@ -32,6 +78,17 @@ export async function GET(request: NextRequest) {
         // Validate it's an image URL (basic check)
         if (!decodedUrl.startsWith('http://') && !decodedUrl.startsWith('https://')) {
             return new NextResponse('Invalid URL', { status: 400 });
+        }
+
+        // SSRF guard: refuse to fetch internal / private / metadata hosts.
+        let parsedUrl: URL;
+        try {
+            parsedUrl = new URL(decodedUrl);
+        } catch {
+            return new NextResponse('Invalid URL', { status: 400 });
+        }
+        if (isBlockedHost(parsedUrl.hostname)) {
+            return transparentPixel({ 'X-Proxy-Blocked': 'ssrf' });
         }
 
         // Check if it's a known tracking pixel domain

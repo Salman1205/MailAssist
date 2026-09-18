@@ -89,14 +89,21 @@ export async function getTicketByThreadId(
   // which then triggers the creation of YET ANOTHER duplicate — exponential growth.
   // Instead, use a normal array query with .limit(1) and pick the first result.
 
+  // Normalize the OWNER/scoping email to lowercase so dedup and the
+  // (thread_id, user_email) unique index match across webhook/cron/reconcile.
+  // Gmail Pub/Sub email casing varies; different casing must NOT split a thread
+  // into duplicate tickets. (Only the owner identity is normalized here — never
+  // the customer_email display value.)
+  const normalizedUserEmail = userEmail ? userEmail.toLowerCase() : null;
+
   let query = supabase
     .from('tickets')
     .select('*')
     .eq('thread_id', threadId)
 
-  if (userEmail) {
+  if (normalizedUserEmail) {
     // First try exact match on user_email (most common case)
-    query = query.eq('user_email', userEmail)
+    query = query.eq('user_email', normalizedUserEmail)
   }
 
   // Order by created_at ascending to always return the OLDEST (canonical) ticket
@@ -111,7 +118,7 @@ export async function getTicketByThreadId(
 
   // FALLBACK: If no exact match found and we have a userEmail,
   // also check for zombie tickets (user_email IS NULL) for this thread
-  if (userEmail) {
+  if (normalizedUserEmail) {
     const { data: zombieData, error: zombieError } = await supabase
       .from('tickets')
       .select('*')
@@ -122,12 +129,12 @@ export async function getTicketByThreadId(
 
     if (!zombieError && zombieData && zombieData.length > 0) {
       console.log(`[Ticket] Found zombie ticket ${zombieData[0].id} for thread ${threadId}, will adopt it`);
-      // Update the zombie ticket with the correct user_email so it won't be orphaned
+      // Update the zombie ticket with the correct (normalized) user_email so it won't be orphaned
       await supabase
         .from('tickets')
-        .update({ user_email: userEmail, updated_at: new Date().toISOString() })
+        .update({ user_email: normalizedUserEmail, updated_at: new Date().toISOString() })
         .eq('id', zombieData[0].id);
-      return mapRowToTicket({ ...zombieData[0], user_email: userEmail });
+      return mapRowToTicket({ ...zombieData[0], user_email: normalizedUserEmail });
     }
   }
 
@@ -435,22 +442,37 @@ export async function ensureTicketForEmail(
   // Use provided userEmail/ownerEmail or fall back to current session
   // CRITICAL FIX: In background jobs, getCurrentUserEmail() returns null.
   // We must use the passed userEmail/ownerEmail to correctly find existing tickets.
-  const resolvedUserEmail = email.ownerEmail || (await getCurrentUserEmail());
+  // Normalize the OWNER identity to lowercase so dedup + the (thread_id,
+  // user_email) unique index match across webhook/cron/reconcile (Pub/Sub casing
+  // varies). Only the owner/user_email identity is normalized here — NOT the
+  // customer_email / customer's From value computed below.
+  const rawResolvedUserEmail = email.ownerEmail || (await getCurrentUserEmail());
+  const resolvedUserEmail = rawResolvedUserEmail ? rawResolvedUserEmail.toLowerCase() : null;
 
   const threadId = email.threadId || email.id;
-  // Guard: if the email has no date, we cannot safely determine whether it is
-  // newer or older than recorded activity. Bail out — do NOT default to 'now'
-  // (that would make every undated email appear brand-new and reopen closed tickets).
+  // Determine the email timestamp. A missing/unparseable Date header must NOT
+  // cause the email to vanish — but a bogus "now" must NOT reopen an already
+  // closed ticket either. Strategy: fall back to now() ONLY as the creation
+  // timestamp for a brand-new ticket (safe — there is nothing to reopen). For an
+  // email landing on an EXISTING ticket with no usable date we cannot order it
+  // against prior activity, so we skip the recency/status update entirely below.
+  let dateIso: string;
+  let hasValidDate: boolean;
   if (!email.date) {
-    console.warn(`[Ticket] Skipping email ${email.id} — missing date field, cannot determine recency`);
-    return null;
+    console.warn(`[Ticket] Email ${email.id} missing date field — falling back to now() for creation only`);
+    dateIso = new Date().toISOString();
+    hasValidDate = false;
+  } else {
+    const parsedEmailDate = new Date(email.date);
+    if (isNaN(parsedEmailDate.getTime())) {
+      console.warn(`[Ticket] Email ${email.id} unparseable date "${email.date}" — falling back to now() for creation only`);
+      dateIso = new Date().toISOString();
+      hasValidDate = false;
+    } else {
+      dateIso = parsedEmailDate.toISOString();
+      hasValidDate = true;
+    }
   }
-  const parsedEmailDate = new Date(email.date);
-  if (isNaN(parsedEmailDate.getTime())) {
-    console.warn(`[Ticket] Skipping email ${email.id} — unparseable date: "${email.date}"`);
-    return null;
-  }
-  const dateIso = parsedEmailDate.toISOString();
 
   // Guess customer email based on direction
   const customerEmail = isFromAgent ? email.to : email.from;
@@ -487,6 +509,15 @@ export async function ensureTicketForEmail(
         hasBody: !!emailBody
       });
     }
+    return ticket;
+  }
+
+  // Existing ticket: if the incoming email had no usable date we cannot safely
+  // order it against prior activity. Skip the recency/status update to avoid the
+  // now()-fallback reopening a closed ticket. (The email is not lost — it already
+  // maps to this thread's ticket.)
+  if (!hasValidDate) {
+    console.log(`[Ticket] Existing ticket ${ticket.id}: incoming email ${email.id} has no usable date — leaving status/timestamps unchanged`);
     return ticket;
   }
 

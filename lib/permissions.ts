@@ -3,7 +3,7 @@
  */
 
 import { NextRequest } from 'next/server';
-import { getCurrentUserIdFromRequest as getUserIdFromRequest } from './session';
+import { getCurrentUserIdFromRequest as getUserIdFromRequest, getVerifiedUserId } from './session';
 import { getUserById, UserRole, hasPermission } from './users';
 
 /**
@@ -40,7 +40,10 @@ export async function requirePermission(
   request: NextRequest,
   requiredRole: UserRole | UserRole[]
 ): Promise<{ allowed: boolean; userId: string | null; userRole?: UserRole }> {
-  const userId = getCurrentUserIdFromRequest(request);
+  // SECURITY: identity comes from the server-validated session_token, never from
+  // the client-writable current_user_id cookie (which is forgeable → privilege
+  // escalation). getVerifiedUserId() resolves the id from validateBusinessSession.
+  const userId = await getVerifiedUserId();
 
   if (!userId) {
     return { allowed: false, userId: null };

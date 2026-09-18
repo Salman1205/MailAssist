@@ -5,13 +5,44 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getTicketNotes, createTicketNote, updateTicketNote } from '@/lib/ticket-notes';
-import { getCurrentUserIdFromRequest } from '@/lib/permissions';
+import { validateBusinessSession } from '@/lib/session';
 import { getUserEmailForTickets } from '@/lib/ticket-helpers';
 import { isValidUUID, validateTextInput } from '@/lib/validation';
+import { supabase } from '@/lib/supabase';
 
 type RouteContext =
   | { params: { id: string } }
   | { params: Promise<{ id: string }> };
+
+/**
+ * Verify a ticket belongs to the caller's tenant (one of their connected
+ * mailboxes). The service-role client bypasses RLS, so without this a user in
+ * one business could read or write internal notes on another business's ticket
+ * just by passing its id.
+ */
+async function ticketInTenant(
+  ticketId: string,
+  session: { businessId: string | null; email: string },
+): Promise<boolean> {
+  if (!supabase) return false;
+  const scopeEmails: string[] = [];
+  try {
+    const { loadBusinessTokens } = await import('@/lib/storage');
+    const conn = await loadBusinessTokens(session.businessId || null, session.email || undefined);
+    conn.forEach((a: any) => { if (a?.email) scopeEmails.push(String(a.email)); });
+  } catch (e) {
+    console.warn('[notes] Could not resolve tenant mailboxes:', e);
+  }
+  if (scopeEmails.length === 0 && session.email) scopeEmails.push(session.email);
+  if (scopeEmails.length === 0) return false;
+  const { data } = await supabase
+    .from('tickets')
+    .select('id')
+    .eq('id', ticketId)
+    .in('user_email', scopeEmails)
+    .maybeSingle();
+  return !!data;
+}
 
 export async function GET(
   request: NextRequest,
@@ -28,12 +59,16 @@ export async function GET(
       );
     }
 
-    const userId = getCurrentUserIdFromRequest(request);
-    if (!userId) {
+    const session = await validateBusinessSession();
+    if (!session) {
       return NextResponse.json(
         { error: 'Not authenticated' },
         { status: 401 }
       );
+    }
+
+    if (!(await ticketInTenant(ticketId, session))) {
+      return NextResponse.json({ error: 'Ticket not found' }, { status: 404 });
     }
 
     const notes = await getTicketNotes(ticketId);
@@ -62,12 +97,17 @@ export async function POST(
       );
     }
 
-    const userId = getCurrentUserIdFromRequest(request);
-    if (!userId) {
+    const session = await validateBusinessSession();
+    if (!session) {
       return NextResponse.json(
         { error: 'Not authenticated' },
         { status: 401 }
       );
+    }
+    const userId = session.id;
+
+    if (!(await ticketInTenant(ticketId, session))) {
+      return NextResponse.json({ error: 'Ticket not found' }, { status: 404 });
     }
 
     const userEmail = await getUserEmailForTickets();
@@ -125,13 +165,14 @@ export async function PATCH(
       );
     }
 
-    const userId = getCurrentUserIdFromRequest(request);
-    if (!userId) {
+    const session = await validateBusinessSession();
+    if (!session) {
       return NextResponse.json(
         { error: 'Not authenticated' },
         { status: 401 }
       );
     }
+    const userId = session.id;
 
     const body = await request.json();
     const { noteId, content, mentions } = body;

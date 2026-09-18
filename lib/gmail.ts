@@ -70,6 +70,37 @@ export function getGmailClient(tokens: { access_token?: string | null; refresh_t
   return google.gmail({ version: 'v1', auth: oauth2Client });
 }
 
+/**
+ * Strip CR/LF and other ASCII control characters from a header value before it
+ * is interpolated into a raw MIME message. Without this, a newline embedded in a
+ * partly client-controlled value (To/From/Subject/In-Reply-To/References) could
+ * inject additional SMTP headers (header injection). Any run of control chars
+ * (including CR, LF and TAB) is collapsed to a single space and the result is
+ * trimmed, so no new header line can be introduced.
+ */
+function sanitizeHeaderValue(value: string | null | undefined): string {
+  if (!value) return ''
+  // eslint-disable-next-line no-control-regex
+  return value.replace(/[\x00-\x1F\x7F]+/g, ' ').trim()
+}
+
+// Attachment filename used inside a quoted MIME header param. Strip control
+// chars and the quote/backslash characters that would break out of the quoted
+// string (MIME header injection), and keep it non-empty.
+function sanitizeAttachmentFilename(value: string | null | undefined): string {
+  const cleaned = sanitizeHeaderValue(value).replace(/["\\]/g, '_')
+  return cleaned || 'attachment'
+}
+
+// Attachment MIME type must look like "type/subtype"; otherwise fall back to a
+// safe default. Prevents header injection via a crafted mimeType.
+function sanitizeMimeType(value: string | null | undefined): string {
+  const cleaned = sanitizeHeaderValue(value)
+  return /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/.test(cleaned)
+    ? cleaned
+    : 'application/octet-stream'
+}
+
 interface AttachmentPayload {
   filename: string
   mimeType: string
@@ -109,12 +140,12 @@ export async function sendReplyMessage(
   } = options
 
   const headers = [
-    `To: ${to}`,
-    from ? `From: ${from}` : null,
-    `Subject: ${subject}`,
+    `To: ${sanitizeHeaderValue(to)}`,
+    from ? `From: ${sanitizeHeaderValue(from)}` : null,
+    `Subject: ${sanitizeHeaderValue(subject)}`,
     'MIME-Version: 1.0',
-    inReplyTo ? `In-Reply-To: ${inReplyTo}` : null,
-    references ? `References: ${references}` : null,
+    inReplyTo ? `In-Reply-To: ${sanitizeHeaderValue(inReplyTo)}` : null,
+    references ? `References: ${sanitizeHeaderValue(references)}` : null,
   ]
     .filter(Boolean)
     .join('\r\n')
@@ -150,16 +181,19 @@ export async function sendReplyMessage(
 
   const altClosing = `--${altBoundary}--`
 
-  const buildAttachmentPart = (attachment: AttachmentPayload) =>
-    [
+  const buildAttachmentPart = (attachment: AttachmentPayload) => {
+    const safeName = sanitizeAttachmentFilename(attachment.filename)
+    const safeMime = sanitizeMimeType(attachment.mimeType)
+    return [
       `--${mixedBoundary}`,
-      `Content-Type: ${attachment.mimeType}; name="${attachment.filename}"`,
+      `Content-Type: ${safeMime}; name="${safeName}"`,
       'Content-Transfer-Encoding: base64',
-      `Content-Disposition: attachment; filename="${attachment.filename}"`,
+      `Content-Disposition: attachment; filename="${safeName}"`,
       '',
       attachment.data,
       '',
     ].join('\r\n')
+  }
 
   let message = ''
 
@@ -892,7 +926,8 @@ export async function sendNewEmail(
   subject: string,
   body: string,
   userId: string,
-  bodyHtml?: string
+  bodyHtml?: string,
+  attachments: AttachmentPayload[] = []
 ) {
   // CRITICAL FIX: For invited users, get tokens from business-connected accounts
   let tokens = await getValidTokens();
@@ -920,14 +955,20 @@ export async function sendNewEmail(
 
   const gmail = getGmailClient(tokens);
 
+  // Sanitize header values to prevent SMTP/MIME header injection via CR/LF.
+  const safeSubject = sanitizeHeaderValue(subject);
+
   const headers = [
-    `To: ${to}`,
-    `Subject: ${subject}`,
+    `To: ${sanitizeHeaderValue(to)}`,
+    `Subject: ${safeSubject}`,
     'MIME-Version: 1.0',
   ].filter(Boolean).join('\r\n');
 
   const hasHtml = Boolean(bodyHtml);
+  const hasAttachments = attachments.length > 0;
+
   const altBoundary = `alt-${Date.now()}`;
+  const mixedBoundary = `mixed-${Date.now()}`;
 
   // CRITICAL: Ensure plain text body has no HTML tags
   const cleanBody = body && /<[^>]+>/.test(body)
@@ -954,8 +995,34 @@ export async function sendNewEmail(
 
   const altClosing = `--${altBoundary}--`;
 
+  const buildAttachmentPart = (attachment: AttachmentPayload) => {
+    const safeName = sanitizeAttachmentFilename(attachment.filename)
+    const safeMime = sanitizeMimeType(attachment.mimeType)
+    return [
+      `--${mixedBoundary}`,
+      `Content-Type: ${safeMime}; name="${safeName}"`,
+      'Content-Transfer-Encoding: base64',
+      `Content-Disposition: attachment; filename="${safeName}"`,
+      '',
+      attachment.data,
+      '',
+    ].join('\r\n')
+  };
+
   let message = '';
-  if (hasHtml) {
+  if (hasAttachments) {
+    // multipart/mixed wrapping a multipart/alternative body + base64 attachments,
+    // mirroring sendReplyMessage so attachment behavior matches the reply path.
+    message += `${headers}\r\nContent-Type: multipart/mixed; boundary="${mixedBoundary}"\r\n\r\n`;
+    message += `--${mixedBoundary}\r\nContent-Type: multipart/alternative; boundary="${altBoundary}"\r\n\r\n`;
+    message += textPart;
+    if (hasHtml) message += htmlPart;
+    message += `${altClosing}\r\n`;
+    for (const attachment of attachments) {
+      message += buildAttachmentPart(attachment);
+    }
+    message += `--${mixedBoundary}--`;
+  } else if (hasHtml) {
     // Use multipart/alternative to send both text and HTML
     message += `${headers}\r\nContent-Type: multipart/alternative; boundary="${altBoundary}"\r\n\r\n`;
     message += textPart;
@@ -971,8 +1038,56 @@ export async function sendNewEmail(
 
   const encodedMessage = encodeBase64Url(message);
 
+  // Idempotency guard: after a transient send failure, verify whether the
+  // message actually landed in the Sent folder before deciding to re-send.
+  //
+  // Gmail can ACCEPT a message and still surface a transient network error
+  // (ECONNRESET, ETIMEDOUT, EPIPE/'socket hang up', a 5xx after acceptance).
+  // The previous code only ran this check for ECONNRESET, so every other
+  // transient error fell through and re-sent the identical message — delivering
+  // duplicates to the customer. We now run it before ANY retry, and only skip
+  // the resend when a matching sent message is actually found (conservative).
+  const findAlreadySentMessage = async (): Promise<{ data: { id?: string | null; threadId?: string | null } } | null> => {
+    try {
+      const sentResponse = await gmail.users.messages.list({
+        userId: 'me',
+        q: `subject:(${safeSubject.replace(/"/g, '\\"')}) in:sent`,
+        maxResults: 5,
+      });
+
+      if (sentResponse.data.messages && sentResponse.data.messages.length > 0) {
+        for (const msg of sentResponse.data.messages) {
+          try {
+            const fullMsg = await gmail.users.messages.get({
+              userId: 'me',
+              id: msg.id!,
+              format: 'metadata',
+            });
+
+            // Match by subject + approximate send time (within 30s).
+            const msgSubject = fullMsg.data.payload?.headers?.find((h: any) => h.name === 'Subject')?.value;
+            const msgDate = fullMsg.data.payload?.headers?.find((h: any) => h.name === 'Date')?.value;
+
+            if (msgSubject === safeSubject && msgDate) {
+              const msgTime = new Date(msgDate).getTime();
+              const now = Date.now();
+              if (Math.abs(now - msgTime) < 30000) {
+                return { data: { id: msg.id, threadId: fullMsg.data.threadId } };
+              }
+            }
+          } catch (checkError) {
+            console.error('Error checking sent message:', checkError);
+          }
+        }
+      }
+    } catch (checkError) {
+      console.error('Error checking for sent message:', checkError);
+    }
+    return null;
+  };
+
   // Send the email with retry logic and better error handling
-  let response;
+  let response: { data: { id?: string | null; threadId?: string | null } } | undefined;
   let retries = 3;
   let lastError: any = null;
 
@@ -990,56 +1105,18 @@ export async function sendNewEmail(
       lastError = error;
       retries--;
 
-      // For ECONNRESET, the email might have been sent successfully despite the error
-      // Let's check if we can find the message in sent folder
-      if (error.code === 'ECONNRESET' || error.message?.includes('ECONNRESET')) {
-        console.log('ECONNRESET detected - checking if email was actually sent...');
-        try {
-          // Try to find the message in sent folder by checking recent messages
-          const sentResponse = await gmail.users.messages.list({
-            userId: 'me',
-            q: `subject:(${subject.replace(/"/g, '\\"')}) in:sent`,
-            maxResults: 5,
-          });
-
-          if (sentResponse.data.messages && sentResponse.data.messages.length > 0) {
-            // Check if any of these messages match our content
-            for (const msg of sentResponse.data.messages) {
-              try {
-                const fullMsg = await gmail.users.messages.get({
-                  userId: 'me',
-                  id: msg.id!,
-                  format: 'metadata',
-                });
-
-                // Check if this is our message by comparing subject and approximate time
-                const msgSubject = fullMsg.data.payload?.headers?.find((h: any) => h.name === 'Subject')?.value;
-                const msgDate = fullMsg.data.payload?.headers?.find((h: any) => h.name === 'Date')?.value;
-
-                if (msgSubject === subject && msgDate) {
-                  const msgTime = new Date(msgDate).getTime();
-                  const now = Date.now();
-                  // If message was sent within last 30 seconds, it's likely ours
-                  if (Math.abs(now - msgTime) < 30000) {
-                    console.log('Found matching sent message despite ECONNRESET error');
-                    response = { data: { id: msg.id, threadId: fullMsg.data.threadId } };
-                    break;
-                  }
-                }
-              } catch (checkError) {
-                console.error('Error checking sent message:', checkError);
-              }
-            }
-          }
-
-          if (response) break; // Found the message
-        } catch (checkError) {
-          console.error('Error checking for sent message:', checkError);
-        }
+      // Before re-sending after ANY transient error, verify the message did not
+      // actually go through. This prevents duplicate deliveries regardless of the
+      // specific error (ECONNRESET, ETIMEDOUT, EPIPE, 5xx-after-acceptance, ...).
+      const alreadySent = await findAlreadySentMessage();
+      if (alreadySent) {
+        console.log('Found matching sent message after send error - treating as success (skipping resend)');
+        response = alreadySent;
+        break;
       }
 
       if (retries === 0) {
-        throw lastError; // All retries failed
+        throw lastError; // All retries failed and no matching sent message found
       }
       // Wait before retry
       await new Promise(resolve => setTimeout(resolve, 1000));
