@@ -232,14 +232,14 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
             }
         )
 
+        // Collapse quoted history into a native <details> element. This MUST be
+        // script-free: the email iframe is sandboxed WITHOUT allow-scripts (a
+        // security requirement), so an onclick-based toggle would silently do
+        // nothing — which is exactly why the old "[...]" button never opened.
+        // <details>/<summary> expands natively with no JS.
         processed = processed.replace(
             /(<blockquote[^>]*>[\s\S]*?<\/blockquote>)/gi,
-            '<div class="gmail-quote" data-collapsed="true">$1</div>'
-        )
-
-        processed = processed.replace(
-            /(On\s+.+\s+wrote:?\s*<br\s*\/?>)/gi,
-            '<div class="quote-header" data-collapsed="true">$1<button class="expand-quote" onclick="this.parentElement.classList.toggle(\'expanded\')">[...]</button></div><div class="quoted-content">'
+            '<details class="gmail-quote"><summary class="gmail-quote-toggle"></summary>$1</details>'
         )
 
         setProcessedContent(processed)
@@ -390,39 +390,28 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                     border-left: 3px solid ${quoteBorder};
                     color: ${quoteText};
                 }
-                .gmail-quote[data-collapsed="true"] blockquote {
-                    max-height: 100px;
-                    overflow: hidden;
-                    position: relative;
-                }
-                .gmail-quote[data-collapsed="true"] blockquote::after {
-                    content: "";
-                    position: absolute;
-                    bottom: 0; left: 0; right: 0;
-                    height: 40px;
-                    background: linear-gradient(transparent, ${showOriginal && isDark ? '#ffffff' : canvasBg});
-                }
-                .gmail-quote.expanded blockquote { max-height: none; }
-                .gmail-quote.expanded blockquote::after { display: none; }
-                .quote-header { color: ${quoteText}; font-size: 0.9em; margin-top: 1em; }
-                .quote-header .expand-quote {
-                    background: ${quoteBtnBg};
-                    border: none;
-                    border-radius: 4px;
-                    padding: 2px 8px;
-                    margin-left: 8px;
+                /* Native, script-free expandable quoted history (Gmail-style). */
+                details.gmail-quote { margin: 10px 0; }
+                summary.gmail-quote-toggle {
                     cursor: pointer;
-                    font-size: 0.85em;
+                    list-style: none;
+                    display: inline-flex;
+                    align-items: center;
+                    background: ${quoteBtnBg};
                     color: ${quoteBtnText};
+                    border-radius: 6px;
+                    padding: 3px 10px;
+                    font-size: 12px;
+                    font-weight: 500;
+                    user-select: none;
+                    transition: opacity .15s;
                 }
-                .quote-header .expand-quote:hover { opacity: 0.85; }
-                .quote-header:not(.expanded) + .quoted-content { display: none; }
-                .quote-header.expanded + .quoted-content {
-                    display: block;
-                    padding-left: 12px;
-                    border-left: 3px solid ${quoteBorder};
-                    color: ${quoteText};
-                }
+                summary.gmail-quote-toggle:hover { opacity: 0.85; }
+                summary.gmail-quote-toggle::-webkit-details-marker { display: none; }
+                summary.gmail-quote-toggle::marker { content: ""; }
+                summary.gmail-quote-toggle::after { content: "Show quoted text"; }
+                details.gmail-quote[open] > summary.gmail-quote-toggle::after { content: "Hide quoted text"; }
+                details.gmail-quote > blockquote { margin-top: 10px; }
             </style>
         </head>
         <body>

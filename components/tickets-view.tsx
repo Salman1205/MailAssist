@@ -2187,6 +2187,34 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }
 
+  // Warm the thread cache for a ticket WITHOUT touching the current selection or
+  // spinner. Lets us load the top of a tab's list ahead of time so the first
+  // click opens instantly instead of waiting on Gmail.
+  const prefetchThread = useCallback(async (ticketId: string) => {
+    if (!ticketId || threadCacheRef.current[ticketId]) return
+    try {
+      const res = await fetch(`/api/tickets/${ticketId}/thread`)
+      if (!res.ok) return
+      const data = await res.json()
+      if (Array.isArray(data?.messages) && data.messages.length) {
+        threadCacheRef.current[ticketId] = data.messages
+      }
+    } catch {
+      // best-effort prefetch — ignore failures
+    }
+  }, [])
+
+  // After a tab's list loads, quietly prefetch the first few threads so opening
+  // them is instant. Small delay + cap keeps this from competing with the list
+  // render or hammering Gmail.
+  useEffect(() => {
+    if (!tickets || tickets.length === 0) return
+    const timer = setTimeout(() => {
+      tickets.slice(0, 4).forEach(tk => { if (tk?.id) prefetchThread(tk.id) })
+    }, 400)
+    return () => clearTimeout(timer)
+  }, [tickets, prefetchThread])
+
   const fetchNotes = async (signal?: AbortSignal) => {
     if (!selectedTicket) return
     try {
