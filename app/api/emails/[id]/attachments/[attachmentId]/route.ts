@@ -40,6 +40,17 @@ function encodeFilename(filename: string): string {
     }
 }
 
+// Only these MIME types may be served INLINE (rendered in the browser). Anything
+// else — critically text/html, image/svg+xml, XML and any text/* — is forced to
+// download instead, so a malicious email attachment can never execute script on
+// our origin (stored XSS). SVG is deliberately excluded: it can carry scripts.
+const INLINE_SAFE_MIME = new Set<string>([
+    'image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp', 'image/bmp', 'image/avif',
+    'video/mp4', 'video/webm', 'video/ogg', 'video/quicktime',
+    'audio/mpeg', 'audio/mp3', 'audio/ogg', 'audio/wav', 'audio/mp4', 'audio/aac',
+    'application/pdf', 'text/plain',
+]);
+
 export async function GET(
     request: NextRequest,
     context: { params: Promise<{ id: string; attachmentId: string }> }
@@ -117,12 +128,16 @@ export async function GET(
             filename = filenameParam || 'attachment';
         }
 
-        const mimeType = request.nextUrl.searchParams.get('mimeType') || 'application/octet-stream';
+        const requestedMime = (request.nextUrl.searchParams.get('mimeType') || 'application/octet-stream').toLowerCase().split(';')[0].trim();
 
-        // `?disposition=inline` opens the file in the browser (new tab) instead of
-        // forcing a download — useful for viewing videos, PDFs and images.
+        // `?disposition=inline` opens the file in the browser (new tab) — but ONLY
+        // for types that cannot execute script. For everything else we force a
+        // download, and for the download path we serve a neutral content type so a
+        // scriptable file can never be rendered on our origin.
         const wantsInline = request.nextUrl.searchParams.get('disposition') === 'inline';
-        const contentDisposition = `${wantsInline ? 'inline' : 'attachment'}; ${encodeFilename(filename)}`;
+        const safeInline = wantsInline && INLINE_SAFE_MIME.has(requestedMime);
+        const mimeType = safeInline ? requestedMime : 'application/octet-stream';
+        const contentDisposition = `${safeInline ? 'inline' : 'attachment'}; ${encodeFilename(filename)}`;
 
         console.log(`[Attachment] Serving attachment: ${filename} (${buffer.length} bytes, type: ${mimeType}, inline: ${wantsInline})`);
 
