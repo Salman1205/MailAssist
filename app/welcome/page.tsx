@@ -92,8 +92,8 @@ export default function WelcomePage() {
           </h1>
           <p className="ma-sub load load-5">
             MailAssist turns your team's Gmail into one calm, shared helpdesk — every
-            message sorted, assigned, and drafted in your voice. A self-healing inbox
-            that guarantees no customer email ever goes missing.
+            message sorted, assigned, and drafted in your voice, so no customer email
+            ever goes missing.
           </p>
           <div className="ma-cta load load-6">
             <button className="ma-btn ma-btn-primary" onClick={go("/auth/landing?view=register")}>
@@ -152,7 +152,7 @@ export default function WelcomePage() {
           {[
             { k: "01", t: "Auto-sorted queue", d: "Every incoming email becomes a ticket, labeled to the right workstream and routed to the right person — no manual filing.", m: "inbox → tickets" },
             { k: "02", t: "Drafts in your voice", d: "AI reads the thread and writes a reply that sounds like your team, ready to send or edit. Fast answers, still human.", m: "draft · 1.2s" },
-            { k: "03", t: "Nothing slips", d: "A self-healing sync re-scans every mailbox on a schedule, so a missed notification never means a missed customer.", m: "0 lost / 30d" },
+            { k: "03", t: "Nothing slips", d: "A background sync re-scans every mailbox on a schedule, so a missed notification never means a missed customer.", m: "0 lost / 30d" },
           ].map((c) => (
             <div className="ma-cap" key={c.k}>
               <div className="ma-cap-k">{c.k}</div>
@@ -204,7 +204,7 @@ export default function WelcomePage() {
                 "Roles, assignment & approvals",
                 "AI workstream labeling & guardrails",
                 "Shopify, notes, analytics & knowledge base",
-                "Self-healing sync — no email left behind",
+                "Automatic sync — no email left behind",
               ].map((f) => (
                 <li key={f}><Check className="ma-check ma-check-teal" /> {f}</li>
               ))}
@@ -233,7 +233,7 @@ export default function WelcomePage() {
 
       <footer className="ma-wrap ma-foot">
         <span className="ma-brand"><img src="/amanii_logo.png" alt="MailAssist" className="ma-logo" /> MailAssist</span>
-        <span className="ma-foot-r">The self-healing shared inbox.</span>
+        <span className="ma-foot-r">The shared inbox that never misses.</span>
       </footer>
     </div>
   )

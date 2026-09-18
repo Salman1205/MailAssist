@@ -10,7 +10,7 @@ const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono"
 const fraunces = Fraunces({ subsets: ["latin"], variable: "--font-fraunces", display: "swap" })
 
 export const metadata: Metadata = {
-  title: "MailAssist — The self-healing shared inbox",
+  title: "MailAssist — The shared inbox that never misses",
   description: "Turn your team's Gmail into one calm, AI-drafted helpdesk. Every email sorted, assigned, and answered — nothing missed.",
   icons: {
     icon: [{ url: "/amanii_logo.png", type: "image/png" }],
