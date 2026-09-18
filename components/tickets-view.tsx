@@ -351,6 +351,10 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
   // Ticket detail state
   const [threadMessages, setThreadMessages] = useState<ThreadMessage[]>([])
+  // In-memory cache of already-loaded threads (ticketId -> messages). Re-opening a
+  // ticket paints instantly from here while a quiet background fetch revalidates,
+  // so switching between tickets no longer shows a multi-second spinner each time.
+  const threadCacheRef = useRef<Record<string, ThreadMessage[]>>({})
   // Keep any locally-sent (optimistic) messages per ticket so they don't
   // disappear when you change tickets and come back before the server
   // thread endpoint has fully caught up.
@@ -2094,13 +2098,22 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
     if (!targetTicketId) return
 
+    // Instant paint from cache if we've loaded this thread before this session.
+    // We still fetch below to revalidate, but without the blocking spinner.
+    const cached = threadCacheRef.current[targetTicketId]
+    const servedFromCache = !silent && !!(cached && cached.length)
+    if (servedFromCache) {
+      setThreadMessages(cached!)
+      setThreadError(null)
+    }
+
     try {
       // Save current scroll position before loading
       if (conversationScrollRef.current) {
         savedScrollPositionRef.current = conversationScrollRef.current.scrollTop
       }
 
-      if (!silent) setLoadingThread(true)
+      if (!silent && !servedFromCache) setLoadingThread(true)
       if (!silent) setThreadError(null)
       const response = await fetch(`/api/tickets/${targetTicketId}/thread`)
 
@@ -2136,6 +2149,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         }
 
         setThreadMessages(messages)
+        threadCacheRef.current[targetTicketId] = messages
         if (selectedTicketIdRef.current === targetTicketId) setThreadError(null)
       } else {
         // Handle error - try to get error message from response
@@ -2153,13 +2167,17 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     } catch (err) {
       console.error("Error fetching thread:", err)
       if (selectedTicketIdRef.current === targetTicketId) {
-        setThreadMessages([])
-        if (!silent) {
-          setThreadError(
-            err instanceof TypeError
-              ? "Network error — check your connection and retry."
-              : `Couldn't load this conversation.${err instanceof Error ? ` ${err.message}` : ''}`
-          )
+        // Don't blank a view we already painted from cache just because the quiet
+        // revalidation failed (e.g. a transient network blip) — keep showing it.
+        if (!servedFromCache) {
+          setThreadMessages([])
+          if (!silent) {
+            setThreadError(
+              err instanceof TypeError
+                ? "Network error — check your connection and retry."
+                : `Couldn't load this conversation.${err instanceof Error ? ` ${err.message}` : ''}`
+            )
+          }
         }
       }
     } finally {
