@@ -1,8 +1,17 @@
 "use client"
 
-import React, { useEffect, useMemo, useRef, useState } from "react"
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import DOMPurify from "isomorphic-dompurify"
 import { cn } from "@/lib/utils"
+import {
+    prepareEmailHtml,
+    EMAIL_FIT_CSS,
+    isDarkSurface,
+    DARK_INK,
+    DARK_MUTED,
+    DARK_LINK,
+    DARK_PANEL,
+} from "@/lib/email-dark"
 
 interface EmailContentViewerProps {
     content: string
@@ -24,13 +33,51 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
     const [loading, setLoading] = useState(false)
     const [remoteImagesAllowed, setRemoteImagesAllowed] = useState(true)
     const [blockedRemoteCount, setBlockedRemoteCount] = useState(0)
+    // Dark mode: `surface` is the real background colour of the card this viewer
+    // sits in, read from the DOM, so the email canvas matches whatever theme the
+    // app is on instead of a hard-coded hex that only matches one of them.
+    const [surface, setSurface] = useState<string>("#ffffff")
+    const [showOriginal, setShowOriginal] = useState(false)
     const iframeRef = useRef<HTMLIFrameElement>(null)
+    const containerRef = useRef<HTMLDivElement>(null)
 
-    // Reset remote image permissions when switching emails.
+    const isDark = isDarkSurface(surface)
+
+    // Reset per-email view state when switching emails.
     useEffect(() => {
         setRemoteImagesAllowed(true)
         setBlockedRemoteCount(0)
+        setShowOriginal(false)
     }, [emailId])
+
+    // Resolve the nearest painted background behind the viewer, and re-resolve it
+    // when the theme flips (class change on <html>, or OS-level preference change).
+    const readSurface = useCallback(() => {
+        let node: HTMLElement | null = containerRef.current
+        while (node) {
+            const bg = getComputedStyle(node).backgroundColor
+            const parts = bg.match(/rgba?\(([^)]+)\)/)
+            const alpha = parts ? parseFloat(parts[1].split(",")[3] ?? "1") : 1
+            if (bg && bg !== "transparent" && alpha > 0.2) {
+                setSurface(bg)
+                return
+            }
+            node = node.parentElement
+        }
+        setSurface("#ffffff")
+    }, [])
+
+    useLayoutEffect(() => {
+        readSurface()
+        const mo = new MutationObserver(readSurface)
+        mo.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style", "data-theme"] })
+        const mq = window.matchMedia("(prefers-color-scheme: dark)")
+        mq.addEventListener?.("change", readSurface)
+        return () => {
+            mo.disconnect()
+            mq.removeEventListener?.("change", readSurface)
+        }
+    }, [readSurface])
 
     useEffect(() => {
         if (!content) {
@@ -39,69 +86,52 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
             return
         }
 
-        // Plain-text detection is the memoized `isPlainTextContent` (derived from
-        // the same content), so the body normalization and the canvas theme stay in sync.
         const isPlainText = isPlainTextContent
         let normalizedContent = content
 
         if (isPlainText) {
-            // Escape HTML entities first
             normalizedContent = normalizedContent
                 .replace(/&/g, '&amp;')
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;')
 
-            // Auto-link URLs (Gmail/Outlook style)
             normalizedContent = normalizedContent.replace(
                 /\b(https?:\/\/[^\s<>"\]]+)/gi,
                 '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>'
             )
-
-            // Auto-link email addresses
             normalizedContent = normalizedContent.replace(
                 /\b([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,})\b/g,
                 '<a href="mailto:$1">$1</a>'
             )
-
-            // Auto-link phone numbers (basic patterns)
             normalizedContent = normalizedContent.replace(
                 /\b(\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})\b/g,
                 '<a href="tel:$1">$1</a>'
             )
-
-            // Convert newlines to <br>
             normalizedContent = normalizedContent.replace(/\n/g, '<br>')
         }
 
-        // Configure DOMPurify to allow common email tags, attributes, and URI schemes
         const clean = DOMPurify.sanitize(normalizedContent, {
             USE_PROFILES: { html: true },
-            // Allow common formatting tags plus style (many emails rely on inline <style>)
             ADD_TAGS: ['style', 'center', 'font', 'table', 'tbody', 'thead', 'tfoot', 'tr', 'td', 'th', 'div', 'span', 'p', 'br', 'hr', 'img', 'a', 'ul', 'ol', 'li', 'blockquote', 'b', 'strong', 'i', 'em', 'u', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'],
             ADD_ATTR: ['style', 'target', 'href', 'src', 'width', 'height', 'align', 'valign', 'bgcolor', 'border', 'cellpadding', 'cellspacing', 'colspan', 'rowspan', 'class', 'id', 'alt', 'title'],
             ADD_URI_SAFE_ATTR: ['src', 'href'],
             ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|data|blob):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
-            // Forbid active/unsafe embeds; allow <style> for email fidelity
             FORBID_TAGS: ['script', 'object', 'embed', 'form', 'input', 'button', 'svg', 'canvas', 'video', 'audio'],
             FORBID_ATTR: ['onmouseover', 'onclick', 'onerror', 'onload', 'onmouseenter', 'onmouseleave']
         })
 
         setLoading(true)
 
-        // Process the cleaned HTML to handle images
         let processed = clean
         let remoteImageCount = 0
 
         const transparentPixel = "data:image/gif;base64,R0lGODlhAQABAIAAAP///////ywAAAAAAQABAAACAUwAOw=="
 
-        // Replace CID images with attachment route (robust patterns)
-        // Gmail attachments use /api route, IMAP attachments may have inline data
         if (emailId && attachments?.length) {
             attachments.forEach(att => {
                 const nameWithoutExt = att.filename?.replace(/\.[^.]+$/, '') || ''
                 const contentId = att.contentId || att.id
 
-                // Build list of possible CID patterns this attachment might match
                 const patterns = [
                     `cid:${att.id}`,
                     `cid:${contentId}`,
@@ -113,13 +143,10 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                     `<${nameWithoutExt}>`
                 ].filter(Boolean).map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
 
-                // Determine replacement src: inline data URI for IMAP, API route for Gmail
                 let replacementSrc: string
                 if (att.data) {
-                    // IMAP-style: attachment has inline base64 data
                     replacementSrc = `data:${att.mimeType || 'application/octet-stream'};base64,${att.data}`
                 } else {
-                    // Gmail-style: fetch via API route
                     replacementSrc = `/api/emails/${emailId}/attachments/${att.id}`
                 }
 
@@ -128,14 +155,11 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
             })
         }
 
-        // Outlook/Gmail-style remote image handling: block remote loads until user opts in
         processed = processed.replace(
             /<img\s+([^>]*?)src=["']([^"']+)["']([^>]*)>/gi,
             (match, beforeSrc, srcValue, afterSrc) => {
                 const hasLoading = /loading=/i.test(beforeSrc + afterSrc)
                 const hasDecoding = /decoding=/i.test(beforeSrc + afterSrc)
-                const isDataUri = srcValue.startsWith('data:')
-                const isAlreadyProxied = srcValue.startsWith('/api/proxy/image')
                 const isHttp = /^https?:\/\//i.test(srcValue)
 
                 if (isHttp) {
@@ -149,22 +173,18 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                     return `<img ${beforeSrc}src="${proxiedSrc}" ${hasLoading ? '' : 'loading="lazy" '} ${hasDecoding ? '' : 'decoding="async" '} ${afterSrc}>`
                 }
 
-                // Unresolved cid: refs (Yahoo/IMAP attachments we couldn't match).
-                // Replace with a styled placeholder so users see something nice
-                // instead of a browser broken-image icon + raw alt text.
                 if (srcValue.toLowerCase().startsWith('cid:')) {
                     const altMatch = (beforeSrc + afterSrc).match(/\balt=["']([^"']*)["']/i)
                     const label = altMatch ? altMatch[1] : 'Inline image unavailable'
                     const escaped = label.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-                    return `<span class="cid-placeholder" role="img" aria-label="${escaped}">🖼  ${escaped}</span>`
+                    return `<span class="cid-placeholder" role="img" aria-label="${escaped}">${escaped}</span>`
                 }
 
-                // For data/relative images just ensure lazy/async
                 return `<img ${beforeSrc}src="${srcValue}" ${hasLoading ? '' : 'loading="lazy" '} ${hasDecoding ? '' : 'decoding="async" '} ${afterSrc}>`
             }
         )
 
-        // Gmail/Outlook: Hide tracking pixels (1x1 images)
+        // Hide tracking pixels (1x1 images)
         processed = processed.replace(
             /<img\s+([^>]*?)width=["']1["']\s*height=["']1["']([^>]*)>/gi,
             '<img $1width="1" height="1" style="display:none!important" $2>'
@@ -176,7 +196,6 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
 
         setBlockedRemoteCount(remoteImageCount)
 
-        // Ensure links open in new tab and add external link indicator
         processed = processed.replace(
             /<a\s+([^>]*href=["']([^"']+)["'][^>]*)>/gi,
             (match, attrs, href) => {
@@ -187,33 +206,26 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                 if (!hasTarget) {
                     newAttrs += ' target="_blank" rel="noopener noreferrer"'
                 }
-
-                // Add data attribute for external links (can be styled in CSS)
                 if (isExternal) {
                     newAttrs += ' data-external="true"'
                 }
-
                 return `<a ${newAttrs}>`
             }
         )
 
-        // Gmail-style: Collapse quoted text (lines starting with > or quoted blocks)
-        // Wrap quoted sections in a collapsible container
         processed = processed.replace(
             /(<blockquote[^>]*>[\s\S]*?<\/blockquote>)/gi,
             '<div class="gmail-quote" data-collapsed="true">$1</div>'
         )
 
-        // Detect "On ... wrote:" pattern and wrap following content
         processed = processed.replace(
             /(On\s+.+\s+wrote:?\s*<br\s*\/?>)/gi,
             '<div class="quote-header" data-collapsed="true">$1<button class="expand-quote" onclick="this.parentElement.classList.toggle(\'expanded\')">[...]</button></div><div class="quoted-content">'
         )
 
         setProcessedContent(processed)
-    }, [content, emailId, attachments, remoteImagesAllowed])
+    }, [content, emailId, attachments, remoteImagesAllowed, isPlainTextContent])
 
-    // Wait for all images to load before calculating height
     const waitForImages = (iframeDoc: Document): Promise<void> => {
         return new Promise((resolve) => {
             const images = iframeDoc.querySelectorAll('img')
@@ -221,21 +233,16 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                 resolve()
                 return
             }
-
             let loadedCount = 0
             const checkAllLoaded = () => {
                 loadedCount++
-                if (loadedCount === images.length) {
-                    resolve()
-                }
+                if (loadedCount === images.length) resolve()
             }
-
             images.forEach(img => {
-                if (img.complete) {
-                    checkAllLoaded()
-                } else {
+                if (img.complete) checkAllLoaded()
+                else {
                     img.onload = checkAllLoaded
-                    img.onerror = checkAllLoaded // Count errors as loaded to not block
+                    img.onerror = checkAllLoaded
                 }
             })
         })
@@ -247,35 +254,172 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
         try {
             const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document
             if (!iframeDoc) return
-
-            // Measure the BODY's content height only. Previously this took
-            // Math.max of body AND documentElement metrics — but once the iframe
-            // is sized tall, documentElement fills it and html.scrollHeight never
-            // shrinks back, leaving a large blank gap under short emails (the
-            // "whitespace" bug). body.scrollHeight reflects the true content height
-            // and shrinks correctly because the body isn't forced to fill the frame.
+            // Measure the BODY only: once the iframe is sized tall, documentElement
+            // fills it and html.scrollHeight never shrinks back, which is what left
+            // a large blank gap under short emails.
             const body = iframeDoc.body
             const contentHeight = body?.scrollHeight || iframeDoc.documentElement?.scrollHeight || 0
-
             const minHeight = 56
-            const calculatedHeight = contentHeight + 16
-            setIframeHeight(Math.max(calculatedHeight, minHeight))
+            setIframeHeight(Math.max(contentHeight + 16, minHeight))
         } catch (error) {
             console.error('Error updating iframe height:', error)
         }
     }
 
-    // Auto-resize iframe based on content with smart max height
+    // ---- Canvas theme -------------------------------------------------------
+    // Light theme: unchanged behaviour (email renders on its authored paper).
+    // Dark theme, adapted (default): colours are remapped onto the app surface.
+    // Dark theme, "Original": the authored email on a white sheet, inset in the
+    // card so it reads as a document rather than a blown-out panel.
+    const adapt = isDark && !showOriginal
+    const canvasBg = isDark ? surface : (isPlainTextContent ? surface : '#fafafa')
+    const fallbackText = isDark ? DARK_INK : '#1f2937'
+    const fallbackLink = isDark ? DARK_LINK : '#2563eb'
+    const colorScheme = isDark ? 'dark' : 'light'
+    const quoteText = isDark ? DARK_MUTED : '#718096'
+    const quoteBorder = isDark ? 'rgba(255,255,255,0.20)' : '#cbd5e0'
+    const quoteBtnBg = isDark ? 'rgba(255,255,255,0.10)' : '#e5e7eb'
+    const quoteBtnText = isDark ? DARK_LINK : '#0b57d0'
+    const shimmer = isDark ? 'rgba(255,255,255,0.09)' : 'rgba(0,0,0,0.07)'
+
+    // Layout is normalised in both themes (absolute mastheads, baked-in heights,
+    // fixed pixel widths); colour is remapped only when the canvas is dark.
+    const bodyHtml = useMemo(
+        () => prepareEmailHtml(processedContent, { dark: adapt }),
+        [adapt, processedContent]
+    )
+
+    const iframeHtml = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+                :root { color-scheme: ${colorScheme}; }
+                * { box-sizing: border-box; }
+                html, body { margin: 0; padding: 0; background: ${canvasBg}; }
+                body {
+                    padding: ${showOriginal && isDark ? '14px' : '24px'};
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                    font-size: 14px;
+                    line-height: 1.6;
+                    word-wrap: break-word;
+                    overflow-wrap: break-word;
+                    color: ${fallbackText};
+                    background: ${canvasBg};
+                    -webkit-user-select: text;
+                    user-select: text;
+                }
+                /* "Show original" sheet: authored email kept on paper, but inset and
+                   rounded so it sits in the dark card instead of fighting it. */
+                .sheet {
+                    background: #ffffff;
+                    color: #1f2937;
+                    border-radius: 12px;
+                    padding: 18px;
+                    overflow: hidden;
+                    box-shadow: 0 12px 28px rgba(0,0,0,0.45);
+                }
+                .email-body { max-width: 100%; }
+                /* pre-wrap belongs to plain-text mail only. Applying it to HTML mail
+                   turns every newline between tags into visible whitespace, which is
+                   what made table-based emails render with huge random gaps. */
+                .email-body.plain-text { white-space: pre-wrap; word-break: break-word; }
+                .email-body > div:not([style]) { margin: 0 0 1em 0; }
+                .email-body > div[style*="margin-left"] {
+                    margin-left: 0 !important;
+                    padding-left: 0 !important;
+                    text-indent: 0 !important;
+                }
+                .email-body > p:not([style]) { margin: 0 0 1em 0; }
+                .email-body > ul:not([style]), .email-body > ol:not([style]) { padding-left: 20px; margin: 0 0 1em 0; }
+                img { border-radius: 6px; }
+                ${EMAIL_FIT_CSS}
+                td, th { padding: 2px 4px; }
+                pre, code { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+                hr { border: 0; border-top: 1px solid ${isDark ? 'rgba(255,255,255,0.10)' : '#e5e7eb'}; }
+                .cid-placeholder {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 8px;
+                    padding: 10px 14px;
+                    min-height: 44px;
+                    border: 1px dashed ${isDark ? 'rgba(255,255,255,0.18)' : '#d1d5db'};
+                    background: ${isDark ? DARK_PANEL : '#f3f4f6'};
+                    color: ${isDark ? DARK_MUTED : '#4b5563'};
+                    border-radius: 8px;
+                    font-size: 13px;
+                    font-style: italic;
+                    line-height: 1.4;
+                    margin: 4px 0;
+                }
+                img[data-remote-blocked="true"] {
+                    background: ${isDark
+                        ? 'repeating-linear-gradient(45deg, #1B212B, #1B212B 10px, #232B36 10px, #232B36 20px)'
+                        : 'repeating-linear-gradient(45deg, #f7f7f7, #f7f7f7 10px, #e5e5e5 10px, #e5e5e5 20px)'};
+                    border: 1px dashed ${isDark ? 'rgba(255,255,255,0.18)' : '#c4c4c4'};
+                    color: ${isDark ? DARK_MUTED : '#555'};
+                    min-height: 48px;
+                }
+                a:not([style*="color"]) { color: ${fallbackLink}; }
+                a:hover { text-decoration: underline; }
+                a[data-external="true"]::after { content: " ↗"; font-size: 0.75em; opacity: 0.6; }
+                blockquote:not([style*="border"]) {
+                    margin: 0 0 1em 0;
+                    padding-left: 12px;
+                    border-left: 3px solid ${quoteBorder};
+                    color: ${quoteText};
+                }
+                .gmail-quote[data-collapsed="true"] blockquote {
+                    max-height: 100px;
+                    overflow: hidden;
+                    position: relative;
+                }
+                .gmail-quote[data-collapsed="true"] blockquote::after {
+                    content: "";
+                    position: absolute;
+                    bottom: 0; left: 0; right: 0;
+                    height: 40px;
+                    background: linear-gradient(transparent, ${showOriginal && isDark ? '#ffffff' : canvasBg});
+                }
+                .gmail-quote.expanded blockquote { max-height: none; }
+                .gmail-quote.expanded blockquote::after { display: none; }
+                .quote-header { color: ${quoteText}; font-size: 0.9em; margin-top: 1em; }
+                .quote-header .expand-quote {
+                    background: ${quoteBtnBg};
+                    border: none;
+                    border-radius: 4px;
+                    padding: 2px 8px;
+                    margin-left: 8px;
+                    cursor: pointer;
+                    font-size: 0.85em;
+                    color: ${quoteBtnText};
+                }
+                .quote-header .expand-quote:hover { opacity: 0.85; }
+                .quote-header:not(.expanded) + .quoted-content { display: none; }
+                .quote-header.expanded + .quoted-content {
+                    display: block;
+                    padding-left: 12px;
+                    border-left: 3px solid ${quoteBorder};
+                    color: ${quoteText};
+                }
+            </style>
+        </head>
+        <body>
+${showOriginal && isDark ? '<div class="sheet">' : ''}<div class="email-body${isPlainTextContent ? ' plain-text' : ''}">${bodyHtml}</div>${showOriginal && isDark ? '</div>' : ''}
+        </body>
+        </html>
+    `
+
+    // Auto-resize the iframe to its content.
     useEffect(() => {
         const iframe = iframeRef.current
         if (!iframe || !processedContent) return
 
         const loadingFallback = setTimeout(() => setLoading(false), 1500)
-
-        // Initial height calculation (do NOT wait on images)
         const timer = setTimeout(measureHeight, 10)
 
-        // After images load, measure again without blocking initial render
         const scheduleAfterImages = () => {
             try {
                 const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document
@@ -290,16 +434,12 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
         }
         const imagesTimer = setTimeout(scheduleAfterImages, 100)
 
-        // Set up ResizeObserver for dynamic content changes
         let resizeObserver: ResizeObserver | null = null
         const setupObserver = () => {
             try {
                 const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document
                 if (!iframeDoc?.body) return
-
-                resizeObserver = new ResizeObserver(() => {
-                    measureHeight()
-                })
+                resizeObserver = new ResizeObserver(() => measureHeight())
                 resizeObserver.observe(iframeDoc.body)
             } catch (error) {
                 console.error('Error setting up ResizeObserver:', error)
@@ -316,186 +456,8 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
         }
     }, [processedContent])
 
-    // Styled HTML mail is authored for a white background, so we keep a light
-    // "paper" for it (matching Gmail/Outlook). But plain-text mail and agent
-    // replies carry no inline styling — rendering those on glaring white inside
-    // a dark console is eye-fatiguing, so we render them on the dark theme canvas
-    // (this is exactly what Gmail does for plain text in dark mode).
-    const canvasBg = isPlainTextContent ? '#15181E' : '#fafafa'
-    const fallbackText = isPlainTextContent ? '#E9EDF2' : '#1f2937'
-    const fallbackLink = isPlainTextContent ? '#5EC6D6' : '#2563eb'
-    const colorScheme = isPlainTextContent ? 'dark' : 'light'
-    // Quote / reply chrome, tuned per canvas so collapsed "On … wrote:" history
-    // and blockquotes don't show light-gray bars/text on the dark plain-text canvas.
-    const quoteText = isPlainTextContent ? '#9AA3AE' : '#718096'
-    const quoteBorder = isPlainTextContent ? 'rgba(255,255,255,0.20)' : '#cbd5e0'
-    const quoteBtnBg = isPlainTextContent ? 'rgba(255,255,255,0.10)' : '#e5e7eb'
-    const quoteBtnText = isPlainTextContent ? '#7FD3DF' : '#0b57d0'
-    const shimmer = isPlainTextContent ? 'rgba(255,255,255,0.09)' : 'rgba(0,0,0,0.07)'
-
-    const iframeHtml = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <style>
-                :root { color-scheme: ${colorScheme}; }
-                * { box-sizing: border-box; }
-                html, body {
-                    margin: 0;
-                    padding: 0;
-                    background: ${canvasBg};
-                }
-                body {
-                    padding: 24px;
-                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-                    font-size: 14px;
-                    line-height: 1.6;
-                    word-wrap: break-word;
-                    overflow-wrap: break-word;
-                    /* Fallback colors - email CSS will override if present */
-                    color: ${fallbackText};
-                    background: ${canvasBg};
-                    -webkit-user-select: text;
-                    user-select: text;
-                }
-                .email-body {
-                    max-width: 100%;
-                    /* Preserve user-intended line breaks and spacing for plain-text style emails
-                       while still allowing HTML emails to render normally. */
-                    white-space: pre-wrap;
-                    word-break: break-word;
-                }
-                /* Add paragraph-like spacing for simple div-based layouts (common in Gmail),
-                   but only when the email itself hasn't set custom styles. */
-                .email-body > div:not([style]) {
-                    margin: 0 0 1em 0;
-                }
-                /* Some providers (like Gmail) add inline left margins on the
-                   first line only. Normalize those so all lines align the same. */
-                .email-body > div[style*="margin-left"] {
-                    margin-left: 0 !important;
-                    padding-left: 0 !important;
-                    text-indent: 0 !important;
-                }
-                /* Only apply spacing if email doesn't have its own */
-                .email-body > p:not([style]) { margin: 0 0 1em 0; }
-                .email-body > ul:not([style]), .email-body > ol:not([style]) { padding-left: 20px; margin: 0 0 1em 0; }
-                img {
-                    max-width: 100%;
-                    height: auto;
-                    border-radius: 6px;
-                }
-                /* Placeholder for unresolved cid: refs (Yahoo/IMAP inline images
-                   whose attachments we couldn't match). Replaces what would
-                   otherwise render as a broken-image icon + raw "Photo attachment"
-                   alt text. Works without iframe scripts. */
-                .cid-placeholder {
-                    display: inline-flex;
-                    align-items: center;
-                    gap: 8px;
-                    padding: 10px 14px;
-                    min-height: 44px;
-                    border: 1px dashed #d1d5db;
-                    background: #f3f4f6;
-                    color: #4b5563;
-                    border-radius: 8px;
-                    font-size: 13px;
-                    font-style: italic;
-                    line-height: 1.4;
-                    margin: 4px 0;
-                }
-                img[data-remote-blocked="true"] {
-                    background: repeating-linear-gradient(45deg, #f7f7f7, #f7f7f7 10px, #e5e5e5 10px, #e5e5e5 20px);
-                    border: 1px dashed #c4c4c4;
-                    color: #555;
-                    min-height: 48px;
-                }
-                /* Fallback link color - email links with inline style will override */
-                a:not([style*="color"]) { color: ${fallbackLink}; }
-                a:hover { text-decoration: underline; }
-                /* External link indicator (Gmail-style) */
-                a[data-external="true"]::after {
-                    content: " ↗";
-                    font-size: 0.75em;
-                    opacity: 0.6;
-                }
-                table { border-collapse: collapse; }
-                td, th { padding: 2px 4px; }
-                /* Preserve whitespace in preformatted blocks */
-                pre, code { white-space: pre-wrap; font-family: monospace; }
-                /* Quoted text styling (common in replies) */
-                blockquote {
-                    margin: 0 0 1em 0;
-                    padding-left: 12px;
-                    border-left: 3px solid ${quoteBorder};
-                    color: ${quoteText};
-                }
-                /* Gmail-style collapsed quotes */
-                .gmail-quote[data-collapsed="true"] blockquote {
-                    max-height: 100px;
-                    overflow: hidden;
-                    position: relative;
-                }
-                .gmail-quote[data-collapsed="true"] blockquote::after {
-                    content: "";
-                    position: absolute;
-                    bottom: 0;
-                    left: 0;
-                    right: 0;
-                    height: 40px;
-                    background: linear-gradient(transparent, ${canvasBg});
-                }
-                .gmail-quote.expanded blockquote {
-                    max-height: none;
-                }
-                .gmail-quote.expanded blockquote::after {
-                    display: none;
-                }
-                /* Quote header with expand button */
-                .quote-header {
-                    color: ${quoteText};
-                    font-size: 0.9em;
-                    margin-top: 1em;
-                }
-                .quote-header .expand-quote {
-                    background: ${quoteBtnBg};
-                    border: none;
-                    border-radius: 4px;
-                    padding: 2px 8px;
-                    margin-left: 8px;
-                    cursor: pointer;
-                    font-size: 0.85em;
-                    color: ${quoteBtnText};
-                }
-                .quote-header .expand-quote:hover {
-                    opacity: 0.85;
-                }
-                .quote-header:not(.expanded) + .quoted-content {
-                    display: none;
-                }
-                .quote-header.expanded + .quoted-content {
-                    display: block;
-                    padding-left: 12px;
-                    border-left: 3px solid ${quoteBorder};
-                    color: ${quoteText};
-                }
-            </style>
-        </head>
-        <body>
-<div class="email-body${isPlainTextContent ? ' plain-text' : ''}">${processedContent}</div>
-        </body>
-        </html>
-    `
-
-    // Write the email HTML into the iframe imperatively rather than via srcDoc.
-    // srcDoc has a race: the iframe frequently finishes loading BEFORE React binds
-    // the onLoad handler, so the "reveal the iframe once loaded" step never fires
-    // and the user is left looking at the blank canvas behind a still-hidden frame
-    // (seen first on Edge, then intermittently everywhere). Writing to the
-    // same-origin document from the parent is synchronous and reliable in every
-    // browser, and does not depend on any load event.
+    // Write the email HTML into the iframe imperatively rather than via srcDoc:
+    // srcDoc races the onLoad handler, which used to leave the frame invisible.
     useEffect(() => {
         const iframe = iframeRef.current
         if (!iframe) return
@@ -505,28 +467,21 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
             doc.open()
             doc.write(iframeHtml)
             doc.close()
-            // Content is in the DOM now — clear the loading veil immediately and
-            // measure on the next frame so layout has settled.
             setLoading(false)
             requestAnimationFrame(measureHeight)
         } catch (error) {
             console.error('Error writing email iframe content:', error)
             setLoading(false)
         }
-        // iframeHtml is a plain string derived from content/theme; React compares it
-        // by value, so this only re-runs when the rendered HTML actually changes.
     }, [iframeHtml])
+
+    // The revert control is only meaningful for styled HTML mail on a dark theme.
+    const showThemeToggle = isDark && !isPlainTextContent && !!processedContent
 
     return (
         <div
-            className={cn(
-                // Chrome-less by design: the parent message card owns the single
-                // surface. We render exactly one inner "paper" for the email body
-                // so there's no double/triple-bordered nesting (the old "box
-                // overlapping" look). Rounded only to clip the paper corners.
-                "email-content-viewer w-full overflow-hidden rounded-lg",
-                className
-            )}
+            ref={containerRef}
+            className={cn("email-content-viewer w-full overflow-hidden rounded-lg", className)}
             aria-busy={loading}
         >
             {blockedRemoteCount > 0 && !remoteImagesAllowed && (
@@ -542,37 +497,44 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                     </button>
                 </div>
             )}
-            <div className="relative">
-                <div className="relative overflow-hidden" style={{ background: canvasBg }}>
-                    {loading && (
-                        <div className="absolute inset-0 z-10 flex flex-col gap-3 p-6" style={{ background: canvasBg }}>
-                            {/* Shimmer tracks the canvas (dark for plain text, light for HTML mail) */}
-                            <div className="h-3 w-2/3 rounded animate-pulse" style={{ background: shimmer }} />
-                            <div className="h-3 w-11/12 rounded animate-pulse" style={{ background: shimmer, animationDelay: '80ms' }} />
-                            <div className="h-3 w-5/6 rounded animate-pulse" style={{ background: shimmer, animationDelay: '160ms' }} />
-                            <div className="h-3 w-3/5 rounded animate-pulse" style={{ background: shimmer, animationDelay: '240ms' }} />
-                        </div>
-                    )}
-                    {/* Content is written imperatively via contentDocument (see effect
-                        above), NOT srcDoc — this avoids the onLoad race that left the
-                        frame invisible. The iframe is always visible; the loading veil
-                        above covers it only until the write completes. */}
-                    <iframe
-                        ref={iframeRef}
-                        sandbox="allow-same-origin"
-                        className="w-full border-0 block"
-                        style={{
-                            height: `${iframeHeight}px`,
-                            minHeight: '48px',
-                            background: canvasBg,
-                        }}
-                        onLoad={() => {
-                            measureHeight()
-                            setLoading(false)
-                        }}
-                        title="Email content"
-                    />
+
+            {showThemeToggle && (
+                <div className="flex justify-end px-1 pb-2">
+                    <button
+                        type="button"
+                        onClick={() => setShowOriginal(v => !v)}
+                        className="rounded-full border border-border bg-muted/40 px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition hover:text-foreground hover:border-foreground/25"
+                        title={showOriginal ? "Adapt this email to the dark theme" : "Show the email as the sender designed it"}
+                    >
+                        {showOriginal ? "Adapt to dark" : "Original"}
+                    </button>
                 </div>
+            )}
+
+            <div className="relative overflow-hidden" style={{ background: canvasBg }}>
+                {loading && (
+                    <div className="absolute inset-0 z-10 flex flex-col gap-3 p-6" style={{ background: canvasBg }}>
+                        <div className="h-3 w-2/3 rounded animate-pulse" style={{ background: shimmer }} />
+                        <div className="h-3 w-11/12 rounded animate-pulse" style={{ background: shimmer, animationDelay: '80ms' }} />
+                        <div className="h-3 w-5/6 rounded animate-pulse" style={{ background: shimmer, animationDelay: '160ms' }} />
+                        <div className="h-3 w-3/5 rounded animate-pulse" style={{ background: shimmer, animationDelay: '240ms' }} />
+                    </div>
+                )}
+                <iframe
+                    ref={iframeRef}
+                    sandbox="allow-same-origin"
+                    className="w-full border-0 block"
+                    style={{
+                        height: `${iframeHeight}px`,
+                        minHeight: '48px',
+                        background: canvasBg,
+                    }}
+                    onLoad={() => {
+                        measureHeight()
+                        setLoading(false)
+                    }}
+                    title="Email content"
+                />
             </div>
         </div>
     )
