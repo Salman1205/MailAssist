@@ -50,21 +50,40 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
         setShowOriginal(false)
     }, [emailId])
 
-    // Resolve the nearest painted background behind the viewer, and re-resolve it
+    // Resolve the background the email canvas should sit on, and re-resolve it
     // when the theme flips (class change on <html>, or OS-level preference change).
+    //
+    // The app is in dark mode when <html> has the `.dark` class (next-themes) —
+    // this is the authoritative signal. We do NOT rely solely on reading a painted
+    // background colour up the tree, because the app's dark background is a CSS
+    // *gradient* (`.dark body { background: linear-gradient(...) }`), which reports
+    // as `transparent` to getComputedStyle().backgroundColor. That made the viewer
+    // fall through to white and render every email on a glaring white sheet in dark
+    // mode. We still try to read a real solid surface for an exact colour match,
+    // but fall back to a proper dark/light default based on the `.dark` class.
     const readSurface = useCallback(() => {
+        const root = document.documentElement
+        const rootDark =
+            root.classList.contains("dark") || root.getAttribute("data-theme") === "dark"
+
         let node: HTMLElement | null = containerRef.current
         while (node) {
             const bg = getComputedStyle(node).backgroundColor
             const parts = bg.match(/rgba?\(([^)]+)\)/)
             const alpha = parts ? parseFloat(parts[1].split(",")[3] ?? "1") : 1
+            // Only trust a solid colour that agrees with the app theme — a stray
+            // light panel found in dark mode (or vice-versa) must not win.
             if (bg && bg !== "transparent" && alpha > 0.2) {
-                setSurface(bg)
-                return
+                if (isDarkSurface(bg) === rootDark) {
+                    setSurface(bg)
+                    return
+                }
             }
             node = node.parentElement
         }
-        setSurface("#ffffff")
+        // No matching solid surface (e.g. the dark gradient body) — use the app's
+        // known dark/light canvas.
+        setSurface(rootDark ? "#0F141A" : "#ffffff")
     }, [])
 
     useLayoutEffect(() => {
