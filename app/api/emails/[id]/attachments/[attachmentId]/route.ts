@@ -119,17 +119,33 @@ export async function GET(
 
         const mimeType = request.nextUrl.searchParams.get('mimeType') || 'application/octet-stream';
 
-        // Properly encode filename for Content-Disposition header
-        // Use both filename and filename* for maximum browser compatibility
-        const contentDisposition = `attachment; ${encodeFilename(filename)}`;
+        // `?disposition=inline` opens the file in the browser (new tab) instead of
+        // forcing a download — useful for viewing videos, PDFs and images.
+        const wantsInline = request.nextUrl.searchParams.get('disposition') === 'inline';
+        const contentDisposition = `${wantsInline ? 'inline' : 'attachment'}; ${encodeFilename(filename)}`;
 
-        console.log(`[Attachment] Serving attachment: ${filename} (${buffer.length} bytes, type: ${mimeType})`);
+        console.log(`[Attachment] Serving attachment: ${filename} (${buffer.length} bytes, type: ${mimeType}, inline: ${wantsInline})`);
 
-        // STREAM the file rather than returning a single buffered body. A buffered
-        // response is capped (~4.5 MB on Vercel), which silently broke downloads of
-        // videos and other large attachments ("can't download it"). Streaming the
-        // bytes out in chunks lets attachments up to Gmail's own limit (~25 MB)
-        // download successfully.
+        const SMALL_LIMIT = 4 * 1024 * 1024; // stay under Vercel's ~4.5MB buffered-body cap
+
+        // Small files: return a single buffered body — the simple, reliable path.
+        if (buffer.length <= SMALL_LIMIT) {
+            return new NextResponse(new Uint8Array(buffer), {
+                status: 200,
+                headers: {
+                    'Content-Type': mimeType,
+                    'Content-Disposition': contentDisposition,
+                    'Content-Length': String(buffer.length),
+                    'Cache-Control': 'private, max-age=3600',
+                    'X-Content-Type-Options': 'nosniff',
+                },
+            });
+        }
+
+        // Large files (e.g. video "footage"): a single buffered body exceeds the
+        // platform cap and silently fails. Stream the bytes out in chunks. We do
+        // NOT set Content-Length here — pinning it to a streamed body is what left
+        // the browser's download stuck at "downloading…" with nothing delivered.
         const CHUNK = 256 * 1024;
         const stream = new ReadableStream<Uint8Array>({
             start(controller) {
@@ -145,7 +161,6 @@ export async function GET(
             headers: {
                 'Content-Type': mimeType,
                 'Content-Disposition': contentDisposition,
-                'Content-Length': String(buffer.length),
                 'Cache-Control': 'private, max-age=3600',
                 'X-Content-Type-Options': 'nosniff',
             },

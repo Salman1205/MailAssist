@@ -4970,9 +4970,10 @@ ${latestMsg.body || ""}
                                         <div className="mt-3 pt-3 border-t border-border/50">
                                           <div className="flex flex-wrap gap-2">
                                             {msg.attachments.map((att: any, attIdx: number) => {
-                                              // Always use API route for downloads to avoid browser data URI size limits
-                                              // Data URIs are only used for inline display (images in email content)
-                                              const downloadHref = `/api/emails/${msg.id}/attachments/${att.id}?filename=${encodeURIComponent(att.filename)}&mimeType=${encodeURIComponent(att.mimeType || 'application/octet-stream')}`
+                                              // Always use API route to avoid browser data URI size limits.
+                                              const base = `/api/emails/${msg.id}/attachments/${att.id}?filename=${encodeURIComponent(att.filename)}&mimeType=${encodeURIComponent(att.mimeType || 'application/octet-stream')}`
+                                              const viewHref = `${base}&disposition=inline`      // open in new tab
+                                              const downloadHref = base                          // force download
 
                                               // Handle size display
                                               let sizeDisplay = ''
@@ -4983,20 +4984,34 @@ ${latestMsg.body || ""}
                                               }
 
                                               return (
-                                                <a
+                                                <div
                                                   key={`att-${att.id}-${attIdx}`}
-                                                  href={downloadHref}
-                                                  download={att.filename}
-                                                  className="inline-flex items-center gap-2 px-3 py-2 text-xs bg-muted/50 hover:bg-muted border border-border/50 rounded-md transition-colors group max-w-full"
-                                                  title={att.filename}
+                                                  className="inline-flex items-center gap-1 pl-1 pr-1 py-1 text-xs bg-muted/50 border border-border/50 rounded-md max-w-full"
                                                 >
-                                                  <div className="p-1 rounded bg-primary/10 text-primary">
-                                                    <FileText className="w-3 h-3" />
-                                                  </div>
-                                                  <span className="truncate max-w-[150px] font-medium">{att.filename}</span>
-                                                  {sizeDisplay && <span className="text-muted-foreground opacity-70">({sizeDisplay})</span>}
-                                                  <Download className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity ml-1" />
-                                                </a>
+                                                  {/* Click the name to view it in a new tab (video/pdf/image render inline) */}
+                                                  <a
+                                                    href={viewHref}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="inline-flex items-center gap-2 px-2 py-1 rounded hover:bg-muted transition-colors min-w-0"
+                                                    title={`Open ${att.filename} in a new tab`}
+                                                  >
+                                                    <div className="p-1 rounded bg-primary/10 text-primary flex-shrink-0">
+                                                      <FileText className="w-3 h-3" />
+                                                    </div>
+                                                    <span className="truncate max-w-[150px] font-medium">{att.filename}</span>
+                                                    {sizeDisplay && <span className="text-muted-foreground opacity-70 flex-shrink-0">({sizeDisplay})</span>}
+                                                  </a>
+                                                  {/* Explicit download button */}
+                                                  <a
+                                                    href={downloadHref}
+                                                    download={att.filename}
+                                                    className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
+                                                    title={`Download ${att.filename}`}
+                                                  >
+                                                    <Download className="w-3.5 h-3.5" />
+                                                  </a>
+                                                </div>
                                               )
                                             })}
                                           </div>
