@@ -21,23 +21,44 @@ export async function PATCH(
             return NextResponse.json({ error: 'Ticket ID is required' }, { status: 400 });
         }
 
-        // 1. Fetch current ticket state to get original department (for feedback log)
+        if (!supabase) {
+            return NextResponse.json({ error: 'Database not configured' }, { status: 500 });
+        }
+
+        // TENANT SCOPING: the service-role client bypasses RLS, so we MUST restrict
+        // this ticket to the caller's own mailboxes. Otherwise a user in business A
+        // could rewrite the classification of business B's ticket by passing its id.
+        const scopeEmails: string[] = [];
+        try {
+            const { loadBusinessTokens } = await import('@/lib/storage');
+            const conn = await loadBusinessTokens(user.businessId || null, user.email || undefined);
+            conn.forEach((a: any) => { if (a?.email) scopeEmails.push(String(a.email)); });
+        } catch (e) {
+            console.warn('[department] Could not resolve tenant mailboxes:', e);
+        }
+        if (scopeEmails.length === 0 && user.email) scopeEmails.push(user.email);
+        if (scopeEmails.length === 0) {
+            return NextResponse.json({ error: 'Ticket not found' }, { status: 404 });
+        }
+
+        // 1. Fetch current ticket state (scoped to tenant) for the feedback log
         const { data: currentTicket, error: fetchError } = await supabase
             .from('tickets')
             .select('department_id, classification_confidence')
             .eq('id', ticketId)
-            .single();
+            .in('user_email', scopeEmails)
+            .maybeSingle();
 
         if (fetchError || !currentTicket) {
             return NextResponse.json({ error: 'Ticket not found' }, { status: 404 });
         }
 
-        // 2. Update the ticket
+        // 2. Update the ticket (also scoped to tenant as defense in depth)
         // If setting to null (Unclassified), departmentId will be null
         const updates: any = {
             department_id: departmentId,
             updated_at: new Date().toISOString(),
-            // If manually changed, we can implies 100% confidence or leave as is? 
+            // If manually changed, we can implies 100% confidence or leave as is?
             // Usually manual override implies 100% human confidence.
             classification_confidence: 100
         };
@@ -45,7 +66,8 @@ export async function PATCH(
         const { error: updateError } = await supabase
             .from('tickets')
             .update(updates)
-            .eq('id', ticketId);
+            .eq('id', ticketId)
+            .in('user_email', scopeEmails);
 
         if (updateError) {
             throw updateError;

@@ -121,8 +121,10 @@ export async function POST(request: NextRequest) {
         const { ensureTicketForEmail } = await import('@/lib/tickets');
         const { runAutoClassify } = await import('@/lib/auto-classify');
 
-        // Get last sync state
-        const syncState = await getSyncState(notification.emailAddress);
+        // Get last sync state. Use the normalized (lowercased) mailbox as the
+        // sync_state key so the cursor is not split across casings (Gmail Pub/Sub
+        // email casing varies); other paths key off lowercased user_email too.
+        const syncState = await getSyncState(lookupEmail);
         const lastHistoryId = syncState?.last_history_id || null;
 
         const tokens = {
@@ -134,6 +136,10 @@ export async function POST(request: NextRequest) {
         const { messageIds, spamMessageIds, latestHistoryId } = await getNewMessagesFromHistory(tokens, lastHistoryId);
 
         console.log(`[Gmail Webhook] ${messageIds.length} new inbox message(s), ${spamMessageIds.length} new spam message(s) for ${notification.emailAddress}`);
+
+        // Track per-email failures so we do NOT advance the sync cursor past a
+        // message that failed to become a ticket (see cursor-advance guard below).
+        let ticketFailures = 0;
 
         if (messageIds.length > 0) {
             // Fetch message details
@@ -176,7 +182,10 @@ export async function POST(request: NextRequest) {
                             from: email.from,
                             to: email.to,
                             date: email.date,
-                            ownerEmail: notification.emailAddress,
+                            // Normalized (lowercased) owner so dedup + the
+                            // (thread_id, user_email) unique index match across
+                            // webhook/cron/reconcile regardless of Pub/Sub casing.
+                            ownerEmail: lookupEmail,
                         },
                         isFromAgent,
                         email.body,
@@ -184,6 +193,7 @@ export async function POST(request: NextRequest) {
                     );
                     ticketsCreated++;
                 } catch (emailError) {
+                    ticketFailures++;
                     console.warn(`[Gmail Webhook] Error processing email ${email.id}:`, emailError);
                 }
             }
@@ -224,9 +234,17 @@ export async function POST(request: NextRequest) {
             console.log(`[Gmail Webhook] Detected ${spamMessageIds.length} spam message(s); skipping ticket creation by design`);
         }
 
-        // Update sync state
-        if (latestHistoryId) {
-            await updateSyncState(notification.emailAddress, latestHistoryId);
+        // Update sync state — but ONLY when every message in this batch was
+        // successfully turned into a ticket. If any email failed to be fetched or
+        // converted, we keep the previous cursor so the History API re-delivers
+        // the missed messages on the next notification (or reconcile backfills
+        // them). ensureTicketForEmail dedupes by threadId, so reprocessing the
+        // already-successful messages is harmless. Favor re-processing over
+        // silently skipping a lost email.
+        if (latestHistoryId && ticketFailures === 0) {
+            await updateSyncState(lookupEmail, latestHistoryId);
+        } else if (ticketFailures > 0) {
+            console.warn(`[Gmail Webhook] ${ticketFailures} email(s) failed to become tickets for ${lookupEmail} — NOT advancing sync cursor so they are re-seen next run`);
         }
 
         const duration = Date.now() - startTime;

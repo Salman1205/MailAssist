@@ -4,11 +4,13 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { loadDrafts } from '@/lib/storage';
-import { getCurrentUserIdFromRequest } from '@/lib/session';
+import { getVerifiedUserId } from '@/lib/session';
 
 export async function GET(request: NextRequest) {
   try {
-    const userId = getCurrentUserIdFromRequest(request);
+    // SECURITY: identity from the validated session_token, not the forgeable
+    // current_user_id cookie — otherwise anyone could read another user's drafts.
+    const userId = await getVerifiedUserId();
     if (!userId) {
       return NextResponse.json(
         { error: 'Not authenticated' },

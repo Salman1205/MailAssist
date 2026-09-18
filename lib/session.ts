@@ -387,6 +387,17 @@ export async function validateBusinessSession(): Promise<SessionUser | null> {
 }
 
 /**
+ * Return the VERIFIED current user id — derived from the server-validated
+ * session_token (via validateBusinessSession), NOT from the client-readable
+ * `current_user_id` cookie. Authorization must use this, never the raw cookie,
+ * which any client can forge to impersonate another user.
+ */
+export async function getVerifiedUserId(): Promise<string | null> {
+  const session = await validateBusinessSession();
+  return session?.id ?? null;
+}
+
+/**
  * Check if user is authenticated (either via business session or Gmail OAuth)
  */
 export async function isAuthenticated(): Promise<boolean> {
@@ -411,50 +422,10 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
     return businessSession
   }
 
-  // Fall back to checking cookies for current_user_id (from user selector)
-  const cookieStore = await cookies()
-  const userId = cookieStore.get('current_user_id')?.value
-
-  if (!userId) {
-    return null
-  }
-
-  if (!supabase) {
-    console.error('[Session] Supabase client not initialized')
-    return null
-  }
-
-  const { data: user, error } = await supabase
-    .from('users')
-    .select(`
-      id,
-      name,
-      email,
-      role,
-      business_id,
-      businesses (
-        id,
-        business_name
-      )
-    `)
-    .eq('id', userId)
-    .maybeSingle()
-
-  if (error || !user) {
-    if (error) console.error('[Session] Error fetching current user:', error);
-    return null
-  }
-
-  const business = Array.isArray(user.businesses) ? user.businesses[0] : user.businesses
-
-  return {
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    role: user.role as 'admin' | 'manager' | 'agent',
-    businessId: user.business_id,
-    businessName: business?.business_name || 'Unknown Business',
-    accountType: user.business_id !== null ? 'business' : 'personal',
-  }
+  // SECURITY: do NOT fall back to a bare `current_user_id` cookie here. That
+  // cookie is client-writable and was previously trusted with no verification,
+  // letting anyone impersonate another user (privilege escalation). Identity
+  // must come only from the server-validated session_token above.
+  return null
 }
 

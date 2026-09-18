@@ -72,12 +72,34 @@ export async function GET(request: NextRequest) {
 
         const results: { email: string; success: boolean; needsReconnect?: boolean; error?: string }[] = [];
 
+        // ROTATION: Both the watch-renewal loop and the reconcile loop below are
+        // bounded by a wall-clock budget, so under many accounts the tail of the
+        // list is skipped. If we always iterated in the SAME order, that same tail
+        // would be starved on EVERY run (never renewed, never reconciled).
+        // Fix: build a deterministic base order, then rotate the starting index by
+        // the day-of-year modulo the account count. Over consecutive daily runs
+        // every mailbox eventually becomes the FIRST processed, guaranteeing it is
+        // reconciled even if not all accounts fit in a single run.
+        // (A rotating offset is used rather than ordering by last_sync_at because
+        // the watch-renewal loop bumps last_sync_at mid-run, which would make that
+        // ordering unstable within the same invocation.)
+        const dayOfYear = Math.floor(
+            (Date.now() - Date.UTC(new Date().getUTCFullYear(), 0, 0)) / 86_400_000
+        );
+        const baseOrder = Array.from(byEmail.keys()).sort();
+        const rotation = baseOrder.length > 0 ? dayOfYear % baseOrder.length : 0;
+        const rotatedEmails = [
+            ...baseOrder.slice(rotation),
+            ...baseOrder.slice(0, rotation),
+        ];
+
         // Cap watch-renewal time so the reconcile pass below always gets to run
         // within the 60s function budget, even with many slow accounts.
         const WATCH_RENEWAL_BUDGET_MS = 25_000;
         let watchRenewalSkipped = 0;
 
-        for (const [email, token] of byEmail) {
+        for (const email of rotatedEmails) {
+            const token = byEmail.get(email)!;
             if (Date.now() - startTime > WATCH_RENEWAL_BUDGET_MS) {
                 watchRenewalSkipped++;
                 continue; // remaining accounts renew tomorrow; reconcile still runs
@@ -128,7 +150,10 @@ export async function GET(request: NextRequest) {
         let reconciledAccounts = 0;
         let ticketsRecovered = 0;
         let reconcileSkippedForTime = 0;
-        for (const [email, token] of byEmail) {
+        // Iterate in the SAME rotated order (see ROTATION note above) so the
+        // least-recently-served tail this run becomes the head next run.
+        for (const email of rotatedEmails) {
+            const token = byEmail.get(email)!;
             if (Date.now() - startTime > RECONCILE_TOTAL_BUDGET_MS) {
                 reconcileSkippedForTime++;
                 continue;

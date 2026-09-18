@@ -7,8 +7,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserById, updateUser, deleteUser, getAllUsers } from '@/lib/users';
-import { requirePermission, getCurrentUserIdFromRequest } from '@/lib/permissions';
-import { getCurrentUserIdFromRequest as getUserId } from '@/lib/session';
+import { requirePermission } from '@/lib/permissions';
+import { validateBusinessSession } from '@/lib/session';
 
 type RouteContext =
   | { params: { id: string } }
@@ -29,13 +29,14 @@ export async function GET(
       );
     }
 
-    const currentUserId = getUserId(request);
-    if (!currentUserId) {
+    const session = await validateBusinessSession();
+    if (!session) {
       return NextResponse.json(
         { error: 'Not authenticated' },
         { status: 401 }
       );
     }
+    const currentUserId = session.id;
 
     // Users can view their own profile, or Admin/Manager can view anyone
     if (userId !== currentUserId) {
@@ -54,6 +55,12 @@ export async function GET(
         { error: 'User not found' },
         { status: 404 }
       );
+    }
+
+    // TENANT SCOPING: never expose a user from another business (the service-role
+    // client bypasses RLS). Treat cross-tenant ids as not found.
+    if ((user.businessId ?? null) !== (session.businessId ?? null)) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
     return NextResponse.json({ user });
@@ -81,13 +88,14 @@ export async function PATCH(
       );
     }
 
-    const currentUserId = getUserId(request);
-    if (!currentUserId) {
+    const session = await validateBusinessSession();
+    if (!session) {
       return NextResponse.json(
         { error: 'Not authenticated' },
         { status: 401 }
       );
     }
+    const currentUserId = session.id;
 
     const body = await request.json();
     const { name, email, role, isActive } = body;
@@ -112,6 +120,11 @@ export async function PATCH(
         { error: 'User not found' },
         { status: 404 }
       );
+    }
+
+    // TENANT SCOPING: an admin/manager may only modify users in their OWN business.
+    if ((targetUser.businessId ?? null) !== (session.businessId ?? null)) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
     if (isUpdatingRoleOrActive || (!isSelf && name === undefined && email === undefined)) {
@@ -196,14 +209,19 @@ export async function DELETE(
   context: RouteContext
 ) {
   try {
-    // Check admin permission
+    // Check admin permission (verified identity via session_token)
     const { allowed } = await requirePermission(request, 'admin');
-    
+
     if (!allowed) {
       return NextResponse.json(
         { error: 'Admin access required' },
         { status: 403 }
       );
+    }
+
+    const session = await validateBusinessSession();
+    if (!session) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
     }
 
     const paramsData = await Promise.resolve((context as any).params);
@@ -214,6 +232,14 @@ export async function DELETE(
         { error: 'Missing user id' },
         { status: 400 }
       );
+    }
+
+    // TENANT SCOPING: deleteUser filters by id only, so verify the target belongs
+    // to the caller's business before deactivating — otherwise an admin in one
+    // business could deactivate a user in another and unassign their tickets.
+    const targetUser = await getUserById(userId);
+    if (!targetUser || (targetUser.businessId ?? null) !== (session.businessId ?? null)) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
     await deleteUser(userId);

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getValidTokens } from '@/lib/token-refresh';
 import { getThreadById } from '@/lib/gmail';
+import { validateBusinessSession } from '@/lib/session';
+import { withMailboxFallback } from '@/lib/mailbox-resolver';
 
 type RouteContext =
   | { params: { threadId: string } }
@@ -26,83 +27,44 @@ export async function GET(
       );
     }
 
-    let tokens: any = null;
-    let targetEmail: string | null = null;
+    // SECURITY: require a logged-in session. This endpoint previously had NO auth
+    // and fetched the thread using the mailbox OWNER's own Gmail token looked up
+    // from the DB by threadId — so anyone with a thread id could read any
+    // business's email content. We now (a) require a session and (b) fetch ONLY
+    // through the CALLER's own connected mailboxes. If the thread doesn't live in
+    // one of the caller's mailboxes, they get 404 — never another tenant's mail.
+    const session = await validateBusinessSession();
+    if (!session) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    }
 
-    // STRATEGY: Find the owner of this thread to use the correct tokens
-    // 1. Check if there is a ticket for this thread
-    const { supabase } = await import('@/lib/supabase');
-    if (supabase) {
-      // Use admin client if possible/needed, or just regular client
-      // Check tickets table
-      const { data: ticket } = await supabase
-        .from('tickets')
-        .select('owner_email, user_email')
-        .eq('thread_id', threadId)
-        .limit(1)
-        .maybeSingle();
-
-      if (ticket) {
-        targetEmail = ticket.owner_email || ticket.user_email;
-        console.log(`[Thread/Email API] Found ticket for thread ${threadId}, using email: ${targetEmail}`);
-      } else {
-        // 2. Check emails table
-        const { data: email } = await supabase
-          .from('emails')
-          .select('owner_email')
-          .or(`thread_id.eq.${threadId},id.eq.${threadId}`) // threadId might be emailId
-          .not('owner_email', 'is', null) // Only valid owners
-          .limit(1)
-          .maybeSingle();
-
-        if (email?.owner_email) {
-          targetEmail = email.owner_email;
-          console.log(`[Thread/Email API] Found email for thread ${threadId}, using owner: ${targetEmail}`);
-        }
+    const { result: thread, candidateCount } = await withMailboxFallback<{ messages: any[] }>(
+      { businessId: session.businessId || null, sessionEmail: session.email },
+      async (tok) => {
+        const t = await getThreadById(tok, threadId);
+        return (t && t.messages?.length) ? t : null;
       }
-    }
+    );
 
-    // 3. If targetEmail found, use it
-    if (targetEmail) {
-      tokens = await getValidTokens(targetEmail);
-    } else {
-      // 4. Fallback to session user
-      console.log(`[Thread/Email API] No owner found for thread ${threadId}, falling back to session user`);
-      tokens = await getValidTokens();
-    }
-
-    if (!tokens || !tokens.access_token) {
+    if (candidateCount === 0) {
       return NextResponse.json(
-        { error: `Not authenticated. Please connect Gmail first.${targetEmail ? ` (Target: ${targetEmail})` : ''}` },
+        { error: 'No connected Gmail account. Please reconnect Gmail.' },
         { status: 401 }
       );
     }
 
-    const thread = await getThreadById(tokens, threadId);
-
     if (!thread) {
+      // Either the thread isn't in any of the caller's mailboxes (not theirs) or
+      // it genuinely has no messages. Either way, do not expose anything.
       return NextResponse.json(
         { error: 'Thread not found' },
         { status: 404 }
       );
     }
 
-    // Debug: Log attachment info for each message
-    console.log('[Email Thread API] Thread messages with attachments:');
-    thread.messages?.forEach((msg, i) => {
-      console.log(`  Message ${i}: ${msg.id}, attachments:`, msg.attachments?.length || 0, msg.attachments);
-    });
-
     const response = NextResponse.json({ thread });
-
-    // PERFORMANCE: Cache thread details
-    // Short cache time because threads get new messages
-    // stale-while-revalidate allows instant load while fetching updates in background
-    response.headers.set(
-      'Cache-Control',
-      'public, max-age=30, stale-while-revalidate=300'
-    );
-
+    // Private cache only — this is per-user email content, never shared/CDN cached.
+    response.headers.set('Cache-Control', 'private, max-age=30');
     return response;
   } catch (error) {
     console.error('Error fetching email thread:', error);
@@ -115,5 +77,3 @@ export async function GET(
     );
   }
 }
-
-
