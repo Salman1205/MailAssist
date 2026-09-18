@@ -171,6 +171,21 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
 
                 const cidRegex = new RegExp(`src=["'](?:${patterns.join('|')})["']`, 'gi')
                 processed = processed.replace(cidRegex, `src="${replacementSrc}"`)
+
+                // Make in-body attachment chips (e.g. the Gmail "12676.mp4" link)
+                // actually work. Those anchors point back to Google and do nothing
+                // for us — rewrite any anchor whose visible text contains this
+                // attachment's filename to open OUR view route in a new tab.
+                if (att.filename) {
+                    const enc = (s: string) => encodeURIComponent(s)
+                    const viewSrc = `/api/emails/${emailId}/attachments/${att.id}?filename=${enc(att.filename)}&mimeType=${enc(att.mimeType || 'application/octet-stream')}&disposition=inline`
+                    const fnEsc = att.filename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                    const anchorRe = new RegExp(`<a\\b([^>]*)>([\\s\\S]*?${fnEsc}[\\s\\S]*?)</a>`, 'gi')
+                    processed = processed.replace(anchorRe, (_m, attrs: string, inner: string) => {
+                        const attrsNoHref = attrs.replace(/\shref\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/i, '')
+                        return `<a ${attrsNoHref} href="${viewSrc}" target="_blank" rel="noopener noreferrer">${inner}</a>`
+                    })
+                }
             })
         }
 
