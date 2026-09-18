@@ -255,13 +255,74 @@ export async function POST(
       console.warn('[Reply] Could not find ticket for logging:', ticketError);
     }
 
-    const replyRecipient = body?.to || incomingEmail.from || incomingEmail.to;
-    if (!replyRecipient) {
-      return NextResponse.json(
-        { error: 'Unable to determine reply recipient for this email' },
-        { status: 400 }
-      );
+    // Resolve WHO the reply goes to. This is delivery-critical: if we address the
+    // reply to one of our own mailboxes, Gmail happily "sends" it (returns an id)
+    // but the customer never receives anything — which looks exactly like
+    // "I sent 5 replies and they got nothing".
+    //
+    // Build the set of addresses that belong to US (all connected mailboxes +
+    // the acting user), so we can tell the customer party apart from our own.
+    const { extractBareEmail } = await import('@/lib/personalize-template');
+    const ourAddresses = new Set<string>();
+    try {
+      const { validateBusinessSession } = await import('@/lib/session');
+      const { loadBusinessTokens } = await import('@/lib/storage');
+      const bSession = await validateBusinessSession();
+      const conn = await loadBusinessTokens(bSession?.businessId || null, bSession?.email || undefined);
+      conn.forEach((a: any) => { if (a?.email) ourAddresses.add(String(a.email).toLowerCase()); });
+    } catch (e) {
+      console.warn('[Reply] Could not load connected mailboxes for recipient guard:', e);
     }
+    if (sendFromEmail) ourAddresses.add(sendFromEmail.toLowerCase());
+    if (userEmail) ourAddresses.add(userEmail.toLowerCase());
+
+    const fromBare = extractBareEmail(incomingEmail.from).toLowerCase();
+
+    let replyRecipient: string = (body?.to || '').trim();
+    if (!replyRecipient) {
+      // If the message we're replying to was sent BY one of our mailboxes, then the
+      // customer is on the "To" side; otherwise the customer is the sender.
+      replyRecipient = (fromBare && ourAddresses.has(fromBare))
+        ? (incomingEmail.to || incomingEmail.from)
+        : (incomingEmail.from || incomingEmail.to);
+    }
+
+    // SAFETY NET: never send a customer reply to one of our own mailboxes. If the
+    // resolved recipient is us (or empty), fall back to the ticket's stored
+    // customer_email — the address the customer actually writes from.
+    const recipientBare = extractBareEmail(replyRecipient || '').toLowerCase();
+    if (!recipientBare || ourAddresses.has(recipientBare)) {
+      let customerFromTicket: string | null = null;
+      try {
+        const { supabase } = await import('@/lib/supabase');
+        if (supabase && incomingEmail.threadId) {
+          const { data: t } = await supabase
+            .from('tickets')
+            .select('customer_email')
+            .eq('thread_id', incomingEmail.threadId)
+            .order('created_at', { ascending: true })
+            .limit(1)
+            .maybeSingle();
+          customerFromTicket = t?.customer_email || null;
+        }
+      } catch (e) {
+        console.warn('[Reply] Could not resolve customer_email fallback:', e);
+      }
+      const custBare = extractBareEmail(customerFromTicket || '').toLowerCase();
+      if (customerFromTicket && custBare && !ourAddresses.has(custBare)) {
+        console.warn(`[Reply] Recipient resolved to our own mailbox ("${replyRecipient}"); using ticket customer_email instead: ${customerFromTicket}`);
+        replyRecipient = customerFromTicket;
+      } else {
+        // We could not find a safe customer address — refuse to send rather than
+        // silently mailing ourselves and letting the customer believe they were ignored.
+        return NextResponse.json(
+          { error: 'Could not determine the customer address for this reply. Please open the ticket and set the recipient before sending.' },
+          { status: 422 }
+        );
+      }
+    }
+
+    console.log(`[Reply API] Reply recipient resolved to: ${replyRecipient}`);
 
     const baseSubject = incomingEmail.subject?.trim() || '(No subject)';
     let replySubject: string = body?.subject || '';
