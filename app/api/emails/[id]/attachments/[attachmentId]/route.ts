@@ -6,6 +6,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getGmailClient } from '@/lib/gmail';
 
 export const dynamic = 'force-dynamic';
+// Large attachments (video "footage", etc.) need headroom to fetch + stream.
+export const maxDuration = 60;
 
 /**
  * Properly encode filename for Content-Disposition header
@@ -123,15 +125,28 @@ export async function GET(
 
         console.log(`[Attachment] Serving attachment: ${filename} (${buffer.length} bytes, type: ${mimeType})`);
 
-        // Return as downloadable file with proper headers
-        return new NextResponse(buffer, {
+        // STREAM the file rather than returning a single buffered body. A buffered
+        // response is capped (~4.5 MB on Vercel), which silently broke downloads of
+        // videos and other large attachments ("can't download it"). Streaming the
+        // bytes out in chunks lets attachments up to Gmail's own limit (~25 MB)
+        // download successfully.
+        const CHUNK = 256 * 1024;
+        const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+                for (let i = 0; i < buffer.length; i += CHUNK) {
+                    controller.enqueue(new Uint8Array(buffer.subarray(i, i + CHUNK)));
+                }
+                controller.close();
+            },
+        });
+
+        return new NextResponse(stream, {
             status: 200,
             headers: {
                 'Content-Type': mimeType,
                 'Content-Disposition': contentDisposition,
                 'Content-Length': String(buffer.length),
                 'Cache-Control': 'private, max-age=3600',
-                'Accept-Ranges': 'bytes',
                 'X-Content-Type-Options': 'nosniff',
             },
         });
