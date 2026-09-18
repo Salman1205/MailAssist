@@ -239,7 +239,22 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
         // <details>/<summary> expands natively with no JS.
         processed = processed.replace(
             /(<blockquote[^>]*>[\s\S]*?<\/blockquote>)/gi,
-            '<details class="gmail-quote"><summary class="gmail-quote-toggle"></summary>$1</details>'
+            (m) => {
+                // A short plain-text preview of the quoted history, so the collapsed
+                // state hints at what's inside (like the old fade) instead of a bare button.
+                const text = m
+                    .replace(/<[^>]+>/g, ' ')
+                    .replace(/&nbsp;?/gi, ' ')
+                    .replace(/&[a-z]+;/gi, ' ')
+                    .replace(/\s+/g, ' ')
+                    .trim()
+                const esc = text.slice(0, 100)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                const ellipsis = text.length > 100 ? '…' : ''
+                return `<details class="gmail-quote"><summary class="gmail-quote-toggle"><span class="gq-chevron"></span><span class="gq-preview">${esc}${ellipsis}</span><span class="gq-hide">Hide quoted text</span></summary>${m}</details>`
+            }
         )
 
         setProcessedContent(processed)
@@ -390,27 +405,50 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                     border-left: 3px solid ${quoteBorder};
                     color: ${quoteText};
                 }
-                /* Native, script-free expandable quoted history (Gmail-style). */
+                /* Native, script-free expandable quoted history (Gmail-style), with a
+                   short preview of the quote while collapsed. */
                 details.gmail-quote { margin: 10px 0; }
                 summary.gmail-quote-toggle {
                     cursor: pointer;
                     list-style: none;
-                    display: inline-flex;
+                    display: flex;
                     align-items: center;
-                    background: ${quoteBtnBg};
-                    color: ${quoteBtnText};
-                    border-radius: 6px;
-                    padding: 3px 10px;
-                    font-size: 12px;
-                    font-weight: 500;
+                    gap: 8px;
+                    color: ${quoteText};
+                    font-size: 12.5px;
                     user-select: none;
-                    transition: opacity .15s;
+                    padding: 3px 0;
                 }
-                summary.gmail-quote-toggle:hover { opacity: 0.85; }
+                summary.gmail-quote-toggle:hover { opacity: 0.9; }
                 summary.gmail-quote-toggle::-webkit-details-marker { display: none; }
                 summary.gmail-quote-toggle::marker { content: ""; }
-                summary.gmail-quote-toggle::after { content: "Show quoted text"; }
-                details.gmail-quote[open] > summary.gmail-quote-toggle::after { content: "Hide quoted text"; }
+                .gq-chevron::before {
+                    content: "▸";
+                    display: inline-block;
+                    color: ${quoteText};
+                    transition: transform .15s ease;
+                    flex: 0 0 auto;
+                }
+                details.gmail-quote[open] .gq-chevron::before { transform: rotate(90deg); }
+                .gq-preview {
+                    font-style: italic;
+                    opacity: .85;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    background: ${quoteBtnBg};
+                    color: ${quoteText};
+                    border-radius: 6px;
+                    padding: 2px 10px;
+                    min-width: 0;
+                }
+                details.gmail-quote[open] .gq-preview { display: none; }
+                .gq-hide {
+                    display: none;
+                    color: ${quoteBtnText};
+                    font-weight: 500;
+                }
+                details.gmail-quote[open] .gq-hide { display: inline; }
                 details.gmail-quote > blockquote { margin-top: 10px; }
             </style>
         </head>
